@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "sports-betting-analytics"
+version = "0.1.0"
+description = "Sports betting analytics pipeline for NFL moneyline predictions"
+authors = ["Bobby <bobby@example.com>"]
+readme = "README.md"
+packages = [{ include = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+dash = "^2.14.0"
+dash-bootstrap-components = "^1.5.0"
+plotly = "^5.17.0"
+requests = "^2.31.0"
+pandas = "^2.2.0"
+python-dotenv = "^1.0.0"
+nfl-data-py = "^0.3.0"
+pyarrow = "^15.0.0"
+scikit-learn = "^1.5.0"
+numpy = "^1.26.0"
+joblib = "^1.4.0"
+lightgbm = "^4.5.0"
+xgboost = "^2.1.0"
+nba-api = "^1.4.1"
+beautifulsoup4 = "^4.12.0"
+lxml = "^5.1.0"
+PyYAML = "^6.0.0"
+selenium = "^4.15.0"
+webdriver-manager = "^4.0.0"
+kaggle = "^1.6.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0"
+ruff = "^0.6.0"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+

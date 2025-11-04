@@ -1,0 +1,218 @@
+# Wave 1 and Wave 3 source configuration
+
+nfl:
+  - key: espn_odds_nfl
+    name: "ESPN NFL odds"
+    category: odds
+    url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+    handler: "src.data.sources.espn_odds:ingest_nfl"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nfl/espn_odds"
+    notes: "Moneyline/spread/total pulled from ESPN scoreboard API."
+    params: {}
+
+  - key: nflfastr
+    name: "nflfastR play-by-play"
+    category: play_by_play
+    url: "https://github.com/nflverse/nflfastR-data"
+    handler: "src.data.sources.nflfastr:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nfl/nflfastr"
+    notes: "Use published CSV/Parquet dumps for historical play-by-play data."
+
+  - key: pro_football_reference
+    name: "Pro Football Reference schedules & results"
+    category: schedules
+    url: "https://www.pro-football-reference.com/"
+    handler: "src.data.sources.pro_football_reference:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nfl/pro_football_reference"
+    notes: "Scrape season schedule tables and box scores. Respect robots.txt."
+    params:
+      timeout: 45
+
+  - key: teamrankings_nfl
+    name: "TeamRankings NFL efficiency"
+    category: advanced_metrics
+    url: "https://www.teamrankings.com/nfl/team/"
+    handler: "src.data.sources.teamrankings:ingest_nfl"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nfl/teamrankings"
+    notes: "Capture pace/efficiency splits by season and situation."
+    params:
+      stats: ["points-per-game", "yards-per-play", "opponent-points-per-game"]
+
+  - key: nfl_team_metrics
+    name: "nflfastR team season metrics"
+    category: advanced_metrics
+    url: "https://github.com/nflverse/nflfastR-data"
+    handler: "src.data.sources.nfl_team_metrics:ingest"
+    frequency: weekly
+    enabled: true
+    storage_subdir: "nfl/team_metrics"
+    notes: "Season-level EPA/success metrics aggregated from play-by-play."
+    params: {}
+
+  - key: covers_nfl
+    name: "Covers NFL odds & consensus"
+    category: odds
+    url: "https://www.covers.com/sport/football/nfl"
+    handler: "src.data.sources.covers:ingest_nfl"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nfl/covers"
+    notes: "Collect moneyline odds, consensus percentages, and line movement."
+
+  - key: nflverse_injuries
+    name: "nflverse injury reports"
+    category: injuries
+    url: "https://github.com/nflverse/nflverse-data"
+    handler: "src.data.sources.nflverse_injuries:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nfl/injuries"
+    notes: "Official injury CSV released by nflverse."
+
+nba:
+  - key: espn_odds_nba
+    name: "ESPN NBA odds"
+    category: odds
+    url: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+    handler: "src.data.sources.espn_odds:ingest_nba"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/espn_odds"
+    notes: "NBA moneyline/spread/total snapshot from ESPN scoreboard."
+    params: {}
+
+  - key: basketball_reference
+    name: "Basketball-Reference games & stats"
+    category: schedules
+    url: "https://www.basketball-reference.com/"
+    handler: "src.data.sources.basketball_reference:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nba/basketball_reference"
+    notes: "Season schedules, box scores, and advanced team metrics."
+    params:
+      timeout: 45
+
+  - key: nba_api
+    name: "NBA Stats API"
+    category: logs
+    url: "https://stats.nba.com/"
+    handler: "src.data.sources.nba_api:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nba/nba_api"
+    notes: "Use nba_api endpoints for game logs and player stats."
+    params:
+      season_type: "Regular Season"
+
+  - key: teamrankings_nba
+    name: "TeamRankings NBA pace & efficiency"
+    category: advanced_metrics
+    url: "https://www.teamrankings.com/nba/team/"
+    handler: "src.data.sources.teamrankings:ingest_nba"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nba/teamrankings"
+    notes: "Capture offensive/defensive efficiency, rest splits, and pace."
+    params:
+      stats: ["points-per-game", "offensive-efficiency", "defensive-efficiency"]
+
+  - key: nba_team_metrics
+    name: "nba_api estimated metrics"
+    category: advanced_metrics
+    url: "https://stats.nba.com/"
+    handler: "src.data.sources.nba_team_metrics:ingest"
+    frequency: weekly
+    enabled: true
+    storage_subdir: "nba/team_metrics"
+    notes: "Season-level estimated metrics (off/def rating, pace)."
+    params: {}
+
+  - key: covers_nba
+    name: "Covers NBA odds & consensus"
+    category: odds
+    url: "https://www.covers.com/sport/basketball/nba"
+    handler: "src.data.sources.covers:ingest_nba"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/covers"
+    notes: "Moneyline odds, betting consensus, and line movement. Supports historical dates via date parameter."
+
+  - key: oddsshark_nba
+    name: "OddsShark NBA odds"
+    category: odds
+    url: "https://www.oddsshark.com/nba/odds"
+    handler: "src.data.sources.oddsshark:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/oddsshark"
+    notes: "Historical NBA odds from OddsShark. Uses Selenium for JavaScript rendering. Supports date parameter for historical data."
+
+  - key: vegasinsider_nba
+    name: "VegasInsider NBA odds"
+    category: odds
+    url: "https://www.vegasinsider.com/nba/odds/las-vegas/"
+    handler: "src.data.sources.vegasinsider:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/vegasinsider"
+    notes: "Historical NBA odds from VegasInsider. Uses Selenium for JavaScript rendering. Supports date parameter for historical data."
+
+  - key: action_network_nba
+    name: "Action Network NBA odds"
+    category: odds_movement
+    url: "https://www.actionnetwork.com/nba/odds"
+    handler: "src.data.sources.action_network:ingest_nba"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/action_network"
+    notes: "Action Network NBA odds with line movement. Uses Selenium to bypass AWS WAF protection."
+
+  - key: killersports_nba
+    name: "Killersports NBA odds"
+    category: odds
+    url: "https://killersports.com/nba/query"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/killersports"
+    notes: "Historical NBA odds from Killersports. Uses Selenium for JavaScript rendering. Supports date parameter for historical data."
+
+  - key: teamrankings_trends_nba
+    name: "TeamRankings NBA trends"
+    category: trends
+    url: "https://www.teamrankings.com/nba/trends/ou_trends"
+    handler: "src.data.sources.teamrankings_trends:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nba/teamrankings_trends"
+    notes: "NBA over/under trends and betting data from TeamRankings. Supports date parameter for historical data."
+
+  - key: kaggle_nba_betting
+    name: "Kaggle NBA historical betting data"
+    category: odds
+    url: "https://www.kaggle.com/datasets/ehallmar/nba-historical-stats-and-betting-data"
+    handler: "src.data.sources.kaggle_nba:ingest"
+    frequency: manual
+    enabled: true
+    storage_subdir: "nba/kaggle"
+    notes: "Historical NBA stats and betting data from Kaggle. Requires Kaggle API credentials. Can also load from local CSV file using csv_path parameter."
+
+  - key: nba_injuries
+    name: "NBA live injuries"
+    category: injuries
+    url: "https://cdn.nba.com/static/json/liveData/injuries/injuries_00.json"
+    handler: "src.data.sources.nba_injuries:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nba/injuries"
+    notes: "League-published injury statuses"
+
