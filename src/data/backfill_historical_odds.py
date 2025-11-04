@@ -63,13 +63,13 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backfill historical NBA odds from multiple sources")
     parser.add_argument(
         "--source",
-        choices=["oddsshark", "vegasinsider", "covers", "killersports", "teamrankings_trends", "all"],
+        choices=["oddsshark", "vegasinsider", "covers", "killersports", "teamrankings_trends", "espn", "all"],
         default="all",
         help="Source to backfill from",
     )
     parser.add_argument(
         "--league",
-        choices=["nba", "nfl"],
+        choices=["nba", "nfl", "cfb"],
         default="nba",
         help="League to backfill",
     )
@@ -111,29 +111,51 @@ def main() -> None:
     )
     
     sources = []
-    if args.source == "all" or args.source == "oddsshark":
-        from src.data.sources.oddsshark import ingest as oddsshark_ingest
-        sources.append(("OddsShark", oddsshark_ingest))
-    
-    if args.source == "all" or args.source == "vegasinsider":
-        from src.data.sources.vegasinsider import ingest as vegasinsider_ingest
-        sources.append(("VegasInsider", vegasinsider_ingest))
-    
-    if args.source == "all" or args.source == "covers":
-        if args.league == "nba":
-            from src.data.sources.covers import ingest_nba as covers_ingest
-        else:
-            from src.data.sources.covers import ingest_nfl as covers_ingest
-        sources.append(("Covers", covers_ingest))
-    
-    if args.source == "all" or args.source == "killersports":
-        from src.data.sources.killersports import ingest as killersports_ingest
-        sources.append(("Killersports", killersports_ingest))
-    
-    if args.source == "all" or args.source == "teamrankings_trends":
-        from src.data.sources.teamrankings_trends import ingest as trends_ingest
-        sources.append(("TeamRankings Trends", trends_ingest))
-    
+    league = args.league
+
+    if args.source == "all" or args.source == "espn":
+        from src.data.sources.espn_odds import ingest_nba, ingest_nfl, ingest_cfb
+
+        if league == "nba":
+            sources.append(("ESPN", ingest_nba))
+        elif league == "nfl":
+            sources.append(("ESPN", ingest_nfl))
+        elif league == "cfb":
+            sources.append(("ESPN", ingest_cfb))
+
+    if league in {"nba", "nfl"}:
+        if args.source == "all" or args.source == "oddsshark":
+            from src.data.sources.oddsshark import ingest as oddsshark_ingest
+
+            sources.append(("OddsShark", oddsshark_ingest))
+
+        if args.source == "all" or args.source == "vegasinsider":
+            from src.data.sources.vegasinsider import ingest as vegasinsider_ingest
+
+            sources.append(("VegasInsider", vegasinsider_ingest))
+
+        if args.source == "all" or args.source == "covers":
+            if league == "nba":
+                from src.data.sources.covers import ingest_nba as covers_ingest
+            else:
+                from src.data.sources.covers import ingest_nfl as covers_ingest
+
+            sources.append(("Covers", covers_ingest))
+
+        if args.source == "all" or args.source == "killersports":
+            from src.data.sources.killersports import ingest as killersports_ingest
+
+            sources.append(("Killersports", killersports_ingest))
+
+        if args.source == "all" or args.source == "teamrankings_trends":
+            from src.data.sources.teamrankings_trends import ingest as trends_ingest
+
+            sources.append(("TeamRankings Trends", trends_ingest))
+
+    if not sources:
+        LOGGER.warning("No sources available for league=%s and source=%s", league, args.source)
+        return
+
     for source_name, handler in sources:
         LOGGER.info("Backfilling from %s", source_name)
         try:

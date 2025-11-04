@@ -557,6 +557,7 @@ def _find_game_by_details(
 
 SPORT_CONFIG = {
     "americanfootball_nfl": {"league": "NFL", "sport_name": "Football", "default_market": "moneyline"},
+    "americanfootball_ncaaf": {"league": "CFB", "sport_name": "Football", "default_market": "moneyline"},
     "basketball_nba": {"league": "NBA", "sport_name": "Basketball", "default_market": "moneyline"},
 }
 

@@ -24,7 +24,7 @@ poetry run python -m src.data.ingest_sources --source covers_nfl --season-start 
 - **Notes**: Respect rate limits, request in UTC, and cache responses under `data/raw/odds/` with ISO date folders.
   - Use `src/data/backfill_odds.py` to pull historical snapshots via the `/odds-history` endpoint (set `--step-days` to thin requests when covering many seasons).
 - **Provider**: ESPN Scoreboard API (`https://site.api.espn.com/apis/site/v2/sports/<sport>/<league>/scoreboard`)
-  - Scraped via `src.data.sources.espn_odds` for both NFL and NBA (`espn_odds_nfl`, `espn_odds_nba`).
+  - Scraped via `src.data.sources.espn_odds` for NFL (`espn_odds_nfl`), NBA (`espn_odds_nba`), and FBS college football (`espn_odds_cfb`).
   - Captures open/close moneyline, spread, and total values published by ESPN Bet.
   - Outputs `odds.csv` under `data/raw/sources/<league>/espn_odds/<timestamp>/`.
   - Note: ESPN API only provides current/upcoming odds, not historical data.
@@ -85,6 +85,17 @@ betting = nfl.import_betting_data([2020, 2021, 2022])
   - Script `src/data/ingest_results_nba.py` converts team-level logs into game-level parquet (`data/raw/results/schedules_nba_<start>_<end>.parquet`).
   - Games/results load into SQLite via `load_schedules(..., league="NBA")`.
 - **Advanced Team Metrics (NBA)**: `src.data.sources.nba_team_metrics` queries `nba_api.stats` (`TeamEstimatedMetrics`) for league-wide offensive/defensive ratings and pace. Data lands in `data/raw/sources/nba/team_metrics/<timestamp>/team_metrics.parquet` and feeds the dataset builder.
+
+### College Football (FBS) Results
+
+- **Provider**: CollegeFootballData API (https://api.collegefootballdata.com)
+- **Coverage**: FBS schedules, scores, and game metadata. Requires a free API key.
+- **Access**:
+  - Sign up for an API key and store it as `CFBD_API_KEY` in `.env`.
+  - Use `src/data/ingest_results_cfb.py` to fetch season schedules and final scores (writes to `data/raw/results/schedules_cfb_<start>_<end>.parquet`).
+- **Notes**:
+  - The ingestion script only records scores when the API marks games as completed (Win/Loss values populated).
+  - Results load into SQLite via `load_schedules(..., league="CFB")`, enabling the generic moneyline dataset builder to service CFB models.
 
 ## Contextual Team Metrics (Optional)
 

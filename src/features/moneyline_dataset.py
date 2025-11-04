@@ -1,4 +1,4 @@
-"""Transform betting data into a modeling dataset for NFL and NBA."""
+"""Transform betting data into a modeling dataset for NFL, NBA, and CFB."""
 
 from __future__ import annotations
 
@@ -1178,10 +1178,10 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
         LOGGER.warning("No games found for %s seasons %s", league_code, season_range)
         return pd.DataFrame()
 
-    games["start_time_utc"] = pd.to_datetime(games["start_time_utc"], errors="coerce")
+    games["start_time_utc"] = pd.to_datetime(games["start_time_utc"], errors="coerce", utc=True)
 
     if not odds.empty:
-        odds["fetched_at_utc"] = pd.to_datetime(odds["fetched_at_utc"], errors="coerce")
+        odds["fetched_at_utc"] = pd.to_datetime(odds["fetched_at_utc"], errors="coerce", utc=True)
         odds = odds.dropna(subset=["fetched_at_utc", "price_american"])
         odds.sort_values("fetched_at_utc", inplace=True)
 
@@ -1200,9 +1200,11 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
         for outcome_key, column in (("home", "home_moneyline_close"), ("away", "away_moneyline_close")):
             mask = games[column].isna()
             if mask.any():
-                games.loc[mask, column] = games.loc[mask, "game_id"].map(
+                fill_values = games.loc[mask, "game_id"].map(
                     lambda gid: closing_map.get((gid, outcome_key))
                 )
+                fill_values = pd.to_numeric(fill_values, errors="coerce")
+                games.loc[mask, column] = fill_values
 
     # For NBA, match odds from database by game_id
     # First check if moneylines are already in game_results (from Kaggle or other sources)
@@ -1223,9 +1225,11 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
         for outcome_key, column in (("home", "home_moneyline_close"), ("away", "away_moneyline_close")):
             mask = games[column].isna()
             if mask.any():
-                games.loc[mask, column] = games.loc[mask, "game_id"].map(
+                fill_values = games.loc[mask, "game_id"].map(
                     lambda gid: odds_by_game.get(gid, {}).get(outcome_key) if pd.notna(gid) else None
                 )
+                fill_values = pd.to_numeric(fill_values, errors="coerce")
+                games.loc[mask, column] = fill_values
 
     games = games.dropna(subset=["home_moneyline_close", "away_moneyline_close", "home_score", "away_score"])
     games["game_datetime"] = games["start_time_utc"]
@@ -1341,7 +1345,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--league",
         default="NFL",
-        choices=["NFL", "NBA"],
+        choices=["NFL", "NBA", "CFB"],
         help="League to build the dataset for",
     )
     return parser.parse_args()

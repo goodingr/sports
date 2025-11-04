@@ -10,9 +10,11 @@ Interactive monitoring UI built with Dash (Plotly) to visualize forward testing 
   - Plotly (bundled with Dash)
 - Forward testing predictions saved under `data/forward_test/predictions_master.parquet`.
   - Populate this file by running the forward testing pipeline:
-    - `poetry run python -m src.models.forward_test predict`
-    - `poetry run python -m src.models.forward_test update`
-  - Scheduled scripts (`scripts/run_forward_test_predict.ps1`, `scripts/run_forward_test_update.ps1`) and Task Scheduler setup keep the file fresh automatically.
+    - `poetry run python -m src.models.forward_test predict --league <NBA|NFL|CFB>`
+    - `poetry run python -m src.models.forward_test update --league <NBA|NFL|CFB>`
+  - Scheduled scripts keep the file fresh automatically:
+    - NBA/NFL: `scripts/run_forward_test_predict.ps1`, `scripts/run_forward_test_update.ps1`
+    - CFB: `scripts/run_forward_test_predict_cfb.ps1`, `scripts/run_forward_test_update_cfb.ps1`
 
 ## Running the Dashboard
 
@@ -55,7 +57,7 @@ Once running, open `http://localhost:8050` in a browser.
 - Change default edge threshold by editing `DEFAULT_EDGE_THRESHOLD` in `src/dashboard/data.py`.
 - Adjust stake assumptions (`DEFAULT_STAKE`) to align ROI with bankroll strategy.
 - To add new charts or metrics, add helper functions to `src/dashboard/data.py` and expose corresponding components in `src/dashboard/components.py`.
-- For multi-league support, extend `load_forward_test_data` to include a league column and add a `dcc.Dropdown` filter in `app.py`.
+- Multi-league filtering is handled via the League dropdown (All/NBA/NFL/CFB); ensure predictions include the `league` column when adding new sports.
 
 ## Troubleshooting
 

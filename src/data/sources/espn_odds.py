@@ -17,6 +17,7 @@ LOGGER = logging.getLogger(__name__)
 SPORT_MAP = {
     "nfl": "football/nfl",
     "nba": "basketball/nba",
+    "cfb": "football/college-football",
 }
 
 
@@ -140,5 +141,9 @@ def ingest_nba(*, date: Optional[str] = None, timeout: int = 30) -> str:
     return _ingest("nba", date=date, timeout=timeout)
 
 
-__all__ = ["ingest_nfl", "ingest_nba"]
+def ingest_cfb(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("cfb", date=date, timeout=timeout)
+
+
+__all__ = ["ingest_nfl", "ingest_nba", "ingest_cfb"]
 

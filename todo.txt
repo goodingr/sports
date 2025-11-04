@@ -1,3 +1,1 @@
-scrape nba stats with selenium
 random forest model
-college football

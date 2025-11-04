@@ -57,10 +57,24 @@ def _transform_to_games(df: pd.DataFrame) -> pd.DataFrame:
         home_row = home_rows.iloc[0]
         away_row = away_rows.iloc[0]
 
+        home_wl = str(home_row.get("WL") or "").strip().upper()
+        away_wl = str(away_row.get("WL") or "").strip().upper()
+        is_final = home_wl in {"W", "L"} and away_wl in {"W", "L"}
+
         try:
-            game_date = datetime.strptime(home_row["GAME_DATE"], "%b %d, %Y").date()
-        except ValueError:
-            game_date = None
+            game_date_str = str(home_row["GAME_DATE"]).strip()
+        except Exception:
+            game_date_str = ""
+
+        game_date = None
+        for fmt in ("%b %d, %Y", "%Y-%m-%d"):
+            if not game_date_str:
+                break
+            try:
+                game_date = datetime.strptime(game_date_str, fmt).date()
+                break
+            except ValueError:
+                continue
 
         record = {
             "game_id": f"NBA_{game_id}",
@@ -74,8 +88,8 @@ def _transform_to_games(df: pd.DataFrame) -> pd.DataFrame:
             "home_team_name": home_row["TEAM_NAME"],
             "away_team": away_row["TEAM_ABBREVIATION"],
             "away_team_name": away_row["TEAM_NAME"],
-            "home_score": int(home_row["PTS"]),
-            "away_score": int(away_row["PTS"]),
+            "home_score": int(home_row["PTS"]) if is_final else None,
+            "away_score": int(away_row["PTS"]) if is_final else None,
             "spread_line": None,
             "total_line": None,
             "home_moneyline": None,

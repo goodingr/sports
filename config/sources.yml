@@ -216,3 +216,37 @@ nba:
     storage_subdir: "nba/injuries"
     notes: "League-published injury statuses"
 
+cfb:
+  - key: espn_odds_cfb
+    name: "ESPN College Football odds"
+    category: odds
+    url: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+    handler: "src.data.sources.espn_odds:ingest_cfb"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "cfb/espn_odds"
+    notes: "FBS moneyline/spread/total snapshot from ESPN scoreboard"
+    params: {}
+
+  - key: cfbd_games
+    name: "CollegeFootballData games & results"
+    category: schedules
+    url: "https://api.collegefootballdata.com/games"
+    handler: "src.data.ingest_results_cfb:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "cfb/cfbd"
+    notes: "Requires CFBD API key (set CFBD_API_KEY). Pulls game schedules and final scores for FBS."
+    params: {}
+
+  - key: cfbd_lines
+    name: "CollegeFootballData lines"
+    category: odds
+    url: "https://api.collegefootballdata.com/lines"
+    handler: "src.data.sources.cfbd_lines:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "cfb/cfbd_lines"
+    notes: "Moneyline/spread/total prices from CollegeFootballData lines endpoint. Requires CFBD_API_KEY."
+    params: {}
+

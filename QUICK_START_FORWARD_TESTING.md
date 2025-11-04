@@ -26,24 +26,28 @@ Or use the PowerShell script:
 
 #### 1. Before Games (Make Predictions)
 ```bash
-poetry run python -m src.models.forward_test predict --dotenv .env
+poetry run python -m src.models.forward_test predict --league NBA --dotenv .env
+poetry run python -m src.models.forward_test predict --league NFL --dotenv .env
+poetry run python -m src.models.forward_test predict --league CFB --dotenv .env
 ```
 
 This will:
-- Fetch current NBA games with odds
+- Fetch current games with odds for the chosen league (The Odds API sport keys are `basketball_nba`, `americanfootball_nfl`, and `americanfootball_ncaaf`)
 - Make predictions using your trained model
 - Show recommendations (bets with edge >= 0.06)
 - Save predictions to `data/forward_test/predictions_master.parquet`
 
-**When to run:** Before games start (typically 6-7 PM EST for NBA)
+**When to run:** Before games start (typically late afternoon/early evening for NBA/NFL; morning for Saturday CFB slates)
 
 #### 2. After Games (Update Results)
 ```bash
-poetry run python -m src.models.forward_test update
+poetry run python -m src.models.forward_test update --league NBA
+poetry run python -m src.models.forward_test update --league NFL
+poetry run python -m src.models.forward_test update --league CFB
 ```
 
 This will:
-- Query database for completed game results
+- Query the database for completed game results
 - Update predictions with actual outcomes
 - Mark games as completed
 
@@ -51,7 +55,9 @@ This will:
 
 #### 3. View Performance (Generate Report)
 ```bash
-poetry run python -m src.models.forward_test report
+poetry run python -m src.models.forward_test report --league NBA
+poetry run python -m src.models.forward_test report --league NFL
+poetry run python -m src.models.forward_test report --league CFB
 ```
 
 This shows:
@@ -65,7 +71,7 @@ This shows:
 ## 📊 Understanding the Output
 
 ### Predictions Output
-When you run `predict`, you'll see:
+When you run `predict --league <...>`, you'll see:
 ```
 === RECOMMENDATIONS (Edge >= 0.06) ===
   LAL vs GSW: Home edge=12.3%, Pred=68.5%, ML=-150
@@ -78,7 +84,7 @@ This means:
 - **ML**: The moneyline (betting odds)
 
 ### Report Output
-When you run `report`, you'll see:
+When you run `report --league <...>`, you'll see:
 ```
 === FORWARD TESTING REPORT ===
 Total Predictions: 45
@@ -124,17 +130,19 @@ To build confidence before live betting:
 ## 🔧 Troubleshooting
 
 ### "No live games found"
-- Check if NBA games are scheduled today
-- Verify your API key is valid
+- Check if games are scheduled today for the selected league
+- Verify your The Odds API key is valid
 - Check The Odds API rate limits
 
 ### "No results found" when updating
-- Ensure game results are loaded into database
-- Run: `poetry run python -m src.data.ingest_results_nba --seasons 2024`
-- Wait a few hours after games finish
+- Ensure game results are loaded into the database
+- NBA: `poetry run python -m src.data.ingest_results_nba --seasons 2025`
+- NFL: `poetry run python -m src.data.ingest_results --seasons 2024`
+- CFB: `poetry run python -m src.data.ingest_results_cfb --seasons 2024 --season-type regular`
+- Wait a short period after games finish for box scores to publish
 
 ### "Model not found"
-- Run: `poetry run python -m src.models.train --league NBA --model-type gradient_boosting --calibration sigmoid --seasons 2009 2017`
+- Run a league-specific training job, e.g. `poetry run python -m src.models.train --league NBA --model-type gradient_boosting --calibration sigmoid --seasons 2009 2017`
 
 ### Predictions seem wrong
 - Check that moneylines are being fetched correctly
@@ -161,9 +169,9 @@ Once you have 50-100 forward tested games with positive results:
 Everything is set up. Start forward testing today:
 
 ```bash
-poetry run python -m src.models.forward_test predict --dotenv .env
+poetry run python -m src.models.forward_test predict --league NBA --dotenv .env
 ```
 
-Good luck! 🏀
+Good luck! 🏈🏀🏉
 
 
