@@ -9,6 +9,10 @@
   - Financial: ROI, cumulative profit, max drawdown, Sharpe-like risk-adjusted return.
 - **Deployment cadence**: Daily batch recommendations; live odds update optional future enhancement.
 
+### Supported Leagues
+
+The pipelines currently support NFL, NBA, CFB, and European soccer (EPL/La Liga/Bundesliga/Serie A/Ligue 1). Additional sports such as MLB are disabled until their ingestion stack is completed to production standards.
+
 ### Project Structure (planned)
 
 ```

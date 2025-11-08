@@ -250,41 +250,6 @@ cfb:
     notes: "Moneyline/spread/total prices from CollegeFootballData lines endpoint. Requires CFBD_API_KEY."
     params: {}
 
-mlb:
-  - key: espn_odds_mlb
-    name: "ESPN MLB odds"
-    category: odds
-    url: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
-    handler: "src.data.sources.espn_odds:ingest_mlb"
-    frequency: hourly
-    enabled: true
-    storage_subdir: "mlb/espn_odds"
-    notes: "MLB moneyline/spread/total snapshot from ESPN scoreboard."
-    params: {}
-
-  - key: lahman
-    name: "Lahman historical database"
-    category: historical_stats
-    url: "http://www.seanlahman.com/baseball-archive/statistics/"
-    handler: "src.data.sources.lahman:ingest"
-    frequency: manual
-    enabled: true
-    run_mode: bootstrap
-    storage_subdir: "mlb/lahman"
-    notes: "Historical baseball statistics database (1871-present). Team stats, batting, pitching, fielding, etc. One-time load from CSV files."
-    params: {}
-
-  - key: pybaseball
-    name: "pybaseball schedules & results"
-    category: schedules
-    url: "https://github.com/jldbc/pybaseball"
-    handler: "src.data.ingest_results_mlb:run"
-    frequency: daily
-    enabled: true
-    storage_subdir: "mlb/pybaseball"
-    notes: "Python library for baseball data. Fetches game schedules and results using pybaseball.team_game_logs()."
-    params: {}
-
 epl:
   - key: espn_odds_epl
     name: "ESPN EPL odds"

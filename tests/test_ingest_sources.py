@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 from src.data import ingest_sources
 
-
 HANDLER_PATH = "tests.test_ingest_sources:_dummy_handler"
 
 

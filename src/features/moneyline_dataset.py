@@ -20,6 +20,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     ) from exc
 
 from src.data.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, ensure_directories
+from src.data.team_mappings import normalize_team_code
 from src.data.nfl import get_team_conference, get_team_division
 from src.db.core import connect
 
@@ -118,6 +119,15 @@ def _coalesce_columns(df: pd.DataFrame, candidates: List[str], default: float | 
         if col in df.columns:
             return df[col]
     return pd.Series(default, index=df.index)
+
+
+def _normalize_advanced_team_codes(df: pd.DataFrame, league: str) -> pd.DataFrame:
+    if df.empty or "team" not in df.columns:
+        return df
+    df = df.copy()
+    df["team"] = df["team"].apply(lambda name: normalize_team_code(league, str(name)))
+    df = df[df["team"].astype(bool)]
+    return df
 
 
 def _status_category_from_text(text: str) -> str:
@@ -702,6 +712,8 @@ def _merge_team_metrics(dataset: pd.DataFrame, league: str) -> pd.DataFrame:
             metrics["team"] = metrics["team"].astype(str)
         elif "TEAM_ABBREVIATION" in metrics.columns:
             metrics["team"] = metrics["TEAM_ABBREVIATION"].astype(str)
+        elif "TEAM_NAME" in metrics.columns:
+            metrics["team"] = metrics["TEAM_NAME"].apply(lambda name: normalize_team_code("NBA", str(name)))
         else:
             return dataset
         metrics = metrics[["season", "team", "E_OFF_RATING", "E_DEF_RATING", "E_NET_RATING", "E_PACE"]]
@@ -1318,6 +1330,45 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
     if league_code != "NBA":
         dataset = _merge_espn_odds(dataset, league_code)
     dataset = _merge_team_metrics(dataset, league_code)
+    
+    # Merge advanced stats for NBA, CFB, Soccer
+    if league_code == "NBA":
+        # Merge rolling metrics
+        rolling_metrics = _load_latest_parquet("nba", "rolling_metrics", "rolling_metrics.parquet")
+        if not rolling_metrics.empty:
+            rolling_metrics["team"] = rolling_metrics["team"].astype(str)
+            dataset_game_dt = pd.to_datetime(dataset["game_datetime"], errors="coerce", utc=True)
+            dataset["game_date"] = dataset_game_dt.dt.tz_localize(None).dt.normalize()
+            rolling_game_dt = pd.to_datetime(rolling_metrics["game_date"], errors="coerce", utc=True)
+            rolling_metrics["game_date"] = rolling_game_dt.dt.tz_localize(None).dt.normalize()
+            dataset = dataset.merge(
+                rolling_metrics[["team", "game_date", "rolling_win_pct_3", "rolling_point_diff_3"]],
+                on=["team", "game_date"],
+                how="left"
+            )
+    elif league_code == "CFB":
+        # Merge advanced stats
+        advanced_stats = _load_latest_parquet("cfb", "advanced_stats", "advanced_stats.parquet")
+        if not advanced_stats.empty:
+            advanced_stats = _normalize_advanced_team_codes(advanced_stats, league_code)
+            dataset = dataset.merge(
+                advanced_stats,
+                on=["team", "season"],
+                how="left"
+            )
+    elif league_code in {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}:
+        # Merge advanced stats for soccer
+        advanced_stats = _load_latest_parquet("soccer", "advanced_stats", "advanced_stats.parquet")
+        if not advanced_stats.empty:
+            # Filter by league
+            advanced_stats = advanced_stats[advanced_stats["league"] == league_code].copy()
+            if not advanced_stats.empty:
+                advanced_stats = _normalize_advanced_team_codes(advanced_stats, league_code)
+                dataset = dataset.merge(
+                    advanced_stats,
+                    on=["team", "season"],
+                    how="left"
+                )
 
     output_path = PROCESSED_DATA_DIR / "model_input" / (
         f"moneyline_{league_code.lower()}_{season_range[0]}_{season_range[1]}.parquet"
@@ -1345,7 +1396,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--league",
         default="NFL",
-        choices=["NFL", "NBA", "CFB"],
+        choices=["NFL", "NBA", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"],
         help="League to build the dataset for",
     )
     return parser.parse_args()
@@ -1360,4 +1411,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

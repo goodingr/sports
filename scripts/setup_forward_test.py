@@ -1,7 +1,8 @@
 """Setup script for forward testing - checks prerequisites and creates necessary files."""
-import os
+import importlib
 import sys
 from pathlib import Path
+
 
 def check_model_file():
     """Check if trained model exists."""
@@ -60,7 +61,6 @@ def check_directories():
         Path("models"),
     ]
     
-    all_exist = True
     for dir_path in dirs:
         if not dir_path.exists():
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -73,16 +73,14 @@ def check_directories():
 def check_imports():
     """Verify required modules can be imported."""
     try:
-        import joblib
-        import pandas as pd
-        from src.data.config import OddsAPISettings
-        from src.models.train import FEATURE_COLUMNS
+        for module in ["joblib", "pandas", "src.data.config", "src.models.train"]:
+            importlib.import_module(module)
         print("[OK] All required modules can be imported")
+        return True
     except ImportError as e:
         print(f"[X] Import error: {e}")
         print("   Run: poetry install")
         return False
-    return True
 
 def main():
     print("=" * 60)

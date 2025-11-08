@@ -17,6 +17,13 @@ from .core import connect
 LOGGER = logging.getLogger(__name__)
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _ensure_sport(conn, name: str, league: str, default_market: str) -> int:
     row = conn.execute("SELECT sport_id FROM sports WHERE league = ?", (league,)).fetchone()
     if row:
@@ -704,17 +711,16 @@ def load_odds_snapshot(
                     if market.get("key") == "h2h":
                         for outcome in market.get("outcomes", []):
                             price = outcome.get("price")
-                            try:
-                                american = float(price)
-                                outcome_name = outcome.get("name", "").strip()
-                                # Use the same logic as below to determine home/away
-                                if outcome_name.lower() == home_name.lower():
-                                    home_ml_close = american
-                                elif outcome_name.lower() == away_name.lower():
-                                    away_ml_close = american
-                                # Also try matching by outcome_key (which will be set as "home"/"away" below)
-                            except (TypeError, ValueError):
-                                pass
+                            american = _safe_float(price)
+                            if american is None:
+                                continue
+                            outcome_name = outcome.get("name", "").strip()
+                            # Use the same logic as below to determine home/away
+                            if outcome_name.lower() == home_name.lower():
+                                home_ml_close = american
+                            elif outcome_name.lower() == away_name.lower():
+                                away_ml_close = american
+                            # Also try matching by outcome_key (which will be set as "home"/"away" below)
                         break
                 if home_ml_close is not None and away_ml_close is not None:
                     break
@@ -729,10 +735,7 @@ def load_odds_snapshot(
                     market_key = market.get("key")
                     for outcome in market.get("outcomes", []):
                         price = outcome.get("price")
-                        try:
-                            american = float(price)
-                        except (TypeError, ValueError):
-                            american = None
+                        american = _safe_float(price)
 
                         outcome_name = outcome.get("name", "").strip()
                         outcome_key = None

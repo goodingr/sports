@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
-from typing import Iterable, List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import requests
+from requests import RequestException
 
 from .utils import DEFAULT_HEADERS, SourceDefinition, source_run
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,6 +19,11 @@ SPORT_MAP = {
     "nfl": "football/nfl",
     "nba": "basketball/nba",
     "cfb": "football/college-football",
+    "epl": "soccer/eng.1",
+    "laliga": "soccer/esp.1",
+    "bundesliga": "soccer/ger.1",
+    "seriea": "soccer/ita.1",
+    "ligue1": "soccer/fra.1",
 }
 
 
@@ -25,12 +31,38 @@ def _scoreboard_url(league: str) -> str:
     return f"https://site.api.espn.com/apis/site/v2/sports/{SPORT_MAP[league]}/scoreboard"
 
 
+def _request_with_retry(
+    url: str,
+    *,
+    params: Optional[Dict[str, str]],
+    headers: Dict[str, str],
+    timeout: int,
+    attempts: int = 3,
+    backoff: float = 1.5,
+) -> requests.Response:
+    delay = 1.0
+    last_error: Optional[BaseException] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(url, params=params, timeout=timeout, headers=headers)
+            response.raise_for_status()
+            return response
+        except RequestException as exc:  # pragma: no cover - network failures
+            last_error = exc
+            LOGGER.warning("ESPN request failed (attempt %s/%s): %s", attempt, attempts, exc)
+            if attempt == attempts:
+                raise
+            time.sleep(delay)
+            delay *= backoff
+    assert last_error is not None
+    raise last_error
+
+
 def _fetch_scoreboard(league: str, date: Optional[str], *, timeout: int) -> dict:
     params = {"dates": date} if date else {}
     headers = dict(DEFAULT_HEADERS)
     headers.setdefault("Referer", "https://www.espn.com/")
-    response = requests.get(_scoreboard_url(league), params=params, timeout=timeout, headers=headers)
-    response.raise_for_status()
+    response = _request_with_retry(_scoreboard_url(league), params=params, timeout=timeout, headers=headers)
     return response.json()
 
 
@@ -145,5 +177,24 @@ def ingest_cfb(*, date: Optional[str] = None, timeout: int = 30) -> str:
     return _ingest("cfb", date=date, timeout=timeout)
 
 
-__all__ = ["ingest_nfl", "ingest_nba", "ingest_cfb"]
+def ingest_epl(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("epl", date=date, timeout=timeout)
 
+
+def ingest_laliga(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("laliga", date=date, timeout=timeout)
+
+
+def ingest_bundesliga(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("bundesliga", date=date, timeout=timeout)
+
+
+def ingest_seriea(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("seriea", date=date, timeout=timeout)
+
+
+def ingest_ligue1(*, date: Optional[str] = None, timeout: int = 30) -> str:
+    return _ingest("ligue1", date=date, timeout=timeout)
+
+
+__all__ = ["ingest_nfl", "ingest_nba", "ingest_cfb", "ingest_epl", "ingest_laliga", "ingest_bundesliga", "ingest_seriea", "ingest_ligue1"]

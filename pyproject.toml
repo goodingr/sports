@@ -34,6 +34,9 @@ pybaseball = "^2.2.7"
 black = "^24.0"
 ruff = "^0.6.0"
 pytest = "^8.4.2"
+mypy = "^1.18.2"
+types-pyyaml = "^6.0.12.20250915"
+types-requests = "^2.32.4.20250913"
 
 [tool.black]
 line-length = 100
@@ -42,11 +45,17 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = ["debug_team_matching.py", "validate_profitability.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
 
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+mypy_path = "src"
+explicit_package_bases = true
+
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
-
