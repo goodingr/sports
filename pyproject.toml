@@ -28,10 +28,12 @@ PyYAML = "^6.0.0"
 selenium = "^4.15.0"
 webdriver-manager = "^4.0.0"
 kaggle = "^1.6.0"
+pybaseball = "^2.2.7"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0"
 ruff = "^0.6.0"
+pytest = "^8.4.2"
 
 [tool.black]
 line-length = 100

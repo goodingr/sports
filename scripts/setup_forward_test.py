@@ -70,19 +70,19 @@ def check_directories():
     
     return True
 
-def test_imports():
-    """Test if required modules can be imported."""
+def check_imports():
+    """Verify required modules can be imported."""
     try:
         import joblib
         import pandas as pd
         from src.data.config import OddsAPISettings
         from src.models.train import FEATURE_COLUMNS
         print("[OK] All required modules can be imported")
-        return True
     except ImportError as e:
         print(f"[X] Import error: {e}")
         print("   Run: poetry install")
         return False
+    return True
 
 def main():
     print("=" * 60)
@@ -91,7 +91,7 @@ def main():
     print()
     
     checks = [
-        ("Required modules", test_imports),
+        ("Required modules", check_imports),
         ("Directories", check_directories),
         ("Model file", check_model_file),
         ("Environment file", check_env_file),
@@ -127,4 +127,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

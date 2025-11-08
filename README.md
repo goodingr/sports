@@ -43,6 +43,7 @@ reports/
 4. Run structured source ingestions (Wave 1 + Wave 3):
    - List sources: `poetry run python -m src.data.ingest_sources --list`
    - Execute all enabled sources: `poetry run python -m src.data.ingest_sources`
+     - Historical/bootstrap feeds run automatically the first time (to seed a new machine) and are skipped afterward so hourly jobs don't redownload the same archives. Pass `--full-refresh` when you explicitly want to re-fetch those sources.
    - Limit to NFL wave: `poetry run python -m src.data.ingest_sources --league nfl --season-start 2019 --season-end 2023`
    - Limit to CFB: `poetry run python -m src.data.ingest_sources --league cfb --seasons 2024`
    - Target injuries only: `poetry run python -m src.data.ingest_sources --source nflverse_injuries` (or `nba_injuries`)
@@ -108,6 +109,11 @@ Upcoming improvements: richer features (team form, injuries), alternative model 
 - **Historical Backfill**: Use `src/data/backfill_espn_odds.py` to fetch historical ESPN odds snapshots (note: ESPN may not provide historical data):
   - `poetry run python -m src.data.backfill_espn_odds 2024-09-01 2024-11-01 --league nfl --step-days 1 --sleep 1.0`
 
+### Testing & CI
+
+- Run the automated test suite with `poetry run pytest`.
+- Continuous Integration runs via `.github/workflows/ci.yml`, which executes Ruff and Pytest on every push/pull request.
+
 ### Forward Testing Dashboard
 
 - Interactive Dash application to review forward testing performance across leagues (NBA, NFL, CFB).
@@ -122,4 +128,3 @@ Upcoming improvements: richer features (team form, injuries), alternative model 
 - Data is read from `data/forward_test/predictions_master.parquet`. Use the forward testing scripts to keep snapshots current (`src/models/forward_test.py` and `scripts/run_forward_test_*.ps1`).
 - Forward-testing helper scripts now include league-specific wrappers under `scripts/run_forward_test_*_cfb.ps1` for Task Scheduler integration.
 - See `docs/dashboard.md` for screenshots, component breakdown, and deployment notes.
-

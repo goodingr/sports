@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
-import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import pandas as pd
 
 from src.data.team_mappings import normalize_team_code
 
 from .core import connect
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -139,6 +138,18 @@ def load_schedules(
 
             if league.upper() == "NBA" and not game_id.startswith("NBA_"):
                 game_id = f"NBA_{game_id}"
+            elif league.upper() == "MLB" and not game_id.startswith("MLB_"):
+                game_id = f"MLB_{game_id}"
+            elif league.upper() == "EPL" and not game_id.startswith("EPL_"):
+                game_id = f"EPL_{game_id}"
+            elif league.upper() == "LALIGA" and not game_id.startswith("LALIGA_"):
+                game_id = f"LALIGA_{game_id}"
+            elif league.upper() == "BUNDESLIGA" and not game_id.startswith("BUNDESLIGA_"):
+                game_id = f"BUNDESLIGA_{game_id}"
+            elif league.upper() == "SERIEA" and not game_id.startswith("SERIEA_"):
+                game_id = f"SERIEA_{game_id}"
+            elif league.upper() == "LIGUE1" and not game_id.startswith("LIGUE1_"):
+                game_id = f"LIGUE1_{game_id}"
 
             start_time = _parse_datetime(row.get("gameday"), row.get("gametime"))
             season = _season_from_datetime(start_time, int(row.get("season")) if not pd.isna(row.get("season")) else None)
@@ -396,6 +407,25 @@ def record_source_file(
         )
 
 
+def has_successful_source_run(source_key: str) -> bool:
+    """Return True if the source has at least one successful run recorded."""
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM source_runs sr
+            JOIN data_sources ds ON ds.source_id = sr.source_id
+            WHERE ds.source_key = ?
+              AND sr.status = 'success'
+            ORDER BY sr.finished_at DESC
+            LIMIT 1
+            """,
+            (source_key,),
+        ).fetchone()
+    return row is not None
+
+
 def resolve_source(source_key: str) -> Optional[int]:
     with connect() as conn:
         row = conn.execute(
@@ -559,6 +589,12 @@ SPORT_CONFIG = {
     "americanfootball_nfl": {"league": "NFL", "sport_name": "Football", "default_market": "moneyline"},
     "americanfootball_ncaaf": {"league": "CFB", "sport_name": "Football", "default_market": "moneyline"},
     "basketball_nba": {"league": "NBA", "sport_name": "Basketball", "default_market": "moneyline"},
+    "baseball_mlb": {"league": "MLB", "sport_name": "Baseball", "default_market": "moneyline"},
+    "soccer_epl": {"league": "EPL", "sport_name": "Soccer", "default_market": "moneyline"},
+    "soccer_spain_la_liga": {"league": "LALIGA", "sport_name": "Soccer", "default_market": "moneyline"},
+    "soccer_germany_bundesliga": {"league": "BUNDESLIGA", "sport_name": "Soccer", "default_market": "moneyline"},
+    "soccer_italy_serie_a": {"league": "SERIEA", "sport_name": "Soccer", "default_market": "moneyline"},
+    "soccer_france_ligue_1": {"league": "LIGUE1", "sport_name": "Soccer", "default_market": "moneyline"},
 }
 
 SPORT_CONFIG_BY_LEAGUE = {config["league"].upper(): config for config in SPORT_CONFIG.values()}
@@ -771,4 +807,3 @@ def load_odds_snapshot(
                 LOGGER.debug("Game %s: outcomes_by_key is empty", game_id)
 
         LOGGER.info("Stored odds snapshot %s with %d events", snapshot_id, len(results))
-

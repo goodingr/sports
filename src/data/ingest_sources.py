@@ -12,11 +12,12 @@ from typing import Any, Dict, Iterable, List, Optional
 import yaml
 
 from src.data.config import PROJECT_ROOT
-
+from src.db.loaders import has_successful_source_run
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "sources.yml"
+BOOTSTRAP_CATEGORIES = {"historical_stats"}
 
 
 def load_config(config_path: Path) -> Dict[str, List[Dict[str, Any]]]:
@@ -72,6 +73,31 @@ def list_sources(config: Dict[str, List[Dict[str, Any]]]) -> None:
             LOGGER.info("  - %s (%s) -> %s", entry.get("key"), entry.get("category"), entry.get("handler"))
 
 
+def _entry_run_mode(entry: Dict[str, Any]) -> str:
+    explicit_mode = str(entry.get("run_mode", "")).lower()
+    if explicit_mode in {"bootstrap", "continuous"}:
+        return explicit_mode
+    return "bootstrap" if entry.get("category") in BOOTSTRAP_CATEGORIES else "continuous"
+
+
+def _should_skip_entry(entry: Dict[str, Any], *, full_refresh: bool) -> bool:
+    if full_refresh:
+        return False
+    key = entry.get("key")
+    if not key:
+        return False
+    if _entry_run_mode(entry) != "bootstrap":
+        return False
+    if has_successful_source_run(key):
+        LOGGER.info(
+            "Skipping %s (%s); historical data already ingested. Use --full-refresh to re-download.",
+            key,
+            entry.get("category"),
+        )
+        return True
+    return False
+
+
 def run_sources(
     config: Dict[str, List[Dict[str, Any]]],
     *,
@@ -80,6 +106,7 @@ def run_sources(
     seasons: List[int],
     timeout: Optional[int],
     dry_run: bool,
+    full_refresh: bool,
 ) -> None:
     league_filter = {league.lower() for league in leagues} if leagues else None
     source_filter = {source for source in sources} if sources else None
@@ -94,13 +121,15 @@ def run_sources(
                 continue
             if source_filter and key not in source_filter:
                 continue
+            if _should_skip_entry(entry, full_refresh=full_refresh):
+                continue
 
             handler_path = entry.get("handler")
             if not handler_path:
                 LOGGER.warning("Source %s missing handler path", key)
                 continue
 
-            params = entry.get("params") or {}
+            params = dict(entry.get("params") or {})
             # Support date parameter for historical odds sources
             date = params.pop("date", None)
             kwargs = _prepare_kwargs(handler_path, base_kwargs=params, seasons=seasons, timeout=timeout, date=date)
@@ -125,6 +154,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--season-end", type=int, help="End year for inclusive season range")
     parser.add_argument("--timeout", type=int, help="Override request timeout in seconds")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing handlers")
+    parser.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="Re-run bootstrap sources even if they completed successfully before.",
+    )
     parser.add_argument("--list", action="store_true", help="List configured sources and exit")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     return parser.parse_args()
@@ -151,6 +185,7 @@ def main() -> None:
         seasons=seasons,
         timeout=args.timeout,
         dry_run=args.dry_run,
+        full_refresh=args.full_refresh,
     )
 
 
