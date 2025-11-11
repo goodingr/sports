@@ -5,10 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -41,6 +40,20 @@ def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
                 "Received 401 Unauthorized from The Odds API. "
                 "Confirm that your plan includes odds-history access and that the API key is valid."
             ) from exc
+        if response.status_code == 404:
+            LOGGER.warning(
+                "Odds endpoint returned 404 for sport %s (url=%s). Returning empty payload.",
+                settings.sport,
+                url,
+            )
+            return {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "request": {"url": url, "params": params},
+                "results": [],
+                "rate_limit_remaining": response.headers.get("x-requests-remaining"),
+                "rate_limit_reset": response.headers.get("x-requests-reset"),
+                "error": "404 Not Found",
+            }
         raise
 
     payload = {
@@ -62,6 +75,55 @@ def write_snapshot(data: Dict[str, Any], out_dir: Path) -> Path:
     output_path = out_dir / f"odds_{timestamp}.json"
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return output_path
+
+
+def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    candidate = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+
+def _load_recent_snapshot(
+    sport_dir: Path, settings: OddsAPISettings
+) -> Tuple[Optional[Path], Optional[Dict[str, Any]], Optional[float]]:
+    """Return a cached snapshot path/data if it is still fresh."""
+
+    ttl_minutes = settings.min_fetch_interval_minutes
+    if ttl_minutes <= 0 or not sport_dir.exists():
+        return None, None, None
+
+    snapshots = sorted(sport_dir.glob("odds_*.json"))
+    if not snapshots:
+        return None, None, None
+
+    now = datetime.now(timezone.utc)
+    max_age = timedelta(minutes=ttl_minutes)
+
+    for path in reversed(snapshots):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        params = data.get("request", {}).get("params", {})
+        if params.get("regions") != settings.region or params.get("markets") != settings.market:
+            continue
+
+        fetched_at = _parse_timestamp(data.get("fetched_at"))
+        if not fetched_at:
+            continue
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+
+        age = now - fetched_at
+        if age <= max_age:
+            return path, data, age.total_seconds() / 60.0
+
+    return None, None, None
 
 
 def fetch_odds_history(settings: OddsAPISettings, target_datetime: datetime) -> Dict[str, Any]:
@@ -104,6 +166,7 @@ def run(
     sport_key: str | None = None,
     market: str | None = None,
     region: str | None = None,
+    force_refresh: bool = False,
 ) -> Path:
     """Fetch odds data and store the snapshot."""
 
@@ -117,8 +180,21 @@ def run(
     if region:
         settings.region = region
     raw_odds_dir = RAW_DATA_DIR / "odds"
-    data = fetch_odds(settings)
     sport_dir = raw_odds_dir / settings.sport
+
+    if not force_refresh:
+        cached_path, cached_data, age_minutes = _load_recent_snapshot(sport_dir, settings)
+        if cached_path and cached_data is not None and age_minutes is not None:
+            LOGGER.info(
+                "Skipping Odds API call for %s: cached snapshot from %s is only %.1f minutes old",
+                settings.sport,
+                cached_data.get("fetched_at"),
+                age_minutes,
+            )
+            load_odds_snapshot(cached_data, raw_path=str(cached_path), region=settings.region, sport_key=settings.sport)
+            return cached_path
+
+    data = fetch_odds(settings)
     output_path = write_snapshot(data, sport_dir)
 
     load_odds_snapshot(data, raw_path=str(output_path), region=settings.region, sport_key=settings.sport)
@@ -155,13 +231,24 @@ def _parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging verbosity",
     )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Bypass cached snapshots and always hit The Odds API",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
-    run(args.dotenv, sport_key=args.sport, market=args.market, region=args.region)
+    run(
+        args.dotenv,
+        sport_key=args.sport,
+        market=args.market,
+        region=args.region,
+        force_refresh=args.force_refresh,
+    )
 
 
 if __name__ == "__main__":

@@ -184,10 +184,29 @@ def _time_series_split(df: pd.DataFrame, splits: int = 5) -> Tuple[pd.DataFrame,
             df["season"].astype(str) + "-" + df["week"].astype(str).str.zfill(2) + "-01",
             errors="coerce",
         )
-    tscv = TimeSeriesSplit(n_splits=splits)
-    last_split = list(tscv.split(df))[-1]
-    train_idx, test_idx = last_split
-    return df.iloc[train_idx], df.iloc[test_idx]
+
+    total_samples = len(df)
+    if total_samples < 2:
+        raise ValueError(f"Dataset must contain at least two rows, got {total_samples}")
+
+    # TimeSeriesSplit requires n_splits >= 2. When we do not have enough samples,
+    # fall back to a simple last-row holdout rather than crashing training.
+    effective_splits = min(splits, total_samples - 1)
+    if effective_splits >= 2:
+        tscv = TimeSeriesSplit(n_splits=effective_splits)
+        last_split = list(tscv.split(df))[-1]
+        train_idx, test_idx = last_split
+        return df.iloc[train_idx], df.iloc[test_idx]
+
+    cutoff = total_samples - 1
+    LOGGER.warning(
+        "Insufficient samples (%s) for %s time-series splits; using last observation as test set.",
+        total_samples,
+        splits,
+    )
+    train_df = df.iloc[:cutoff]
+    test_df = df.iloc[cutoff:]
+    return train_df, test_df
 
 
 def _build_estimator(model_type: str) -> Pipeline:
@@ -369,10 +388,16 @@ def _evaluate(y_true: np.ndarray, y_pred_proba: np.ndarray) -> Dict[str, float]:
     except ValueError:
         roc_auc = float("nan")
 
+    probs = np.column_stack([1 - y_pred_proba, y_pred_proba])
+    try:
+        logloss = float(log_loss(y_true, probs, labels=[0, 1]))
+    except ValueError:
+        logloss = float("nan")
+
     return {
         "accuracy": float(accuracy_score(y_true, (y_pred_proba >= 0.5).astype(int))),
         "brier_score": float(brier_score_loss(y_true, y_pred_proba)),
-        "log_loss": float(log_loss(y_true, np.column_stack([1 - y_pred_proba, y_pred_proba]))),
+        "log_loss": logloss,
         "roc_auc": roc_auc,
     }
 

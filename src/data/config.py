@@ -26,6 +26,7 @@ class OddsAPISettings:
     market: str = "h2h"
     sport: str = "americanfootball_nfl"
     base_url: str = "https://api.the-odds-api.com/v4"
+    min_fetch_interval_minutes: int = 30
 
     @classmethod
     def from_env(cls, dotenv_path: Optional[Path] = None) -> "OddsAPISettings":
@@ -39,8 +40,19 @@ class OddsAPISettings:
         market = os.getenv("ODDS_API_MARKET", "h2h")
         sport = os.getenv("ODDS_API_SPORT", "americanfootball_nfl")
         base_url = os.getenv("ODDS_API_BASE_URL", "https://api.the-odds-api.com/v4")
+        try:
+            min_fetch_interval = int(os.getenv("ODDS_API_MIN_FETCH_MINUTES", "30"))
+        except ValueError:
+            min_fetch_interval = 30
 
-        return cls(api_key=api_key, region=region, market=market, sport=sport, base_url=base_url)
+        return cls(
+            api_key=api_key,
+            region=region,
+            market=market,
+            sport=sport,
+            base_url=base_url,
+            min_fetch_interval_minutes=min_fetch_interval,
+        )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -53,4 +65,11 @@ def ensure_directories() -> None:
 
     RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_env(dotenv_path: Optional[Path] = None) -> dict[str, str]:
+    """Return environment variables after loading optional .env file."""
+
+    _load_dotenv_if_available(dotenv_path)
+    return dict(os.environ)
 
