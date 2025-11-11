@@ -70,6 +70,26 @@ $soccerDaysBack = 7
 $soccerDaysForward = 2
 
 $soccerSeasonMap = @{}
+$understatLeagueMap = @{
+    "EPL"       = "EPL"
+    "LALIGA"    = "La_liga"
+    "BUNDESLIGA"= "Bundesliga"
+    "SERIEA"    = "Serie_A"
+    "LIGUE1"    = "Ligue_1"
+}
+$footballDataLeagueMap = @{
+    "EPL"       = "premier-league"
+    "LALIGA"    = "la-liga"
+    "BUNDESLIGA"= "bundesliga"
+    "SERIEA"    = "serie-a"
+    "LIGUE1"    = "ligue-1"
+}
+$soccerRecentSeasonStart = 2021
+$soccerRecentSeasonEnd = [Math]::Min($activeSeasonYear + 1, 2025)
+$soccerRecentSeasons = @()
+for ($season = $soccerRecentSeasonStart; $season -le $soccerRecentSeasonEnd; $season++) {
+    $soccerRecentSeasons += $season
+}
 
 function Write-Log {
     param([string]$Message)
@@ -232,6 +252,31 @@ if soccer_leagues:
     Write-Log "Ingestion complete"
 } catch {
     Write-Log "ERROR: Ingestion step failed: $_"
+}
+
+if ($targetSoccerLeagues.Count) {
+    $understatTargets = @($targetSoccerLeagues | Where-Object { $understatLeagueMap.ContainsKey($_) } | ForEach-Object { $understatLeagueMap[$_] })
+    if ($understatTargets.Count) {
+        $leagueArg = ($understatTargets -join ',')
+        $seasonArg = ($soccerRecentSeasons -join ',')
+        Write-Log "Syncing Understat archives for leagues: $leagueArg (seasons: $seasonArg)..."
+        try {
+            & poetry run python -m src.data.ingest_understat --leagues $leagueArg --seasons $seasonArg | Out-Null
+        } catch {
+            Write-Log "WARNING: Understat ingestion failed: $_"
+        }
+    }
+
+    $footballTargets = @($targetSoccerLeagues | Where-Object { $footballDataLeagueMap.ContainsKey($_) } | ForEach-Object { $footballDataLeagueMap[$_] })
+    if ($footballTargets.Count) {
+        $leagueArg = ($footballTargets -join ',')
+        Write-Log "Syncing football-data odds archives for leagues: $leagueArg..."
+        try {
+            & poetry run python -m src.data.ingest_football_data --leagues $leagueArg | Out-Null
+        } catch {
+            Write-Log "WARNING: Football-data ingestion failed: $_"
+        }
+    }
 }
 
 # Step 2: advanced stats / rolling metrics
