@@ -90,6 +90,20 @@ $soccerRecentSeasons = @()
 for ($season = $soccerRecentSeasonStart; $season -le $soccerRecentSeasonEnd; $season++) {
     $soccerRecentSeasons += $season
 }
+$soccerMatchPayloadSeasons = @(
+    $soccerSeasonYears |
+        Sort-Object -Descending |
+        Select-Object -First 2 |
+        Sort-Object
+)
+if (-not $soccerMatchPayloadSeasons -or $soccerMatchPayloadSeasons.Count -eq 0) {
+    $soccerMatchPayloadSeasons = @(
+        $soccerRecentSeasons |
+            Sort-Object -Descending |
+            Select-Object -First 2 |
+            Sort-Object
+    )
+}
 
 function Write-Log {
     param([string]$Message)
@@ -264,6 +278,13 @@ if ($targetSoccerLeagues.Count) {
             & poetry run python -m src.data.ingest_understat --leagues $leagueArg --seasons $seasonArg | Out-Null
         } catch {
             Write-Log "WARNING: Understat ingestion failed: $_"
+        }
+        $matchSeasonArg = ($soccerMatchPayloadSeasons -join ',')
+        Write-Log "Fetching Understat match payloads for leagues: $leagueArg (seasons: $matchSeasonArg)..."
+        try {
+            & poetry run python -m src.data.sources.understat_match_payloads --leagues $leagueArg --seasons $matchSeasonArg | Out-Null
+        } catch {
+            Write-Log "WARNING: Understat match payload ingestion failed: $_"
         }
     }
 

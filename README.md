@@ -1,134 +1,184 @@
-## Sports Betting Analytics
+# Sports Betting Analytics
 
-- **Initial focus**: NFL moneyline outcomes for regular season and playoffs.
-- **Expansion**: Architecture now supports NBA and FBS College Football (CFB) alongside NFL; adding new leagues requires minimal refactoring.
-- **Data horizon**: Use historical data from 2010 onward to capture modern play styles; refresh weekly.
-- **Bankroll assumptions**: Starting bankroll $10,000 with risk capped at 2% per wager unless Kelly recommends less.
-- **KPIs**:
-  - Predictive: accuracy, Brier score, log loss, calibration slope.
-  - Financial: ROI, cumulative profit, max drawdown, Sharpe-like risk-adjusted return.
-- **Deployment cadence**: Daily batch recommendations; live odds update optional future enhancement.
+End-to-end platform for multi-league moneyline modeling, evaluation, and recommendation delivery. The stack ingests dozens of public feeds (odds, injuries, advanced stats), maintains a local SQLite warehouse, engineers league-specific features, trains calibrated models, and pushes forward-testing output into dashboards.
 
-### Supported Leagues
+---
 
-The pipelines currently support NFL, NBA, CFB, and European soccer (EPL/La Liga/Bundesliga/Serie A/Ligue 1). Additional sports such as MLB are disabled until their ingestion stack is completed to production standards.
+## Current Focus
 
-### Project Structure (planned)
+| Domain | Status | Notes |
+| --- | --- | --- |
+| **NFL** | Production | Wave‑1 data full history (1999–present), rolling EPA features, injuries, weather |
+| **NBA** | Production | ESPN odds, Kaggle historical closes, rolling metrics, injury summaries |
+| **CFB (FBS)** | Production | CollegeFootballData API for schedules, advanced stats, lines |
+| **Soccer (EPL, La Liga, Bundesliga, Serie A, Ligue 1)** | Production | Football-Data odds, ESPN schedules, Understat team/player aggregates + starting XI form |
+| MLB / Others | Paused | Data ingestion templates exist but pipelines disabled until parity with above |
+
+Key outcomes:
+
+- Unified feature builder (`src/features/moneyline_dataset.py`) handles all leagues.
+- Soccer seasons are clipped to **2021–2025** with auto‑filled odds (Football-Data) and Understat‑driven lineup metrics.
+- Understat match payloads (rosters/shots) are cached per league/season; subsequent hourly runs only fetch new matches.
+- `scripts/run_hourly_pipeline.ps1` orchestrates ingestion → advanced stats → dataset build → model refresh → forward-test predictions.
+
+---
+
+## Repository Layout
 
 ```
 data/
-  raw/
-  processed/
-notebooks/
+  raw/            # Source snapshots, ESPN pulls, etc.
+  processed/      # Feature-ready tables, model inputs
+docs/             # Source notes, dashboards, automation instructions
+scripts/          # PowerShell automation (hourly pipeline, forward tests, schedulers)
 src/
-  data/
-  features/
-  models/
-reports/
+  data/           # Ingestion + normalization
+  features/       # Feature engineering
+  models/         # Training, evaluation, forward testing
+  dashboard/      # Dash web app
+tests/            # Pytest suites
 ```
 
-- Use `.env` for API keys and configuration.
-- Employ `poetry` for Python environment management.
-- Document workflow updates in `docs/` as features grow.
+---
 
-### Data Pipeline Quickstart
+## Getting Started
 
-1. Install dependencies:
-   - `pip install poetry`
-   - `poetry install`
-2. Copy `.env.example` to `.env` and add your The Odds API key.
-3. Pull upcoming odds snapshots:
-   - NFL: `poetry run python -m src.data.ingest_odds --sport americanfootball_nfl`
-   - NBA: `poetry run python -m src.data.ingest_odds --sport basketball_nba`
-   - CFB: `poetry run python -m src.data.ingest_odds --sport americanfootball_ncaaf`
-   - Historical fill: `poetry run python -m src.data.backfill_odds 2023-10-01 2023-11-01 --sport basketball_nba --step-days 7`
-   - ESPN scoreboard odds: `poetry run python -m src.data.ingest_sources --source espn_odds_nfl` (add `--source espn_odds_nba` or `--source espn_odds_cfb`)
-   - Historical NBA odds: `poetry run python -m src.data.backfill_historical_odds --source all --league nba 2023-10-01 2023-11-01 --step-days 1`
-4. Run structured source ingestions (Wave 1 + Wave 3):
-   - List sources: `poetry run python -m src.data.ingest_sources --list`
-   - Execute all enabled sources: `poetry run python -m src.data.ingest_sources`
-     - Historical/bootstrap feeds run automatically the first time (to seed a new machine) and are skipped afterward so hourly jobs don't redownload the same archives. Pass `--full-refresh` when you explicitly want to re-fetch those sources.
-   - Limit to NFL wave: `poetry run python -m src.data.ingest_sources --league nfl --season-start 2019 --season-end 2023`
-   - Limit to CFB: `poetry run python -m src.data.ingest_sources --league cfb --seasons 2024`
-   - Target injuries only: `poetry run python -m src.data.ingest_sources --source nflverse_injuries` (or `nba_injuries`)
-   - Team metrics: `poetry run python -m src.data.ingest_sources --source nfl_team_metrics --season-start 2021 --season-end 2024` and `--source nba_team_metrics --season-start 2022 --season-end 2024`
-5. Download historical schedules and betting closes:
-   - `poetry run python -m src.data.ingest_results` (default covers 1999-2023; add `--seasons` to customize)
-   - For NBA: `poetry run python -m src.data.ingest_results_nba --seasons 2015 2016 ...`
-   - For CFB: `poetry run python -m src.data.ingest_results_cfb --seasons 2024 --season-type regular` (requires `CFBD_API_KEY`)
-6. Inspect saved files under `data/raw/odds/`, `data/raw/results/`, and `data/raw/sources/`.
-7. Initialize the SQLite warehouse (optional but recommended):
-   - `poetry run python -m src.db.init_db`
+1. **Install dependencies**
+   ```bash
+   pip install poetry
+   poetry install
+   ```
 
-See `docs/data-sources.md` and `docs/storage-layout.md` for details on inputs and storage conventions.
+2. **Environment variables**
+   - Copy `.env.example` → `.env`.
+   - Provide API keys (The Odds API, CollegeFootballData, Football-Data, etc.).
 
-### Modeling & Recommendations
+3. **Initialize the SQLite warehouse (optional but recommended)**
+   ```bash
+   poetry run python -m src.db.init_db
+   ```
 
-1. Build processed dataset (run implicitly by training):
-   - `poetry run python -m src.features.moneyline_dataset` (defaults to seasons 1999-2023)
-2. Train upgraded model and write metrics/predictions:
-   - NFL: `poetry run python -m src.models.train --league NFL --model-type gradient_boosting --calibration sigmoid`
-   - NBA: `poetry run python -m src.models.train --league NBA --model-type ensemble --calibration sigmoid`
-   - CFB: `poetry run python -m src.models.train --league CFB --model-type gradient_boosting --calibration sigmoid`
-   - Alternative model families: `lightgbm`, `xgboost`, `mlp`, or `ensemble` (averages surviving members with log-loss weighting).
-   - All models support per-fold calibration (`--calibration sigmoid` or `--calibration isotonic`); use `--calibration none` to disable.
-3. Generate recommended bets from holdout predictions:
-   - NFL: `poetry run python -m src.models.bet_selector --league NFL --edge-threshold 0.06`
-   - NBA: `poetry run python -m src.models.bet_selector --league NBA --edge-threshold 0.06`
-   - CFB: `poetry run python -m src.models.bet_selector --league CFB --edge-threshold 0.06`
-4. Inspect outputs under `reports/backtests/` (e.g., `gradient_boosting_calibrated_metrics.json`) and `reports/recommendations/`.
+4. **Bootstrap sources**
+   - All historical feeds run once automatically and are skipped on later hourly jobs.
+   - Manual refresh: `poetry run python -m src.data.ingest_sources --full-refresh`.
 
-Upcoming improvements: richer features (team form, injuries), alternative model ensembles, and live odds ingestion with message queues.
+---
 
-### Data Warehouse Overview
+## Data Acquisition Cheat Sheet
 
-- SQLite database lives at `data/betting.db`. Run `src/db/init_db.py` to create tables defined in `src/db/schema.sql`.
-- Core tables cover `sports`, `teams`, `games`, odds snapshots, model inputs, model registry (with league column), and recommendations.
-- Source registry tables (`data_sources`, `source_runs`, `source_files`) track scraping history and raw file locations.
-- `injury_reports` captures normalized player availability from nflverse and NBA live feeds; injury feature columns are derived during dataset builds.
-- `src/db/inspect.py` supplies quick checks: `poetry run python -m src.db.inspect summary` or `... models` or `... source-runs`.
-- Monitor source health: `poetry run python -m src.data.monitor_sources health --hours 24` (or `failures`, `stale`, `check`).
-- Existing ingestion scripts currently persist to parquet/JSON; future work can sync those outputs into the database for cross-sport analytics.
+| Task | Command |
+| --- | --- |
+| List available structured sources | `poetry run python -m src.data.ingest_sources --list` |
+| Run all enabled sources | `poetry run python -m src.data.ingest_sources` |
+| League-only (e.g., NFL) | `... --league nfl --season-start 2019 --season-end 2023` |
+| Odds snapshots (Odds API) | `poetry run python -m src.data.ingest_odds --sport americanfootball_nfl` (swap sport id) |
+| ESPN scoreboard odds | `poetry run python -m src.data.ingest_sources --source espn_odds_nba` |
+| Historical schedules/results | `poetry run python -m src.data.ingest_results --seasons 1999 2024` |
+| NBA schedules | `poetry run python -m src.data.ingest_results_nba --seasons 2015 2024` |
+| CFB schedules | `poetry run python -m src.data.ingest_results_cfb --seasons 2024 --season-type regular` |
+| Football-Data odds (soccer) | `poetry run python -m src.data.ingest_football_data --leagues premier-league,serie-a` |
+| Understat archives | `poetry run python -m src.data.ingest_understat --leagues EPL,La_liga --seasons 2021,2025` |
+| Understat match payloads (lineups/shots) | `poetry run python -m src.data.sources.understat_match_payloads --leagues EPL --seasons 2024`<br>*(caches per league/season; add `--force` to re-download)* |
 
-### Multi-League Tips
+All scrapers are designed to **skip work when cached files exist**, preventing redundant network hits.
 
-- Fetch odds by sport key: `poetry run python -m src.data.ingest_odds --sport americanfootball_nfl`, `--sport basketball_nba`, or `--sport americanfootball_ncaaf`.
-- Historical odds can be backfilled with repeated calls (use `--sport` and date filters when extending the script).
-- Multi-source scraping config lives in `config/sources.yml`; update handlers/params there before running the orchestrator.
-- ESPN odds (`espn_odds_*`) and team metric sources (`*_team_metrics`) populate additional features such as `espn_moneyline_close` and season-level EPA/estimated rating columns.
-- **Historical NBA Odds**: Use `src.data.backfill_historical_odds` to backfill from OddsShark, VegasInsider, or Covers. Sources use Selenium for JavaScript-rendered content. Load CSV files into database with `src.data.load_historical_odds`.
-- Model artifacts and predictions names now include the league prefix, e.g., `models/nfl_ensemble_calibrated_moneyline.pkl` and `reports/backtests/nba_gradient_boosting_calibrated_metrics.json`.
-- College Football ingestion uses the CollegeFootballData API. Set `CFBD_API_KEY` in `.env` before running CFB commands.
+---
 
-### Monitoring & Scheduling
+## Feature Engineering & Modeling
 
-- **Source Health Monitoring**: Use `src/data/monitor_sources.py` to check ingestion status:
-  - `poetry run python -m src.data.monitor_sources health --hours 24` - Show success rates per source
-  - `poetry run python -m src.data.monitor_sources failures --hours 48` - List recent failures
-  - `poetry run python -m src.data.monitor_sources stale --threshold 48` - Find sources that haven't run recently
-  - `poetry run python -m src.data.monitor_sources check --min-success-rate 80` - Exit non-zero if unhealthy (for alerts)
-- **Scheduling**: Set up automated ingestion with cron (Linux/macOS) or Task Scheduler (Windows):
-  - See `scripts/schedule_ingestion.sh` for cron examples (hourly odds, daily full ingestion, weekly metrics)
-  - See `scripts/schedule_ingestion.ps1` for Windows Task Scheduler setup
-- **Historical Backfill**: Use `src/data/backfill_espn_odds.py` to fetch historical ESPN odds snapshots (note: ESPN may not provide historical data):
-  - `poetry run python -m src.data.backfill_espn_odds 2024-09-01 2024-11-01 --league nfl --step-days 1 --sleep 1.0`
+### Dataset Builder
 
-### Testing & CI
+```
+poetry run python -m src.features.moneyline_dataset --league NFL --seasons 2018 2024
+poetry run python -m src.features.moneyline_dataset --league EPL --seasons 2021 2025
+```
 
-- Run the automated test suite with `poetry run pytest`.
-- Continuous Integration runs via `.github/workflows/ci.yml`, which executes Ruff and Pytest on every push/pull request.
+- NFL/NBA/CFB pull directly from the SQLite warehouse (game_results, odds, injuries).
+- Soccer merges ESPN schedules, Football-Data odds, and Understat team/player aggregates. Missing moneylines are backfilled from Bet365/Pinnacle decimal odds, and Understat features mirror both team and opponent context.
 
-### Forward Testing Dashboard
+### Training
 
-- Interactive Dash application to review forward testing performance across leagues (NBA, NFL, CFB).
-- Launch locally: `poetry run python -m src.dashboard --port 8050`
-- Features include:
-  - Overview cards for win rate, ROI, and recommendation counts (respects edge slider)
-  - Time-series charts (cumulative profit, ROI, win rate) with selectable aggregation (daily/weekly/monthly)
-  - Recent predictions table with filtering/sorting and completed result tracking
-  - Recommended bets view showing upcoming games above the edge threshold and a calendar roll-up
-  - Edge analysis tab with ROI by edge bucket and supporting table
-  - Manual refresh button plus date-range and edge-threshold filters
-- Data is read from `data/forward_test/predictions_master.parquet`. Use the forward testing scripts to keep snapshots current (`src/models/forward_test.py` and `scripts/run_forward_test_*.ps1`).
-- Forward-testing helper scripts now include league-specific wrappers under `scripts/run_forward_test_*_cfb.ps1` for Task Scheduler integration.
-- See `docs/dashboard.md` for screenshots, component breakdown, and deployment notes.
+```
+poetry run python -m src.models.train --league NFL --model-type gradient_boosting --calibration sigmoid
+poetry run python -m src.models.train --league NBA --model-type ensemble --calibration sigmoid
+poetry run python -m src.models.train --league EPL --model-type gradient_boosting --calibration sigmoid
+```
+
+Outputs:
+- `models/<league>_<model>_moneyline.pkl`
+- `reports/backtests/<league>_*_metrics.json`
+- `reports/backtests/<league>_*_test_predictions.parquet`
+
+### Bet Recommendations
+
+```
+poetry run python -m src.models.bet_selector --league NFL --edge-threshold 0.06
+```
+
+Adjust the edge threshold per league to trade off volume vs. confidence.
+
+---
+
+## Automation
+
+### Hourly Pipeline
+
+`scripts/run_hourly_pipeline.ps1` orchestrates:
+1. Recent odds / injuries / ESPN schedules.
+2. Football-Data odds + Understat archives + Understat match payloads (only new seasons/matches).
+3. Feature rebuilds for each league.
+4. Model training.
+5. Forward-test predictions and dashboard refresh.
+
+Flags:
+- `.\scripts\run_hourly_pipeline.ps1 -SoccerOnly`
+- Configure via Windows Task Scheduler using the helper scripts in `scripts/`.
+
+### Forward Testing & Dashboard
+
+- Dashboard entrypoint: `poetry run python -m src.dashboard --port 8050`.
+- Forward-test driver: `poetry run python -m src.models.forward_test`.
+- PowerShell wrappers under `scripts/run_forward_test_*.ps1` simplify scheduling per league.
+
+The dashboard reads `data/forward_test/predictions_master.parquet` and surfaces ROI, win rate, cumulative profit, and upcoming recommendations with an adjustable edge slider.
+
+---
+
+## Soccer-Specific Notes
+
+- **Match mapping**: ESPN/Football-Data games are normalized via `src/data/team_mappings.py` and keyed on `(league, match_date, home_code, away_code)`.
+- **Odds coverage**: Bet365 & Pinnacle closes (decimal → implied + American) plus draw prices. Missing moneylines in `game_results` are filled before modeling.
+- **Understat features**: Rolling xG/xGA, PPDA, deep entries, xPTS, lineup minutes, per‑starter xG/xA/shot form, and starter continuity share. All metrics are opponent-mirrored (prefixed `opponent_`).
+- **Caching**: `src/data/sources/understat_match_payloads.py` skips league/seasons already present in `data/raw/sources/soccer/understat_matches/<timestamp>/match_metadata.parquet`. Use `--force` to refresh.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Understat match payload step “Skipping … (cached)” but you need a refresh | Add `--force` to the CLI or delete the corresponding run directory under `data/raw/sources/soccer/understat_matches/`. |
+| Hourly pipeline slow because of soccer scraping | Ensure `$soccerMatchPayloadSeasons` (scripts/run_hourly_pipeline.ps1) targets only the newest seasons; default is the latest two. |
+| `poetry run` commands fail to locate modules | Verify you are in the repo root (`c:\Users\Bobby\Desktop\sports`) and that `poetry shell` is activated or use `poetry run …`. |
+| DB missing tables | Re-run `poetry run python -m src.db.init_db` to lay down schema migrations. |
+
+---
+
+## Contributing Workflow
+
+1. Make changes + add tests in `tests/`.
+2. Run quick sanity check:
+   ```
+   poetry run pytest
+   poetry run python -m src.features.moneyline_dataset --league NFL --seasons 2023
+   ```
+3. Update docs (`docs/`, `README.md`) when adding sources or automation.
+4. Use descriptive commit messages summarizing ingestion + modeling impacts.
+
+For detailed source documentation, see:
+- `docs/data-sources.md`
+- `docs/storage-layout.md`
+- `docs/dashboard.md`
+- `docs/scraping_blockages.md` (rate-limit notes)
+
+Happy modeling!
