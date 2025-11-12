@@ -20,9 +20,7 @@ from .data import (
     get_completed_bets,
     get_performance_by_threshold,
     get_performance_over_time,
-    get_recent_predictions,
     get_recommended_bets,
-    get_upcoming_calendar,
     load_forward_test_data,
 )
 
@@ -137,9 +135,17 @@ app.layout = dbc.Container(
                                 id="league-select",
                                 options=[
                                     {"label": "All Leagues", "value": "all"},
-                                    {"label": "NBA", "value": "NBA"},
+                                    {"label": "— Football —", "value": "divider_football", "disabled": True},
                                     {"label": "NFL", "value": "NFL"},
                                     {"label": "CFB", "value": "CFB"},
+                                    {"label": "— Basketball —", "value": "divider_basketball", "disabled": True},
+                                    {"label": "NBA", "value": "NBA"},
+                                    {"label": "— Soccer —", "value": "divider_soccer", "disabled": True},
+                                    {"label": "EPL", "value": "EPL"},
+                                    {"label": "La Liga", "value": "LALIGA"},
+                                    {"label": "Bundesliga", "value": "BUNDESLIGA"},
+                                    {"label": "Serie A", "value": "SERIEA"},
+                                    {"label": "Ligue 1", "value": "LIGUE1"},
                                 ],
                                 value="all",
                                 clearable=False,
@@ -230,11 +236,6 @@ app.layout = dbc.Container(
                     ],
                 ),
                 dcc.Tab(
-                    label="Recent Predictions",
-                    value="recent",
-                    children=[dcc.Loading(html.Div(id="recent-predictions-table"), type="circle")],
-                ),
-                dcc.Tab(
                     label="Recommended Bets",
                     value="recommended",
                     children=[dcc.Loading(html.Div(id="recommended-bets-table"), type="circle")],
@@ -252,11 +253,6 @@ app.layout = dbc.Container(
                     label="Bets",
                     value="bets",
                     children=[dcc.Loading(html.Div(id="completed-bets-table"), type="circle")],
-                ),
-                dcc.Tab(
-                    label="Calendar",
-                    value="calendar",
-                    children=[dcc.Loading(html.Div(id="calendar-table"), type="circle")],
                 ),
             ],
         ),
@@ -290,10 +286,8 @@ def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
     Output("period-chart", "children"),
     Output("threshold-chart", "children"),
     Output("threshold-table", "children"),
-    Output("recent-predictions-table", "children"),
     Output("recommended-bets-table", "children"),
     Output("completed-bets-table", "children"),
-    Output("calendar-table", "children"),
     Input("forward-data-store", "data"),
     Input("date-range-picker", "start_date"),
     Input("date-range-picker", "end_date"),
@@ -316,9 +310,25 @@ def update_dashboard(
         if "league" not in df.columns:
             if "game_id" in df.columns:
                 # Infer league from game_id prefix
-                df["league"] = df["game_id"].apply(
-                    lambda x: "NFL" if isinstance(x, str) and x.startswith("NFL_") else "NBA"
-                )
+                def _infer_league(x):
+                    if not isinstance(x, str):
+                        return "NBA"
+                    if x.startswith("NFL_"):
+                        return "NFL"
+                    if x.startswith("CFB_"):
+                        return "CFB"
+                    if x.startswith("EPL_"):
+                        return "EPL"
+                    if x.startswith("LALIGA_"):
+                        return "LALIGA"
+                    if x.startswith("BUNDESLIGA_"):
+                        return "BUNDESLIGA"
+                    if x.startswith("SERIEA_"):
+                        return "SERIEA"
+                    if x.startswith("LIGUE1_"):
+                        return "LIGUE1"
+                    return "NBA"
+                df["league"] = df["game_id"].apply(_infer_league)
             else:
                 # Default to NBA for old predictions without game_id info
                 df["league"] = "NBA"
@@ -326,9 +336,25 @@ def update_dashboard(
             # Fix None/NaN values in existing league column
             if "game_id" in df.columns:
                 mask = df["league"].isna() | (df["league"].astype(str).str.lower() == "none")
-                df.loc[mask, "league"] = df.loc[mask, "game_id"].apply(
-                    lambda x: "NFL" if isinstance(x, str) and x.startswith("NFL_") else "NBA"
-                )
+                def _infer_league(x):
+                    if not isinstance(x, str):
+                        return "NBA"
+                    if x.startswith("NFL_"):
+                        return "NFL"
+                    if x.startswith("CFB_"):
+                        return "CFB"
+                    if x.startswith("EPL_"):
+                        return "EPL"
+                    if x.startswith("LALIGA_"):
+                        return "LALIGA"
+                    if x.startswith("BUNDESLIGA_"):
+                        return "BUNDESLIGA"
+                    if x.startswith("SERIEA_"):
+                        return "SERIEA"
+                    if x.startswith("LIGUE1_"):
+                        return "LIGUE1"
+                    return "NBA"
+                df.loc[mask, "league"] = df.loc[mask, "game_id"].apply(_infer_league)
             else:
                 # Fill any None/NaN with NBA as default
                 df["league"] = df["league"].fillna("NBA")
@@ -344,10 +370,8 @@ def update_dashboard(
     metrics: SummaryMetrics = calculate_summary_metrics(df, edge_threshold=edge_threshold)
     performance_df = get_performance_over_time(df, edge_threshold=edge_threshold)
     threshold_df = get_performance_by_threshold(df, stake=DEFAULT_STAKE)
-    recent_df = get_recent_predictions(df)
     recommended_df = get_recommended_bets(df, edge_threshold=edge_threshold)
     completed_bets_df = get_completed_bets(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
-    calendar_df = get_upcoming_calendar(df, edge_threshold=edge_threshold)
 
     period_chart_component = components.empty_state("No performance data yet.")
     if not performance_df.empty:
@@ -363,10 +387,8 @@ def update_dashboard(
         period_chart_component,
         components.performance_by_threshold_chart(threshold_df),
         components.performance_by_threshold_table(threshold_df),
-        components.recent_predictions_table(recent_df),
         components.recommended_bets_table(recommended_df),
         components.completed_bets_table(completed_bets_df),
-        components.calendar_table(calendar_df),
     )
 
 

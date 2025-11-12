@@ -23,6 +23,7 @@ from src.data.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, ensure_directories
 from src.data.team_mappings import normalize_team_code
 from src.data.nfl import get_team_conference, get_team_division
 from src.db.core import connect
+from src.features import soccer_features
 
 
 LOGGER = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ INJURY_PLAYER_COLUMNS = [
 TEAM_SKILL_POSITIONS = {"QB", "WR", "RB", "TE"}
 NBA_SKILL_POSITIONS = {"G", "F", "C", "G-F", "F-G", "F-C", "C-F", "G-C"}
 PRECIP_KEYWORDS = re.compile("rain|snow|sleet|storm|shower|drizzle|hail|precip", re.IGNORECASE)
+SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
+SOCCER_SEASON_MIN = 2021
+SOCCER_SEASON_MAX = 2025
 
 
 @dataclass
@@ -291,9 +295,29 @@ def _load_pbp(paths: DatasetPaths, seasons: Iterable[int]) -> pd.DataFrame:
 
     LOGGER.info("Downloading play-by-play data for seasons %s", seasons)
     pbp_frames: List[pd.DataFrame] = []
+    skipped: List[int] = []
     for season in seasons:
-        season_data = nfl.import_pbp_data([season])
+        try:
+            season_data = nfl.import_pbp_data([season])
+        except Exception as exc:  # pragma: no cover - external dependency guard
+            LOGGER.warning("Failed to download play-by-play for season %s: %s. Skipping.", season, exc)
+            skipped.append(season)
+            continue
         pbp_frames.append(season_data)
+
+    if not pbp_frames:
+        raise RuntimeError(
+            f"Unable to download play-by-play data for seasons {list(seasons)}. "
+            "nfl_data_py may not have released the current season yet."
+        )
+
+    if skipped:
+        LOGGER.warning(
+            "Play-by-play data unavailable for seasons %s; continuing with %s",
+            skipped,
+            [s for s in seasons if s not in skipped],
+        )
+
     pbp = pd.concat(pbp_frames, ignore_index=True)
     pbp = pbp[[col for col in PBP_COLUMNS if col in pbp.columns]].copy()
     paths.raw_pbp.parent.mkdir(parents=True, exist_ok=True)
@@ -462,8 +486,30 @@ def _load_injuries(paths: DatasetPaths, seasons: Iterable[int], league: str = "N
         return pd.read_parquet(paths.raw_injuries)
 
     LOGGER.info("Downloading injury reports for seasons %s", seasons)
-    injuries = nfl.import_injuries(list(seasons))
-    injuries = injuries.copy()
+    injury_frames: List[pd.DataFrame] = []
+    missing: List[int] = []
+    for season in seasons:
+        try:
+            injury_frames.append(nfl.import_injuries([season]))
+        except Exception as exc:  # pragma: no cover - external dependency guard
+            LOGGER.warning("Failed to download injuries for season %s: %s. Skipping.", season, exc)
+            missing.append(season)
+            continue
+
+    if not injury_frames:
+        raise RuntimeError(
+            f"Unable to download injury reports for seasons {list(seasons)}. "
+            "nfl_data_py may not publish in-progress seasons yet."
+        )
+
+    if missing:
+        LOGGER.warning(
+            "Injury data unavailable for seasons %s; continuing with %s",
+            missing,
+            [s for s in seasons if s not in missing],
+        )
+
+    injuries = pd.concat(injury_frames, ignore_index=True)
     paths.raw_injuries.parent.mkdir(parents=True, exist_ok=True)
     injuries.to_parquet(paths.raw_injuries, index=False)
     return injuries
@@ -735,6 +781,60 @@ def _merge_team_metrics(dataset: pd.DataFrame, league: str) -> pd.DataFrame:
         )
         return dataset.merge(metrics, on=["season", "team"], how="left")
 
+    return dataset
+
+
+def _merge_opponent_features(dataset: pd.DataFrame, features: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    feature_cols = [col for col in features.columns if col not in {"game_id", "team"}]
+    if not feature_cols:
+        return dataset
+    renamed = features.rename(
+        columns={"team": "opponent", **{col: f"{prefix}{col}" for col in feature_cols}}
+    )
+    return dataset.merge(renamed, on=["game_id", "opponent"], how="left")
+
+
+def _merge_football_data_features(
+    dataset: pd.DataFrame,
+    league: str,
+    seasons: Iterable[int],
+    games_df: pd.DataFrame,
+) -> pd.DataFrame:
+    odds = soccer_features.load_football_data_odds(league, seasons, games_df)
+    if odds.empty:
+        return dataset
+
+    dataset = dataset.merge(odds, on=["game_id", "team"], how="left")
+    dataset = _merge_opponent_features(dataset, odds, "opponent_")
+
+    if "fd_b365_ml_american" in dataset.columns:
+        mask = dataset["moneyline"].isna() & dataset["fd_b365_ml_american"].notna()
+        if mask.any():
+            dataset.loc[mask, "moneyline"] = dataset.loc[mask, "fd_b365_ml_american"]
+            dataset.loc[mask, "implied_prob"] = _implied_probability(
+                dataset.loc[mask, "fd_b365_ml_american"]
+            )
+    if "fd_ps_ml_american" in dataset.columns:
+        mask = dataset["moneyline"].isna() & dataset["fd_ps_ml_american"].notna()
+        if mask.any():
+            dataset.loc[mask, "moneyline"] = dataset.loc[mask, "fd_ps_ml_american"]
+            dataset.loc[mask, "implied_prob"] = _implied_probability(
+                dataset.loc[mask, "fd_ps_ml_american"]
+            )
+    return dataset
+
+
+def _merge_understat_features(
+    dataset: pd.DataFrame,
+    league: str,
+    seasons: Iterable[int],
+    games_df: pd.DataFrame,
+) -> pd.DataFrame:
+    understat = soccer_features.build_understat_features(league, seasons, games_df)
+    if understat.empty:
+        return dataset
+    dataset = dataset.merge(understat, on=["game_id", "team"], how="left")
+    dataset = _merge_opponent_features(dataset, understat, "opponent_")
     return dataset
 
 
@@ -1134,8 +1234,25 @@ def build_dataset(seasons: Iterable[int], league: str = "NFL") -> pd.DataFrame:
 
 def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
     ensure_directories()
-    season_range = seasons_tuple(seasons)
     league_code = league.upper()
+    season_list = sorted({int(season) for season in seasons})
+    if not season_list:
+        LOGGER.warning("No seasons provided for %s", league_code)
+        return pd.DataFrame()
+    if league_code in SOCCER_LEAGUES:
+        season_list = [
+            season
+            for season in season_list
+            if SOCCER_SEASON_MIN <= season <= SOCCER_SEASON_MAX
+        ]
+        if not season_list:
+            LOGGER.warning(
+                "Requested seasons fall outside supported soccer window %s-%s",
+                SOCCER_SEASON_MIN,
+                SOCCER_SEASON_MAX,
+            )
+            return pd.DataFrame()
+    season_range = (season_list[0], season_list[-1])
 
     with connect() as conn:
         sport_row = conn.execute(
@@ -1170,6 +1287,8 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
             conn,
             params=(sport_id, season_range[0], season_range[1]),
         )
+
+        games_lookup = games[["game_id", "season", "start_time_utc", "home_team", "away_team"]].copy()
 
         odds = pd.read_sql_query(
             """
@@ -1243,7 +1362,7 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
                 fill_values = pd.to_numeric(fill_values, errors="coerce")
                 games.loc[mask, column] = fill_values
 
-    games = games.dropna(subset=["home_moneyline_close", "away_moneyline_close", "home_score", "away_score"])
+    games = games.dropna(subset=["home_score", "away_score"])
     games["game_datetime"] = games["start_time_utc"]
     games["game_type"] = games.get("game_type", "REG").fillna("REG")
 
@@ -1300,10 +1419,9 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
             dataset.loc[mask, "moneyline"] = dataset.loc[mask, "espn_moneyline_close"]
             dataset.loc[mask, "implied_prob"] = _implied_probability(dataset.loc[mask, "espn_moneyline_close"])
     
-    dataset = dataset.dropna(subset=["moneyline"])
     dataset.sort_values(["game_datetime", "season", "team"], inplace=True)
 
-    injuries = _load_injuries_from_db_league(league_code, seasons)
+    injuries = _load_injuries_from_db_league(league_code, season_list)
     if not injuries.empty:
         injury_summary = _summarize_injuries_by_date(injuries, league_code)
         dataset["game_date"] = pd.to_datetime(dataset["game_datetime"], errors="coerce").dt.date
@@ -1370,6 +1488,12 @@ def _build_dataset_generic(seasons: Iterable[int], league: str) -> pd.DataFrame:
                     how="left"
                 )
 
+    if league_code in SOCCER_LEAGUES:
+        dataset = _merge_football_data_features(dataset, league_code, season_list, games_lookup)
+        dataset = _merge_understat_features(dataset, league_code, season_list, games_lookup)
+
+    dataset = dataset.dropna(subset=["moneyline"])
+
     output_path = PROCESSED_DATA_DIR / "model_input" / (
         f"moneyline_{league_code.lower()}_{season_range[0]}_{season_range[1]}.parquet"
     )
@@ -1406,7 +1530,10 @@ def main() -> None:
     args = _parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
     seasons = [int(season) for season in args.seasons]
-    build_dataset(seasons, league=args.league)
+    dataset = build_dataset(seasons, league=args.league)
+    if dataset.empty:
+        LOGGER.warning("No rows produced for %s seasons %s", args.league.upper(), seasons)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

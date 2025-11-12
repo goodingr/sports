@@ -62,7 +62,7 @@ def _convert_to_display_timezone(series: pd.Series) -> pd.Series:
 
 
 @lru_cache(maxsize=1)
-def _read_predictions_cached(path_str: str) -> pd.DataFrame:
+def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame()
@@ -79,6 +79,16 @@ def _read_predictions_cached(path_str: str) -> pd.DataFrame:
             return "CFB"
         if upper.startswith("NBA_"):
             return "NBA"
+        if upper.startswith("EPL_"):
+            return "EPL"
+        if upper.startswith("LALIGA_"):
+            return "LALIGA"
+        if upper.startswith("BUNDESLIGA_"):
+            return "BUNDESLIGA"
+        if upper.startswith("SERIEA_"):
+            return "SERIEA"
+        if upper.startswith("LIGUE1_"):
+            return "LIGUE1"
         return "NBA"
 
     # Add or fix league column (for backward compatibility)
@@ -132,7 +142,11 @@ def load_forward_test_data(*, force_refresh: bool = False, path: Path = MASTER_P
     path_str = str(path.resolve())
     if force_refresh:
         _read_predictions_cached.cache_clear()
-    df = _read_predictions_cached(path_str)
+    try:
+        cache_buster = path.stat().st_mtime_ns
+    except FileNotFoundError:
+        cache_buster = 0
+    df = _read_predictions_cached(path_str, cache_buster)
     
     # Filter by league if specified
     if not df.empty and league and "league" in df.columns:
@@ -193,8 +207,9 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
         "away_score",
     ]
     
-    # Optional columns (may not exist in older predictions)
-    optional_columns = ["result_updated_at"]
+    # Optional columns (may not exist in older predictions or non-soccer leagues)
+    optional_columns = ["result_updated_at", "draw_moneyline", "draw_predicted_prob", 
+                       "draw_implied_prob", "draw_edge"]
 
     missing = [column for column in required_columns if column not in df.columns]
     if missing:
@@ -202,28 +217,59 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
 
     records: list[dict[str, object]] = []
     for _, row in df.iterrows():
-        for side in ("home", "away"):
-            team_col = f"{side}_team"
-            opp_col = "away_team" if side == "home" else "home_team"
-            moneyline_col = f"{side}_moneyline"
-            prob_col = f"{side}_predicted_prob"
-            implied_col = f"{side}_implied_prob"
-            edge_col = f"{side}_edge"
-
-            team = row.get(team_col)
-            opponent = row.get(opp_col)
-            moneyline = row.get(moneyline_col)
-            predicted_prob = row.get(prob_col)
-            implied_prob = row.get(implied_col)
-            edge = row.get(edge_col)
-            result = row.get("result")
-
-            if result == "tie":
-                won: Optional[bool] = None
-            elif result in ("home", "away"):
-                won = result == side
+        # Check if this is a soccer league (has draw_moneyline)
+        has_draw = pd.notna(row.get("draw_moneyline")) and row.get("draw_moneyline") is not None
+        
+        sides = ["home", "away"]
+        if has_draw:
+            sides.append("draw")
+        
+        for side in sides:
+            if side == "draw":
+                # Handle draw bet
+                team = "Draw"
+                opponent = f"{row.get('home_team')} vs {row.get('away_team')}"
+                moneyline_col = "draw_moneyline"
+                prob_col = "draw_predicted_prob"
+                implied_col = "draw_implied_prob"
+                edge_col = "draw_edge"
+                
+                moneyline = row.get(moneyline_col)
+                predicted_prob = row.get(prob_col)
+                implied_prob = row.get(implied_col)
+                edge = row.get(edge_col)
+                result = row.get("result")
+                
+                # Draw wins if result is "tie"
+                if result == "tie":
+                    won = True
+                elif result in ("home", "away"):
+                    won = False
+                else:
+                    won = None
             else:
-                won = None
+                # Handle home/away bets (existing logic)
+                team_col = f"{side}_team"
+                opp_col = "away_team" if side == "home" else "home_team"
+                moneyline_col = f"{side}_moneyline"
+                prob_col = f"{side}_predicted_prob"
+                implied_col = f"{side}_implied_prob"
+                edge_col = f"{side}_edge"
+
+                team = row.get(team_col)
+                opponent = row.get(opp_col)
+                moneyline = row.get(moneyline_col)
+                predicted_prob = row.get(prob_col)
+                implied_prob = row.get(implied_col)
+                edge = row.get(edge_col)
+                result = row.get("result")
+
+                if result == "tie":
+                    won = False
+                elif result in ("home", "away"):
+                    won = result == side
+                else:
+                    won = None
 
             profit = _bet_profit(float(moneyline) if moneyline is not None else np.nan, stake, won)
 
@@ -252,9 +298,14 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
 
     bets = pd.DataFrame(records)
     if not bets.empty:
-        bets["commence_time"] = _convert_to_display_timezone(_to_datetime(bets["commence_time"]))
-        bets["predicted_at"] = _convert_to_display_timezone(_to_datetime(bets["predicted_at"]))
-        bets["settled_at"] = _convert_to_display_timezone(_to_datetime(bets["settled_at"]))
+        # Convert to datetime but don't convert timezone yet - we'll do that after sorting
+        bets["commence_time"] = _to_datetime(bets["commence_time"])
+        bets["predicted_at"] = _to_datetime(bets["predicted_at"])
+        # Handle settled_at - use result_updated_at if available, otherwise commence_time
+        if "result_updated_at" in bets.columns:
+            bets["settled_at"] = _to_datetime(bets["result_updated_at"])
+        else:
+            bets["settled_at"] = bets["commence_time"].copy()
     return bets
 
 
@@ -389,7 +440,7 @@ def get_performance_over_time(
 
     summary["roi"] = np.where(summary["bets"] > 0, summary["profit"] / (stake * summary["bets"]), np.nan)
     summary["win_rate"] = np.where(summary["bets"] > 0, summary["wins"] / summary["bets"], np.nan)
-    summary["cumulative_profit"] = summary["profit"].cumsum()
+    summary["cumulative_profit"] = summary["profit"].cumsum().round(2)
 
     return summary
 
@@ -404,7 +455,20 @@ def get_recent_predictions(
         return pd.DataFrame()
 
     bets = _expand_predictions(df)
-    bets = bets.sort_values("predicted_at", ascending=False)
+    # Filter out finished games (only show games where won is None/NaN)
+    bets = bets[bets["won"].isna()]
+    
+    # Convert to datetime and sort BEFORE timezone conversion to ensure proper sorting
+    if "commence_time" in bets.columns:
+        # Convert to datetime if not already
+        if not pd.api.types.is_datetime64_any_dtype(bets["commence_time"]):
+            bets["commence_time"] = _to_datetime(bets["commence_time"])
+        # Sort by datetime value (ascending - nearest upcoming first)
+        bets = bets.sort_values("commence_time", ascending=True, na_position='last')
+        # Now convert to display timezone AFTER sorting
+        bets["commence_time"] = _convert_to_display_timezone(bets["commence_time"])
+    else:
+        bets = bets.sort_values("predicted_at", ascending=True, na_position='last')
 
     if edge_threshold is not None:
         bets = bets[bets["edge"].notna() & (bets["edge"] >= edge_threshold)]
@@ -424,7 +488,22 @@ def get_recommended_bets(
     upcoming = bets[bets["won"].isna()]
     upcoming = upcoming[upcoming["edge"].notna() & (upcoming["edge"] >= edge_threshold)]
 
-    return upcoming.sort_values("commence_time")
+    if upcoming.empty:
+        return pd.DataFrame()
+
+    # Prefer the strongest edge per game_id to avoid duplicate rows (e.g., both sides recommended)
+    upcoming = upcoming.sort_values(
+        by=["edge", "commence_time"], ascending=[False, True], na_position="last"
+    )
+
+    if "game_id" in upcoming.columns:
+        upcoming = upcoming.drop_duplicates(subset=["game_id"], keep="first")
+    else:
+        dedupe_cols = [col for col in ["league", "commence_time", "team", "opponent"] if col in upcoming.columns]
+        if dedupe_cols:
+            upcoming = upcoming.drop_duplicates(subset=dedupe_cols, keep="first")
+
+    return upcoming.sort_values("commence_time", ascending=True, na_position="last")
 
 
 def get_performance_by_threshold(
@@ -520,6 +599,11 @@ def get_completed_bets(
                         all_ids_to_check.append(f"NBA_{pred_id}")  # NBA prefixed (as game_id)
                         all_ids_to_check.append(f"NFL_{pred_id}")  # NFL prefixed (as game_id)
                         all_ids_to_check.append(f"CFB_{pred_id}")  # CFB prefixed (as game_id)
+                        all_ids_to_check.append(f"EPL_{pred_id}")  # EPL prefixed (as game_id)
+                        all_ids_to_check.append(f"LALIGA_{pred_id}")  # LALIGA prefixed (as game_id)
+                        all_ids_to_check.append(f"BUNDESLIGA_{pred_id}")  # BUNDESLIGA prefixed (as game_id)
+                        all_ids_to_check.append(f"SERIEA_{pred_id}")  # SERIEA prefixed (as game_id)
+                        all_ids_to_check.append(f"LIGUE1_{pred_id}")  # LIGUE1 prefixed (as game_id)
                     
                     # Query game statuses - check both game_id and odds_api_id
                     # Use all_ids_to_check for game_id check and prediction_game_ids for odds_api_id check
@@ -615,4 +699,3 @@ __all__ = [
     "get_performance_by_threshold",
     "get_upcoming_calendar",
 ]
-

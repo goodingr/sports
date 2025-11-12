@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime
-from pathlib import Path
-from typing import Iterable, List
+import textwrap
+import time
+from datetime import datetime, timedelta
+from json.decoder import JSONDecodeError
+from typing import Iterable, List, Optional
 
 import pandas as pd
 from nba_api.stats.endpoints import leaguegamefinder
+from requests import RequestException
 
 from src.db.loaders import load_schedules
 
@@ -18,22 +21,196 @@ from .config import RAW_DATA_DIR, ensure_directories
 
 LOGGER = logging.getLogger(__name__)
 
+try:  # pragma: no cover - imported for runtime resilience
+    from nba_api.stats.library.http import STATS_HEADERS as NBA_STATS_HEADERS_BASE  # type: ignore
+except Exception:  # pragma: no cover - fallback if import location changes
+    NBA_STATS_HEADERS_BASE = {
+        "Host": "stats.nba.com",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.nba.com/",
+        "Pragma": "no-cache",
+        "Cache-Control": "no-cache",
+    }
+
+NBA_STATS_HEADERS = dict(NBA_STATS_HEADERS_BASE)
+NBA_STATS_HEADERS.update(
+    {
+        "Referer": "https://www.nba.com/stats/",
+        "Origin": "https://www.nba.com",
+        "x-nba-stats-token": "true",
+        "x-nba-stats-origin": "stats",
+    }
+)
+
+_NBA_API_MAX_ATTEMPTS = 4
+_NBA_API_BASE_BACKOFF_SECONDS = 2.0
+
 
 def _season_to_string(season: int) -> str:
     return f"{season}-{str(season + 1)[-2:]}"
 
 
-def _fetch_game_logs(seasons: Iterable[int], season_type: str) -> pd.DataFrame:
+def _format_nba_api_date(value: datetime) -> str:
+    """Convert datetime to NBA stats API date string (MM/DD/YYYY)."""
+    return value.strftime("%m/%d/%Y")
+
+
+def _log_nba_api_failure(
+    finder: leaguegamefinder.LeagueGameFinder | None,
+    season_str: str,
+    attempt: int,
+    attempts: int,
+    error: Exception,
+) -> None:
+    status_code = None
+    response_preview = None
+
+    if finder is not None:
+        response = getattr(finder, "nba_response", None)
+        if response is not None:
+            status_code = getattr(response, "_status_code", None)
+            try:
+                raw_response = response.get_response()
+            except Exception:  # pragma: no cover - best effort logging
+                raw_response = None
+            if raw_response:
+                response_preview = textwrap.shorten(
+                    raw_response.replace("\n", " "),
+                    width=500,
+                    placeholder="…",
+                )
+
+    LOGGER.warning(
+        "NBA stats API returned an invalid payload for %s (attempt %s/%s, status=%s): %s",
+        season_str,
+        attempt,
+        attempts,
+        status_code,
+        error,
+    )
+    if response_preview:
+        LOGGER.debug(
+            "NBA stats raw response preview for %s: %s",
+            season_str,
+            response_preview,
+        )
+
+
+def _get_status_code(finder: leaguegamefinder.LeagueGameFinder | None) -> int | None:
+    """Extract HTTP status code from NBA API response."""
+    if finder is None:
+        return None
+    response = getattr(finder, "nba_response", None)
+    if response is None:
+        return None
+    return getattr(response, "_status_code", None)
+
+
+def _fetch_single_season(
+    season: int,
+    season_type: str,
+    *,
+    attempts: int = _NBA_API_MAX_ATTEMPTS,
+    timeout: int = 30,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> pd.DataFrame:
+    season_str = _season_to_string(season)
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        finder: leaguegamefinder.LeagueGameFinder | None = None
+        try:
+            finder = leaguegamefinder.LeagueGameFinder(
+                league_id_nullable="00",
+                season_nullable=season_str,
+                season_type_nullable=season_type,
+                date_from_nullable=date_from,
+                date_to_nullable=date_to,
+                headers=NBA_STATS_HEADERS,
+                timeout=timeout,
+                get_request=False,
+            )
+            finder.get_request()
+            frames = finder.get_data_frames()
+            if not frames:
+                LOGGER.warning(
+                    "NBA stats API returned no results for %s %s",
+                    season_type,
+                    season_str,
+                )
+                return pd.DataFrame()
+            return frames[0]
+        except (JSONDecodeError, ValueError, IndexError, KeyError) as exc:
+            status_code = _get_status_code(finder)
+            # Handle 403 Forbidden as a non-retryable error - likely season unavailable or API blocked
+            if status_code == 403:
+                LOGGER.warning(
+                    "NBA stats API returned 403 Forbidden for %s %s. "
+                    "This season may not be available or the API may be blocking requests. "
+                    "Skipping this season.",
+                    season_type,
+                    season_str,
+                )
+                return pd.DataFrame()
+            last_error = exc
+            _log_nba_api_failure(finder, season_str, attempt, attempts, exc)
+        except RequestException as exc:  # pragma: no cover - network guard
+            last_error = exc
+            LOGGER.warning(
+                "NBA stats API request failed for %s (attempt %s/%s): %s",
+                season_str,
+                attempt,
+                attempts,
+                exc,
+            )
+
+        if attempt < attempts:
+            sleep_seconds = min(60.0, _NBA_API_BASE_BACKOFF_SECONDS * attempt)
+            LOGGER.info(
+                "Retrying NBA stats API for %s in %.1f seconds (attempt %s/%s)",
+                season_str,
+                sleep_seconds,
+                attempt + 1,
+                attempts,
+            )
+            time.sleep(sleep_seconds)
+
+    error_message = (
+        f"Failed to download NBA {season_type} logs for {season_str} "
+        f"after {attempts} attempts"
+    )
+    if last_error:
+        raise RuntimeError(error_message) from last_error
+    raise RuntimeError(error_message)
+
+
+def _fetch_game_logs(
+    seasons: Iterable[int],
+    season_type: str,
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
     for season in seasons:
         season_str = _season_to_string(season)
         LOGGER.info("Downloading NBA %s data for %s", season_type, season_str)
-        finder = leaguegamefinder.LeagueGameFinder(
-            league_id_nullable="00",
-            season_nullable=season_str,
-            season_type_nullable=season_type,
+        df = _fetch_single_season(
+            season,
+            season_type,
+            date_from=date_from,
+            date_to=date_to,
         )
-        df = finder.get_data_frames()[0]
+        if df.empty:
+            continue
         df["season_year"] = season
         frames.append(df)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -113,9 +290,31 @@ def _to_int_list(seasons: Iterable[int | str]) -> List[int]:
     return parsed
 
 
-def run(seasons: List[int], season_type: str = "Regular Season") -> None:
+def run(
+    seasons: List[int],
+    season_type: str = "Regular Season",
+    *,
+    days_back: Optional[int] = None,
+) -> None:
     ensure_directories()
-    logs = _fetch_game_logs(seasons, season_type)
+    date_from = None
+    date_to = None
+
+    if days_back is not None:
+        if days_back <= 0:
+            raise ValueError("days_back must be positive")
+        utc_now = datetime.utcnow()
+        start_date = utc_now - timedelta(days=days_back)
+        date_from = _format_nba_api_date(start_date)
+        date_to = _format_nba_api_date(utc_now)
+        LOGGER.info(
+            "Limiting NBA results download to %s-%s (last %s days)",
+            date_from,
+            date_to,
+            days_back,
+        )
+
+    logs = _fetch_game_logs(seasons, season_type, date_from=date_from, date_to=date_to)
     games = _transform_to_games(logs)
 
     if games.empty:
@@ -167,4 +366,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

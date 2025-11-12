@@ -24,8 +24,12 @@ Write-Host ""
 
 if ($Remove) {
     Write-Host "Removing scheduled tasks..."
+    schtasks /Delete /TN "Forward Test - Predict" /F 2>$null
+    schtasks /Delete /TN "Forward Test - Update" /F 2>$null
     schtasks /Delete /TN "NBA Forward Test - Predict" /F 2>$null
     schtasks /Delete /TN "NBA Forward Test - Update" /F 2>$null
+    schtasks /Delete /TN "CFB Forward Test - Predict" /F 2>$null
+    schtasks /Delete /TN "CFB Forward Test - Update" /F 2>$null
     Write-Host "[OK] Tasks removed"
     exit 0
 }
@@ -34,41 +38,41 @@ if ($Remove) {
 $PowerShellExe = (Get-Command powershell.exe).Source
 
 # Task 1: Make Predictions (Daily at 6:00 PM EST / 11:00 PM UTC)
-Write-Host "Creating task: Make Predictions (Daily 6:00 PM EST)..."
+Write-Host "Creating task: Forward Test - Predict (Daily 6:00 PM EST)..."
 $predictScript = Join-Path $WorkingDir "scripts\run_forward_test_predict.ps1"
 
 schtasks /Create `
-    /TN "NBA Forward Test - Predict" `
+    /TN "Forward Test - Predict" `
     /TR "$PowerShellExe -ExecutionPolicy Bypass -File `"$predictScript`"" `
     /SC DAILY `
     /ST 23:00 `
     /RU "$env:USERDOMAIN\$env:USERNAME" `
-    /RP "" `
+    /RL HIGHEST `
     /F `
     2>&1 | Out-Null
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "[OK] Task created: NBA Forward Test - Predict"
+    Write-Host "[OK] Task created: Forward Test - Predict"
 } else {
     Write-Host "[X] Failed to create task (may already exist)"
 }
 
 # Task 2: Update Results (Daily at 2:00 AM EST / 7:00 AM UTC)
-Write-Host "Creating task: Update Results (Daily 2:00 AM EST)..."
+Write-Host "Creating task: Forward Test - Update (Daily 2:00 AM EST)..."
 $updateScript = Join-Path $WorkingDir "scripts\run_forward_test_update.ps1"
 
 schtasks /Create `
-    /TN "NBA Forward Test - Update" `
+    /TN "Forward Test - Update" `
     /TR "$PowerShellExe -ExecutionPolicy Bypass -File `"$updateScript`"" `
     /SC DAILY `
     /ST 07:00 `
     /RU "$env:USERDOMAIN\$env:USERNAME" `
-    /RP "" `
+    /RL HIGHEST `
     /F `
     2>&1 | Out-Null
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "[OK] Task created: NBA Forward Test - Update"
+    Write-Host "[OK] Task created: Forward Test - Update"
 } else {
     Write-Host "[X] Failed to create task (may already exist)"
 }
@@ -78,21 +82,21 @@ Write-Host ("=" * 60)
 Write-Host "Setup Complete!"
 Write-Host ("=" * 60)
 Write-Host ""
-Write-Host "Task 1: NBA Forward Test - Predict"
+Write-Host "Task 1: Forward Test - Predict"
 Write-Host "  Schedule: Daily at 11:00 PM UTC (6:00 PM EST)"
-Write-Host "  Action: Makes predictions on live games"
+Write-Host "  Action: Runs predictions for all supported leagues"
 Write-Host ""
-Write-Host "Task 2: NBA Forward Test - Update"
+Write-Host "Task 2: Forward Test - Update"
 Write-Host "  Schedule: Daily at 7:00 AM UTC (2:00 AM EST)"
-Write-Host "  Action: Updates predictions with game results"
+Write-Host "  Action: Refreshes results (and ingests data where available)"
 Write-Host ""
 Write-Host "To verify tasks:"
-Write-Host "  schtasks /Query /TN `"NBA Forward Test - Predict`""
-Write-Host "  schtasks /Query /TN `"NBA Forward Test - Update`""
+Write-Host "  schtasks /Query /TN `"Forward Test - Predict`""
+Write-Host "  schtasks /Query /TN `"Forward Test - Update`""
 Write-Host ""
 Write-Host "To run manually:"
-Write-Host "  schtasks /Run /TN `"NBA Forward Test - Predict`""
-Write-Host "  schtasks /Run /TN `"NBA Forward Test - Update`""
+Write-Host "  schtasks /Run /TN `"Forward Test - Predict`""
+Write-Host "  schtasks /Run /TN `"Forward Test - Update`""
 Write-Host ""
 Write-Host "To remove tasks:"
 Write-Host "  .\scripts\schedule_forward_test_simple.ps1 -Remove"

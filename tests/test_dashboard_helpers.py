@@ -1,0 +1,122 @@
+import pandas as pd
+import pytest
+
+from src.dashboard import data as dashboard_data
+
+
+class DummyConn:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, *_, **__):
+        class Cursor:
+            def fetchall(self_inner):
+                return []
+
+        return Cursor()
+
+
+def test_expand_predictions_marks_ties_as_losses_for_moneyline():
+    df = pd.DataFrame(
+        {
+            'game_id': ['G1'],
+            'commence_time': [pd.Timestamp('2025-11-08T12:30:00Z')],
+            'predicted_at': [pd.Timestamp('2025-11-07T18:00:00Z')],
+            'home_team': ['TOT'],
+            'away_team': ['MUN'],
+            'home_moneyline': [-110],
+            'away_moneyline': [120],
+            'draw_moneyline': [275],
+            'home_predicted_prob': [0.55],
+            'away_predicted_prob': [0.35],
+            'draw_predicted_prob': [0.1],
+            'home_implied_prob': [0.5238],
+            'away_implied_prob': [0.4545],
+            'draw_implied_prob': [0.1818],
+            'home_edge': [0.03],
+            'away_edge': [-0.02],
+            'draw_edge': [0.05],
+            'result': ['tie'],
+            'home_score': [0],
+            'away_score': [0],
+            'result_updated_at': [pd.Timestamp('2025-11-08T15:00:00Z')],
+        }
+    )
+
+    bets = dashboard_data._expand_predictions(df)
+
+    home_row = bets.loc[bets['side'] == 'home'].iloc[0]
+    away_row = bets.loc[bets['side'] == 'away'].iloc[0]
+    draw_row = bets.loc[bets['side'] == 'draw'].iloc[0]
+
+    assert home_row['won'] is False or home_row['won'] == False
+    assert away_row['won'] is False or away_row['won'] == False
+    assert draw_row['won'] is True or draw_row['won'] == True
+
+
+def test_get_completed_bets_filters_by_edge_threshold(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'game_id': ['G1', 'G2'],
+            'commence_time': [
+                pd.Timestamp('2025-11-08T14:00:00Z'),
+                pd.Timestamp('2025-11-08T16:00:00Z'),
+            ],
+            'predicted_at': [pd.Timestamp('2025-11-07T12:00:00Z')]*2,
+            'home_team': ['COMO', 'HAM'],
+            'away_team': ['CAG', 'DOR'],
+            'home_moneyline': [-105, 180],
+            'away_moneyline': [125, -200],
+            'home_predicted_prob': [0.6, 0.4],
+            'away_predicted_prob': [0.4, 0.6],
+            'home_implied_prob': [0.512, 0.357],
+            'away_implied_prob': [0.444, 0.667],
+            'home_edge': [0.12, 0.03],
+            'away_edge': [0.01, 0.18],
+            'result': ['tie', 'away'],
+            'home_score': [0, 1],
+            'away_score': [0, 2],
+            'result_updated_at': [pd.Timestamp('2025-11-08T18:00:00Z')]*2,
+        }
+    )
+
+    monkeypatch.setattr('src.db.core.connect', lambda: DummyConn())
+
+    completed = dashboard_data.get_completed_bets(df, edge_threshold=0.06)
+
+    teams = set(completed['team'])
+    assert 'COMO' in teams
+    assert 'DOR' in teams
+    assert 'HAM' not in teams
+    assert not completed['won'].isna().any()
+
+
+def test_get_recommended_bets_deduplicates_by_game(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'game_id': ['G1'],
+            'commence_time': [pd.Timestamp('2025-11-08T12:30:00Z')],
+            'predicted_at': [pd.Timestamp('2025-11-07T10:00:00Z')],
+            'home_team': ['SUN'],
+            'away_team': ['ARS'],
+            'home_moneyline': [150],
+            'away_moneyline': [-155],
+            'home_predicted_prob': [0.45],
+            'away_predicted_prob': [0.55],
+            'home_implied_prob': [0.4],
+            'away_implied_prob': [0.6],
+            'home_edge': [0.08],
+            'away_edge': [0.12],
+            'result': [None],
+            'home_score': [None],
+            'away_score': [None],
+        }
+    )
+
+    bets = dashboard_data.get_recommended_bets(df, edge_threshold=0.06)
+    assert len(bets) == 1
+    assert bets.iloc[0]['team'] == 'ARS'
+    assert bets.iloc[0]['edge'] == 0.12

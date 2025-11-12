@@ -39,6 +39,28 @@ function Write-Log {
 
 Write-Log "Starting forward test predictions..."
 
+# Discover supported leagues from the Python module so new leagues are picked up automatically
+try {
+    $LeaguesJson = (& poetry run python -c "import json; from src.models.forward_test import SUPPORTED_LEAGUES; print(json.dumps(SUPPORTED_LEAGUES))" 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "ERROR: Failed to discover supported leagues. Output: $LeaguesJson"
+        exit $LASTEXITCODE
+    }
+
+    if ($LeaguesJson -is [System.Array]) {
+        $LeaguesJson = ($LeaguesJson -join "")
+    }
+
+    $Leagues = $LeaguesJson | ConvertFrom-Json
+    if (-not $Leagues) {
+        Write-Log "ERROR: No leagues discovered from forward_test module"
+        exit 1
+    }
+} catch {
+    Write-Log "ERROR: Unable to resolve supported leagues: $_"
+    exit 1
+}
+
 try {
     # Load environment variables
     $EnvFile = Join-Path $WorkingDir ".env"
@@ -52,18 +74,30 @@ try {
         }
     }
 
-    # Run the prediction command
-    $Output = poetry run python -m src.models.forward_test predict --dotenv .env 2>&1
-    
-    Write-Log "Command output:"
-    $Output | ForEach-Object { Write-Log $_ }
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Log "Predictions completed successfully"
+    $OverallExitCode = 0
+
+    foreach ($League in $Leagues) {
+        Write-Log "Running predictions for league: $League"
+
+        $Output = & poetry run python -m src.models.forward_test predict --league $League --dotenv .env 2>&1
+
+        Write-Log "Command output for ${League}:"
+        $Output | ForEach-Object { Write-Log $_ }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "ERROR: Predictions failed for $League with exit code $LASTEXITCODE"
+            $OverallExitCode = $LASTEXITCODE
+        } else {
+            Write-Log "Predictions completed successfully for $League"
+        }
+    }
+
+    if ($OverallExitCode -eq 0) {
+        Write-Log "All league predictions completed successfully"
         exit 0
     } else {
-        Write-Log "ERROR: Predictions failed with exit code $LASTEXITCODE"
-        exit $LASTEXITCODE
+        Write-Log "One or more league predictions failed"
+        exit $OverallExitCode
     }
 } catch {
     Write-Log "ERROR: Exception occurred: $_"

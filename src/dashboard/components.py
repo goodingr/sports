@@ -40,8 +40,34 @@ def _format_datetime(value: Optional[pd.Timestamp]) -> str:
             localized = value.tz_localize(DISPLAY_TIMEZONE)
         else:
             localized = value.tz_convert(DISPLAY_TIMEZONE)
-        tz_name = localized.tzname() or "ET"
-        return f"{localized.strftime('%Y-%m-%d %I:%M %p')} {tz_name}"
+        
+        # Format as "Nov 5 6pm", "Dec 12 8:30pm", "Jan 1 11:45am"
+        month = localized.strftime('%b')  # Nov, Dec, Jan
+        day = str(localized.day)  # 5, 12, 1 (no leading zero)
+        hour = localized.hour
+        minute = localized.minute
+        
+        # Convert to 12-hour format
+        if hour == 0:
+            hour_12 = 12
+            period = 'am'
+        elif hour < 12:
+            hour_12 = hour
+            period = 'am'
+        elif hour == 12:
+            hour_12 = 12
+            period = 'pm'
+        else:
+            hour_12 = hour - 12
+            period = 'pm'
+        
+        # Format time: include minutes only if not :00
+        if minute == 0:
+            time_str = f"{hour_12}{period}"
+        else:
+            time_str = f"{hour_12}:{minute:02d}{period}"
+        
+        return f"{month} {day} {time_str}"
     return str(value)
 
 
@@ -282,7 +308,6 @@ def recent_predictions_table(predictions: pd.DataFrame, *, page_size: int = 20) 
     df = predictions.copy()
     if df.empty:
         df = pd.DataFrame(columns=[
-            "predicted_at",
             "commence_time",
             "team",
             "opponent",
@@ -290,59 +315,38 @@ def recent_predictions_table(predictions: pd.DataFrame, *, page_size: int = 20) 
             "predicted_prob",
             "implied_prob",
             "edge",
-            "result",
-            "won",
         ])
 
-    df["predicted_at"] = df["predicted_at"].apply(_format_datetime)
+    # Sort by datetime BEFORE formatting to ensure proper date ordering
+    if "commence_time" in df.columns and not df.empty:
+        # Check if commence_time is still a datetime (not already formatted)
+        if pd.api.types.is_datetime64_any_dtype(df["commence_time"]):
+            df = df.sort_values("commence_time", ascending=False, na_position='last')
+        elif df["commence_time"].dtype == 'object':
+            # Try to convert back to datetime for sorting if it's a string
+            try:
+                df["_sort_time"] = pd.to_datetime(df["commence_time"], errors='coerce')
+                df = df.sort_values("_sort_time", ascending=False, na_position='last')
+                df = df.drop(columns=["_sort_time"])
+            except Exception:
+                pass  # If conversion fails, keep original order
+
+    # Now format the datetime column for display
     df["commence_time"] = df["commence_time"].apply(_format_datetime)
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    
-    # Create winner column - show which team won instead of home/away
-    def get_winner(row):
-        result = row.get("result")
-        if pd.isna(result) or result is None:
-            return ""
-        if result == "tie":
-            return "Tie"
-        if result == "home":
-            # Need to check if this bet is for home or away team
-            # If result is "home", the home team won
-            # But we need to know which team is home - this is tricky without the original game data
-            # For now, show the result but indicate it's home team
-            return f"{row.get('team', 'Home')} (Home)" if row.get("side") == "home" else "Opponent (Home)"
-        elif result == "away":
-            return f"{row.get('team', 'Away')} (Away)" if row.get("side") == "away" else "Opponent (Away)"
-        return "—"
-    
-    # Better approach: if we have won column, use that
-    if "won" in df.columns:
-        def get_winner_from_won(row):
-            if pd.isna(row.get("won")):
-                return ""
-            if row.get("won") is True:
-                return row.get("team", "—")
-            elif row.get("won") is False:
-                return row.get("opponent", "—")
-            return ""
-        df["winner"] = df.apply(get_winner_from_won, axis=1)
-    else:
-        df["winner"] = df.apply(get_winner, axis=1)
 
     columns = [
-        {"name": "Predicted", "id": "predicted_at"},
-        {"name": "Commence", "id": "commence_time"},
+        {"name": "Start Date", "id": "commence_time", "sortable": False},  # Disable sorting on formatted date
         {"name": "Team", "id": "team"},
         {"name": "Opponent", "id": "opponent"},
         {"name": "Moneyline", "id": "moneyline"},
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Impl Prob", "id": "implied_prob"},
         {"name": "Edge", "id": "edge"},
-        {"name": "Winner", "id": "winner"},
     ]
-
+    
     return dash_table.DataTable(
         columns=columns,
         data=df.to_dict("records"),
@@ -358,10 +362,11 @@ def recent_predictions_table(predictions: pd.DataFrame, *, page_size: int = 20) 
 def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df = recommended.copy()
     if df.empty:
-        df = pd.DataFrame(columns=["commence_time", "team", "opponent", "moneyline", "predicted_prob", "edge"])
+        df = pd.DataFrame(columns=["commence_time", "team", "opponent", "moneyline", "predicted_prob", "implied_prob", "edge"])
 
     df["commence_time"] = df["commence_time"].apply(_format_datetime)
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
 
     columns = [
@@ -370,6 +375,7 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
         {"name": "Opponent", "id": "opponent"},
         {"name": "Moneyline", "id": "moneyline"},
         {"name": "Pred Prob", "id": "predicted_prob"},
+        {"name": "Impl Prob", "id": "implied_prob"},
         {"name": "Edge", "id": "edge"},
     ]
 

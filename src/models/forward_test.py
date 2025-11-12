@@ -3,13 +3,15 @@ import argparse
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import joblib
 import numpy as np
 import pandas as pd
+import requests
+from zoneinfo import ZoneInfo
 
 from src.data.config import OddsAPISettings
 from src.data.ingest_odds import fetch_odds
@@ -30,6 +32,17 @@ SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "CFB", "EPL", "LALIGA", "BUNDESLIG
 # Soccer leagues use three-way markets (home/draw/away)
 SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
 
+LEAGUE_SPORT_KEYS: Dict[str, str] = {
+    "NBA": "basketball_nba",
+    "NFL": "americanfootball_nfl",
+    "CFB": "americanfootball_ncaaf",
+    "EPL": "soccer_epl",
+    "LALIGA": "soccer_spain_la_liga",
+    "BUNDESLIGA": "soccer_germany_bundesliga",
+    "SERIEA": "soccer_italy_serie_a",
+    "LIGUE1": "soccer_france_ligue_1",
+}
+
 FORWARD_TEST_DIR = Path("data/forward_test")
 FORWARD_TEST_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +50,17 @@ MODEL_REGISTRY_PATH = Path("models") / "model_registry.json"
 DEFAULT_REST_DAYS = 7.0
 SHORT_WEEK_THRESHOLD = 5.0
 BYE_THRESHOLD = 10.0
+ESPN_CFB_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+EASTERN_TZ = ZoneInfo("America/New_York")
+
+
+def _get_sport_key(league: str) -> str:
+    try:
+        return LEAGUE_SPORT_KEYS[league.upper()]
+    except KeyError as exc:  # pragma: no cover - defensive guard
+        raise ValueError(
+            f"Unknown league: {league}. Must be one of {', '.join(sorted(LEAGUE_SPORT_KEYS))}."
+        ) from exc
 
 
 def _estimate_rest_days(commence_time: Optional[str], *, travel_penalty: float = 0.0) -> float:
@@ -201,26 +225,7 @@ def load_model(model_path: Optional[Path] = None, league: str = "NBA") -> object
 def fetch_live_games(league: str = "NBA", dotenv_path: Optional[Path] = None) -> List[Dict]:
     """Fetch current/upcoming games with odds for the specified league."""
     league_upper = league.upper()
-    if league_upper == "NBA":
-        sport_key = "basketball_nba"
-    elif league_upper == "NFL":
-        sport_key = "americanfootball_nfl"
-    elif league_upper == "CFB":
-        sport_key = "americanfootball_ncaaf"
-    elif league_upper == "EPL":
-        sport_key = "soccer_epl"
-    elif league_upper == "LALIGA":
-        sport_key = "soccer_spain_la_liga"
-    elif league_upper == "BUNDESLIGA":
-        sport_key = "soccer_germany_bundesliga"
-    elif league_upper == "SERIEA":
-        sport_key = "soccer_italy_serie_a"
-    elif league_upper == "LIGUE1":
-        sport_key = "soccer_france_ligue_1"
-    else:
-        raise ValueError(
-            f"Unknown league: {league}. Must be NBA, NFL, CFB, EPL, LALIGA, BUNDESLIGA, SERIEA, or LIGUE1."
-        )
+    sport_key = _get_sport_key(league_upper)
     
     LOGGER.info("Fetching live %s games with odds...", league_upper)
     try:
@@ -670,8 +675,25 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
             X = features_df[model_features]
             
             proba = model.predict_proba(X)
-            home_prob = proba[0, 1]
-            away_prob = proba[1, 1]
+
+            def _normalize_prob(value: float | int | None) -> Optional[float]:
+                if value is None:
+                    return None
+                try:
+                    as_float = float(value)
+                except (TypeError, ValueError):
+                    return None
+                if np.isnan(as_float):
+                    return None
+                return max(0.0, min(1.0, as_float))
+
+            home_prob = _normalize_prob(proba[0, 1])
+            away_prob_raw = _normalize_prob(proba[1, 1])
+
+            if not is_soccer and home_prob is not None:
+                away_prob = _normalize_prob(1.0 - home_prob)
+            else:
+                away_prob = away_prob_raw
             draw_prob = None  # Will be calculated for soccer below
             
             # Normalize probabilities to sum to 1.0 for two-way markets
@@ -899,7 +921,129 @@ def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None)
     return predictions_path
 
 
-def update_results() -> None:
+def _fetch_recent_scores(
+    league: str,
+    *,
+    days_from: int = 5,
+    dotenv_path: Optional[Path] = None,
+) -> Dict[str, Tuple[int, int]]:
+    """Fetch recently completed scores for the given league."""
+    try:
+        settings = OddsAPISettings.from_env(dotenv_path)
+    except RuntimeError as exc:
+        LOGGER.warning("Unable to load Odds API settings for %s scores: %s", league, exc)
+        return {}
+
+    sport_key = _get_sport_key(league)
+    url = f"{settings.base_url}/sports/{sport_key}/scores/"
+    params = {"apiKey": settings.api_key, "daysFrom": min(max(1, days_from), 3)}
+
+    try:
+        response = requests.get(url, params=params, timeout=20)
+        response.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - defensive network guard
+        LOGGER.warning("Failed to fetch %s scores from The Odds API: %s", league, exc)
+        return {}
+
+    results: Dict[str, Tuple[int, int]] = {}
+    for event in response.json() or []:
+        if not event.get("completed"):
+            continue
+        event_id = event.get("id")
+        if not event_id:
+            continue
+
+        scores = event.get("scores") or []
+        home_score = None
+        away_score = None
+        for entry in scores:
+            name = entry.get("name")
+            score_value = entry.get("score")
+            if name is None or score_value is None:
+                continue
+            try:
+                parsed_score = int(score_value)
+            except (TypeError, ValueError):
+                continue
+            if name == event.get("home_team"):
+                home_score = parsed_score
+            elif name == event.get("away_team"):
+                away_score = parsed_score
+
+        if home_score is None or away_score is None:
+            if len(scores) == 2:
+                try:
+                    home_score = int(scores[0].get("score"))
+                    away_score = int(scores[1].get("score"))
+                except (TypeError, ValueError):
+                    continue
+            else:
+                continue
+
+        results[str(event_id)] = (home_score, away_score)
+
+    return results
+
+
+def _fetch_espn_cfb_scores(dates: Iterable[date]) -> Dict[Tuple[str, str, date], Tuple[int, int]]:
+    """Fetch final CFB scores from ESPN scoreboard for specific dates."""
+    unique_dates = sorted({d for d in dates if d is not None})
+    if not unique_dates:
+        return {}
+
+    results: Dict[Tuple[str, str, date], Tuple[int, int]] = {}
+    for target_date in unique_dates:
+        params = {"dates": target_date.strftime("%Y%m%d")}
+        try:
+            response = requests.get(ESPN_CFB_SCOREBOARD_URL, params=params, timeout=20)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network guard
+            LOGGER.warning("Failed to fetch ESPN CFB scores for %s: %s", target_date, exc)
+            continue
+
+        payload = response.json()
+        for event in payload.get("events", []):
+            competitions = event.get("competitions") or []
+            if not competitions:
+                continue
+            competition = competitions[0]
+            status_state = competition.get("status", {}).get("type", {}).get("state")
+            if status_state != "post":
+                continue
+
+            competitors = competition.get("competitors") or []
+            if len(competitors) != 2:
+                continue
+
+            home_comp = next((c for c in competitors if c.get("homeAway") == "home"), None)
+            away_comp = next((c for c in competitors if c.get("homeAway") == "away"), None)
+            if not home_comp or not away_comp:
+                continue
+
+            try:
+                home_score = int(home_comp.get("score"))
+                away_score = int(away_comp.get("score"))
+            except (TypeError, ValueError):
+                continue
+
+            home_name = home_comp.get("team", {}).get("displayName", "")
+            away_name = away_comp.get("team", {}).get("displayName", "")
+            home_code = normalize_team_code("CFB", home_name)
+            away_code = normalize_team_code("CFB", away_name)
+            if not home_code or not away_code:
+                continue
+
+            key = (home_code.upper(), away_code.upper(), target_date)
+            results[key] = (home_score, away_score)
+
+    return results
+
+
+def update_results(
+    *,
+    league: Optional[str] = None,
+    dotenv_path: Optional[Path] = None,
+) -> None:
     """Update forward test predictions with actual game results."""
     master_path = FORWARD_TEST_DIR / "predictions_master.parquet"
     if not master_path.exists():
@@ -917,6 +1061,20 @@ def update_results() -> None:
     else:
         predictions["commence_time"] = pd.NaT
 
+    league_upper = league.upper() if league else None
+    if league_upper and "league" in predictions.columns:
+        target_mask = predictions["league"].astype(str).str.upper() == league_upper
+    elif league_upper:
+        LOGGER.warning("Predictions file missing league column; updating all leagues instead of %s", league_upper)
+        target_mask = pd.Series(True, index=predictions.index)
+    else:
+        target_mask = pd.Series(True, index=predictions.index)
+
+    target_predictions = predictions.loc[target_mask].copy()
+    if target_predictions.empty:
+        LOGGER.info("No predictions found for league %s", league_upper or "ALL")
+        return
+
     save_required = False
 
     def _clear_result(index: int) -> None:
@@ -927,15 +1085,15 @@ def update_results() -> None:
             save_required = True
 
     # Clear any results that were accidentally recorded for future games
-    if "result" in predictions.columns:
+    if "result" in target_predictions.columns:
         future_results_mask = (
-            predictions["commence_time"].notna()
-            & (predictions["commence_time"] > now)
-            & predictions["result"].notna()
+            target_predictions["commence_time"].notna()
+            & (target_predictions["commence_time"] > now)
+            & target_predictions["result"].notna()
         )
         if future_results_mask.any():
             LOGGER.info("Clearing results for %d future games", future_results_mask.sum())
-            for idx in predictions[future_results_mask].index:
+            for idx in target_predictions[future_results_mask].index:
                 _clear_result(idx)
 
     def _find_final_score(row: pd.Series, conn) -> Optional[Tuple[int, int]]:
@@ -1060,24 +1218,51 @@ def update_results() -> None:
 
         return None
 
+    # Build quick lookup of recently completed scores per league via The Odds API
+    if league_upper:
+        leagues_to_check = [league_upper]
+    elif "league" in target_predictions.columns:
+        leagues_to_check = sorted(
+            {str(value).upper() for value in target_predictions["league"].dropna().unique() if str(value)}
+        )
+    else:
+        leagues_to_check = sorted(SUPPORTED_LEAGUES)
+
+    score_lookup: Dict[str, Tuple[int, int]] = {}
+    for league_code in leagues_to_check:
+        fetched_scores = _fetch_recent_scores(league_code, days_from=7, dotenv_path=dotenv_path)
+        if fetched_scores:
+            score_lookup.update(fetched_scores)
+
     with connect() as conn:
         # Re-validate recent games that already have results to ensure they are confirmed
-        if "result" in predictions.columns:
+        if "result" in target_predictions.columns:
             recent_mask = (
-                predictions["result"].notna()
-                & predictions["commence_time"].notna()
-                & (predictions["commence_time"] > now - pd.Timedelta(hours=6))
+                target_predictions["result"].notna()
+                & target_predictions["commence_time"].notna()
+                & (target_predictions["commence_time"] > now - pd.Timedelta(hours=6))
             )
             if recent_mask.any():
-                for idx, row in predictions.loc[recent_mask].iterrows():
+                for idx, row in target_predictions.loc[recent_mask].iterrows():
                     if not _find_final_score(row, conn):
                         LOGGER.info("Clearing result for %s (not confirmed in DB)", row.get("game_id"))
                         _clear_result(idx)
 
         # Find predictions without results (only games that have already started)
-        incomplete = predictions[predictions["result"].isna()].copy()
+        incomplete = target_predictions[target_predictions["result"].isna()].copy()
         if "commence_time" in incomplete.columns:
             incomplete = incomplete[incomplete["commence_time"].notna() & (incomplete["commence_time"] <= now)].copy()
+
+        espn_cfb_scores: Dict[Tuple[str, str, date], Tuple[int, int]] = {}
+        if league_upper == "CFB" and not incomplete.empty and "commence_time" in incomplete.columns:
+            cfb_dates: List[date] = []
+            for ts in incomplete["commence_time"].dropna():
+                try:
+                    local_date = ts.tz_convert(EASTERN_TZ).date()
+                except Exception:
+                    local_date = ts.date()
+                cfb_dates.append(local_date)
+            espn_cfb_scores = _fetch_espn_cfb_scores(cfb_dates)
 
         if len(incomplete) == 0:
             if save_required:
@@ -1086,10 +1271,42 @@ def update_results() -> None:
             LOGGER.info("All predictions already have results")
             return
 
-        LOGGER.info("Checking %d predictions for results", len(incomplete))
+        LOGGER.info(
+            "Checking %d predictions for results%s",
+            len(incomplete),
+            f" ({league_upper})" if league_upper else "",
+        )
 
         for idx, row in incomplete.iterrows():
+            game_id = row.get("game_id")
+            if game_id and score_lookup:
+                score_pair = score_lookup.get(str(game_id))
+            else:
+                score_pair = None
+
+            if score_pair:
+                home_score, away_score = score_pair
+                result_str = "home" if home_score > away_score else "away" if away_score > home_score else "tie"
+                predictions.at[idx, "home_score"] = home_score
+                predictions.at[idx, "away_score"] = away_score
+                predictions.at[idx, "result"] = result_str
+                predictions.at[idx, "result_updated_at"] = datetime.now(timezone.utc).isoformat()
+                save_required = True
+                continue
+
             match = _find_final_score(row, conn)
+
+            if not match and league_upper == "CFB" and espn_cfb_scores:
+                ts = row.get("commence_time")
+                if ts is not None and not pd.isna(ts):
+                    try:
+                        local_date = ts.tz_convert(EASTERN_TZ).date()
+                    except Exception:
+                        local_date = ts.date()
+                    home_code = str(row.get("home_team") or "").upper()
+                    away_code = str(row.get("away_team") or "").upper()
+                    match = espn_cfb_scores.get((home_code, away_code, local_date))
+
             if not match:
                 continue
             home_score, away_score = match
@@ -1221,9 +1438,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--league",
-        choices=SUPPORTED_LEAGUES,
+        choices=SUPPORTED_LEAGUES + ["ALL"],
         default=SUPPORTED_LEAGUES[0],
-        help="League to use (default: NBA)",
+        help="League to use (default: NBA). Specify ALL to process every league.",
     )
     parser.add_argument(
         "--model",
@@ -1288,7 +1505,8 @@ def main() -> None:
             LOGGER.info("No bets meet edge threshold of %.2f", edge_threshold)
     
     elif args.action == "update":
-        update_results()
+        target_league = None if args.league == "ALL" else args.league
+        update_results(league=target_league, dotenv_path=args.dotenv)
     
     elif args.action == "report":
         report = generate_report(league=args.league)
