@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
+
+DEFAULT_HOST="0.0.0.0"
+DEFAULT_PORT="8050"
+DEBUG=0
+HOST="$DEFAULT_HOST"
+PORT="$DEFAULT_PORT"
+PASSTHROUGH=()
+
+print_help() {
+  cat <<'EOF'
+Run the Dash-based forward testing dashboard.
+
+Usage:
+  ./run_dashboard [--host 0.0.0.0] [--port 8050] [--debug] [--] [extra dash args]
+
+Options:
+  --host <value>   Host/interface to bind (default: 0.0.0.0)
+  --port <value>   Port to serve from (default: 8050)
+  --debug          Enable Dash debug/reload mode
+  --no-debug       Disable debug mode if enabled by env/config
+  -h, --help       Show this help text
+  --                Pass remaining flags directly to src.dashboard
+
+All additional arguments after `--` are forwarded to `python -m src.dashboard`.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      HOST="$2"
+      shift 2
+      ;;
+    --port)
+      PORT="$2"
+      shift 2
+      ;;
+    --debug)
+      DEBUG=1
+      shift
+      ;;
+    --no-debug)
+      DEBUG=0
+      shift
+      ;;
+    -h|--help)
+      print_help
+      exit 0
+      ;;
+    --)
+      shift
+      PASSTHROUGH+=("$@")
+      break
+      ;;
+    *)
+      PASSTHROUGH+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if ! command -v poetry >/dev/null 2>&1; then
+  echo "Poetry is required. Install it from https://python-poetry.org/docs/ or adjust PATH." >&2
+  exit 1
+fi
+
+PREDICTIONS_FILE="data/forward_test/predictions_master.parquet"
+if [[ ! -f "$PREDICTIONS_FILE" ]]; then
+  echo "Warning: $PREDICTIONS_FILE not found. The dashboard will start but show empty metrics." >&2
+fi
+
+CMD=(poetry run python -m src.dashboard --host "$HOST" --port "$PORT")
+if [[ "$DEBUG" -eq 1 ]]; then
+  CMD+=("--debug")
+fi
+CMD+=("${PASSTHROUGH[@]}")
+
+echo "Running: ${CMD[*]}"
+exec "${CMD[@]}"

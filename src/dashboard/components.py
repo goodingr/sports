@@ -524,6 +524,138 @@ def empty_state(message: str) -> html.Div:
     )
 
 
+def prediction_summary(stats: PredictionComparisonStats) -> dbc.Row:
+    cards = [
+        dbc.Col(metric_card("Games", _format_number(stats.total_games), color="primary"), md=2),
+        dbc.Col(
+            metric_card(
+                "Agreement Rate",
+                _format_percent(stats.agreement_rate),
+                subtitle="Our vs. sportsbook picks",
+                color="info",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "We Beat Books",
+                _format_number(stats.we_right_books_wrong),
+                subtitle="Our pick correct, books wrong",
+                color="success",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "Books Beat Us",
+                _format_number(stats.books_right_we_wrong),
+                subtitle="Books correct, our pick wrong",
+                color="danger",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "Both Correct",
+                _format_number(stats.both_correct),
+                color="success",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "Both Wrong / Pending",
+                f"{_format_number(stats.both_wrong)} / {_format_number(stats.pending)}",
+                color="secondary",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "Our Accuracy",
+                _format_percent(stats.our_accuracy),
+                subtitle="Completed games",
+                color="primary",
+            ),
+            md=2,
+        ),
+        dbc.Col(
+            metric_card(
+                "Books Accuracy",
+                _format_percent(stats.book_accuracy),
+                subtitle="Completed games",
+                color="dark",
+            ),
+            md=2,
+        ),
+    ]
+    return dbc.Row(cards, className="g-3")
+
+
+def prediction_comparison_table(predictions: pd.DataFrame):
+    if predictions.empty:
+        return empty_state("No predictions available for the selected filters.")
+
+    display = predictions.copy()
+    display["commence_display"] = display["commence_time"].apply(_format_datetime)
+    display["matchup"] = display.apply(
+        lambda row: f"{row.get('away_team') or '?'} @ {row.get('home_team') or '?'}", axis=1
+    )
+    display["our_pick_display"] = display.apply(
+        lambda row: f"{row.get('our_pick_team') or '—'} ({_format_percent(row.get('our_pick_prob'))})",
+        axis=1,
+    )
+    display["book_pick_display"] = display.apply(
+        lambda row: f"{row.get('book_pick_team') or '—'} ({_format_percent(row.get('book_pick_prob'))})",
+        axis=1,
+    )
+    display["agreement_display"] = display["agreement"].apply(lambda val: "Yes" if val else "No")
+    display["actual_display"] = display.apply(
+        lambda row: row.get("actual_winner_team") or "Pending",
+        axis=1,
+    )
+    display["prob_gap_display"] = display["probability_gap"].apply(
+        lambda gap: f"{gap * 100:+.1f} pp" if gap is not None and not pd.isna(gap) else "—"
+    )
+
+    columns = [
+        {"name": "Commence (ET)", "id": "commence_display"},
+        {"name": "League", "id": "league"},
+        {"name": "Matchup", "id": "matchup"},
+        {"name": "Our Pick", "id": "our_pick_display"},
+        {"name": "Sportsbook Pick", "id": "book_pick_display"},
+        {"name": "Agree?", "id": "agreement_display"},
+        {"name": "Outcome", "id": "comparison_outcome"},
+        {"name": "Actual Result", "id": "actual_display"},
+        {"name": "Prob Gap", "id": "prob_gap_display"},
+    ]
+
+    data = display[
+        [
+            "commence_display",
+            "league",
+            "matchup",
+            "our_pick_display",
+            "book_pick_display",
+            "agreement_display",
+            "comparison_outcome",
+            "actual_display",
+            "prob_gap_display",
+        ]
+    ].to_dict("records")
+
+    return dash_table.DataTable(
+        columns=columns,
+        data=data,
+        page_size=25,
+        sort_action="native",
+        filter_action="none",
+        style_table={"overflowX": "auto"},
+        style_cell={"textAlign": "left", "padding": "0.5rem"},
+        style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
+    )
+
+
 __all__ = [
     "metric_card",
     "summary_cards",
@@ -539,5 +671,7 @@ __all__ = [
     "completed_bets_table",
     "calendar_table",
     "empty_state",
+    "prediction_summary",
+    "prediction_comparison_table",
 ]
 

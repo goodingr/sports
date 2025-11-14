@@ -275,6 +275,17 @@ epl:
     params:
       leagues: ["EPL"]
 
+  - key: understat_match_payloads_epl
+    name: "Understat match payloads (EPL)"
+    category: lineups
+    url: "https://understat.com/"
+    handler: "src.data.sources.understat_match_payloads:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "soccer/understat_matches"
+    params:
+      leagues: ["EPL"]
+
 laliga:
   - key: espn_odds_laliga
     name: "ESPN La Liga odds"
@@ -297,6 +308,17 @@ laliga:
     run_mode: bootstrap
     storage_subdir: "laliga/soccer_database"
     notes: "Historical La Liga matches from database.sqlite (2008-2016). Includes betting odds from multiple providers."
+    params:
+      leagues: ["LALIGA"]
+
+  - key: understat_match_payloads_laliga
+    name: "Understat match payloads (La Liga)"
+    category: lineups
+    url: "https://understat.com/"
+    handler: "src.data.sources.understat_match_payloads:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "soccer/understat_matches"
     params:
       leagues: ["LALIGA"]
 
@@ -325,6 +347,17 @@ bundesliga:
     params:
       leagues: ["BUNDESLIGA"]
 
+  - key: understat_match_payloads_bundesliga
+    name: "Understat match payloads (Bundesliga)"
+    category: lineups
+    url: "https://understat.com/"
+    handler: "src.data.sources.understat_match_payloads:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "soccer/understat_matches"
+    params:
+      leagues: ["BUNDESLIGA"]
+
 seriea:
   - key: espn_odds_seriea
     name: "ESPN Serie A odds"
@@ -350,6 +383,17 @@ seriea:
     params:
       leagues: ["SERIEA"]
 
+  - key: understat_match_payloads_seriea
+    name: "Understat match payloads (Serie A)"
+    category: lineups
+    url: "https://understat.com/"
+    handler: "src.data.sources.understat_match_payloads:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "soccer/understat_matches"
+    params:
+      leagues: ["SERIEA"]
+
 ligue1:
   - key: espn_odds_ligue1
     name: "ESPN Ligue 1 odds"
@@ -372,5 +416,16 @@ ligue1:
     run_mode: bootstrap
     storage_subdir: "ligue1/soccer_database"
     notes: "Historical Ligue 1 matches from database.sqlite (2008-2016). Includes betting odds from multiple providers."
+    params:
+      leagues: ["LIGUE1"]
+
+  - key: understat_match_payloads_ligue1
+    name: "Understat match payloads (Ligue 1)"
+    category: lineups
+    url: "https://understat.com/"
+    handler: "src.data.sources.understat_match_payloads:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "soccer/understat_matches"
     params:
       leagues: ["LIGUE1"]

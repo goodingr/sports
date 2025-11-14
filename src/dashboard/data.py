@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple, Dict
 
 try:
     from zoneinfo import ZoneInfo
@@ -43,6 +43,19 @@ class SummaryMetrics:
     current_bankroll: float
     total_staked: float
     bankroll_growth: Optional[float]
+
+
+@dataclass(frozen=True)
+class PredictionComparisonStats:
+    total_games: int
+    agreement_rate: Optional[float]
+    we_right_books_wrong: int
+    books_right_we_wrong: int
+    both_correct: int
+    both_wrong: int
+    pending: int
+    our_accuracy: Optional[float]
+    book_accuracy: Optional[float]
 
 
 def _to_datetime(series: pd.Series) -> pd.Series:
@@ -161,6 +174,14 @@ def _american_to_decimal(ml: float) -> float:
     if ml > 0:
         return 1.0 + (ml / 100.0)
     return 1.0 + (100.0 / abs(ml))
+
+
+def _american_to_probability(ml: Optional[float]) -> float:
+    if ml is None or (isinstance(ml, float) and np.isnan(ml)) or ml == 0:
+        return np.nan
+    if ml > 0:
+        return 100.0 / (ml + 100.0)
+    return abs(ml) / (abs(ml) + 100.0)
 
 
 def _bet_profit(ml: float, stake: float, won: Optional[bool]) -> float:
@@ -684,8 +705,191 @@ def get_upcoming_calendar(
     return bets[["date", "team", "opponent", "edge", "commence_time", "moneyline"]]
 
 
+def _select_best_option(options: Dict[str, Tuple[Optional[float], Optional[str]]]) -> Tuple[Optional[str], Optional[str], Optional[float]]:
+    best_side = None
+    best_label = None
+    best_prob = None
+    for side, (prob, label) in options.items():
+        if prob is None or (isinstance(prob, float) and np.isnan(prob)):
+            continue
+        if best_prob is None or prob > best_prob:
+            best_side = side
+            best_label = label
+            best_prob = prob
+    return best_side, best_label, best_prob
+
+
+def build_prediction_comparison(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    records: list[dict[str, object]] = []
+
+    for _, row in df.iterrows():
+        league = str(row.get("league") or "").upper()
+        is_soccer = league in {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
+
+        side_info: Dict[str, Dict[str, object]] = {
+            "home": {
+                "team": row.get("home_team"),
+                "pred_prob": row.get("home_predicted_prob"),
+                "implied_prob": row.get("home_implied_prob"),
+                "moneyline": row.get("home_moneyline"),
+            },
+            "away": {
+                "team": row.get("away_team"),
+                "pred_prob": row.get("away_predicted_prob"),
+                "implied_prob": row.get("away_implied_prob"),
+                "moneyline": row.get("away_moneyline"),
+            },
+        }
+
+        if is_soccer and "draw_predicted_prob" in row.index:
+            side_info["draw"] = {
+                "team": "Draw",
+                "pred_prob": row.get("draw_predicted_prob"),
+                "implied_prob": row.get("draw_implied_prob"),
+                "moneyline": row.get("draw_moneyline"),
+            }
+
+        our_options = {
+            side: (info.get("pred_prob"), info.get("team") or side.title())
+            for side, info in side_info.items()
+        }
+        our_side, our_team, our_prob = _select_best_option(our_options)
+
+        sportsbook_probabilities: Dict[str, Tuple[Optional[float], Optional[str]]] = {}
+        for side, info in side_info.items():
+            implied = info.get("implied_prob")
+            if implied is None or (isinstance(implied, float) and np.isnan(implied)):
+                implied = _american_to_probability(info.get("moneyline"))
+            sportsbook_probabilities[side] = (implied, info.get("team") or side.title())
+
+        book_side, book_team, book_prob = _select_best_option(sportsbook_probabilities)
+
+        actual_side_raw = str(row.get("result") or "").lower()
+        actual_side = None
+        if actual_side_raw in {"home", "away"}:
+            actual_side = actual_side_raw
+        elif actual_side_raw in {"tie", "draw"}:
+            actual_side = "draw"
+
+        def _team_for_side(side: Optional[str]) -> Optional[str]:
+            if side is None:
+                return None
+            if side == "home":
+                return row.get("home_team")
+            if side == "away":
+                return row.get("away_team")
+            if side == "draw":
+                return "Draw"
+            return None
+
+        actual_team = _team_for_side(actual_side)
+
+        book_probs_by_side = {side: prob for side, (prob, _) in sportsbook_probabilities.items()}
+        gap = np.nan
+        if our_side:
+            gap = (our_prob if our_prob is not None else np.nan) - (
+                book_probs_by_side.get(our_side) if book_probs_by_side.get(our_side) is not None else np.nan
+            )
+
+        our_correct = actual_side is not None and our_side == actual_side
+        book_correct = actual_side is not None and book_side == actual_side
+        agreement = bool(our_side and book_side and our_side == book_side)
+
+        if actual_side is None:
+            outcome = "Pending"
+        elif our_correct and not book_correct:
+            outcome = "We beat the books"
+        elif book_correct and not our_correct:
+            outcome = "Books beat us"
+        elif our_correct and book_correct:
+            outcome = "Both correct"
+        else:
+            outcome = "Both wrong"
+
+        records.append(
+            {
+                "game_id": row.get("game_id"),
+                "league": league or None,
+                "commence_time": row.get("commence_time"),
+                "home_team": row.get("home_team"),
+                "away_team": row.get("away_team"),
+                "our_pick_side": our_side,
+                "our_pick_team": our_team,
+                "our_pick_prob": our_prob,
+                "book_pick_side": book_side,
+                "book_pick_team": book_team,
+                "book_pick_prob": book_prob,
+                "agreement": agreement,
+                "actual_winner_side": actual_side,
+                "actual_winner_team": actual_team,
+                "our_correct": our_correct if actual_side is not None else None,
+                "book_correct": book_correct if actual_side is not None else None,
+                "comparison_outcome": outcome,
+                "probability_gap": gap,
+            }
+        )
+
+    comparison_df = pd.DataFrame.from_records(records)
+    if "commence_time" in comparison_df.columns:
+        comparison_df = comparison_df.sort_values("commence_time", ascending=True)
+    return comparison_df
+
+
+def summarize_prediction_comparison(df: pd.DataFrame) -> PredictionComparisonStats:
+    if df.empty:
+        return PredictionComparisonStats(
+            total_games=0,
+            agreement_rate=None,
+            we_right_books_wrong=0,
+            books_right_we_wrong=0,
+            both_correct=0,
+            both_wrong=0,
+            pending=0,
+            our_accuracy=None,
+            book_accuracy=None,
+        )
+
+    agreement_rate = float(df["agreement"].mean()) if "agreement" in df.columns else None
+    completed = df[df["actual_winner_side"].notna()] if "actual_winner_side" in df.columns else pd.DataFrame()
+    pending = len(df) - len(completed)
+    completed_total = len(completed)
+
+    def _count(mask: pd.Series) -> int:
+        if completed.empty:
+            return 0
+        return int(mask.sum())
+
+    we_right_books_wrong = _count((completed["our_correct"] == True) & (completed["book_correct"] != True))  # noqa: E712
+    books_right_we_wrong = _count((completed["book_correct"] == True) & (completed["our_correct"] != True))  # noqa: E712
+    both_correct = _count((completed["our_correct"] == True) & (completed["book_correct"] == True))  # noqa: E712
+    both_wrong = _count((completed["our_correct"] == False) & (completed["book_correct"] == False))  # noqa: E712
+
+    if completed_total > 0:
+        our_accuracy = float((completed["our_correct"] == True).mean())  # noqa: E712
+        book_accuracy = float((completed["book_correct"] == True).mean())  # noqa: E712
+    else:
+        our_accuracy = None
+        book_accuracy = None
+
+    return PredictionComparisonStats(
+        total_games=len(df),
+        agreement_rate=agreement_rate,
+        we_right_books_wrong=we_right_books_wrong,
+        books_right_we_wrong=books_right_we_wrong,
+        both_correct=both_correct,
+        both_wrong=both_wrong,
+        pending=pending,
+        our_accuracy=our_accuracy,
+        book_accuracy=book_accuracy,
+    )
+
+
 __all__ = [
     "SummaryMetrics",
+    "PredictionComparisonStats",
     "DEFAULT_EDGE_THRESHOLD",
     "DEFAULT_STAKE",
     "DEFAULT_STARTING_BANKROLL",
@@ -698,4 +902,6 @@ __all__ = [
     "get_completed_bets",
     "get_performance_by_threshold",
     "get_upcoming_calendar",
+    "build_prediction_comparison",
+    "summarize_prediction_comparison",
 ]

@@ -16,12 +16,14 @@ from .data import (
     DEFAULT_STAKE,
     DISPLAY_TIMEZONE,
     SummaryMetrics,
+    build_prediction_comparison,
     calculate_summary_metrics,
     get_completed_bets,
     get_performance_by_threshold,
     get_performance_over_time,
     get_recommended_bets,
     load_forward_test_data,
+    summarize_prediction_comparison,
 )
 
 EXTERNAL_STYLESHEETS = [dbc.themes.FLATLY]
@@ -98,168 +100,246 @@ else:
     min_date = today - timedelta(days=7)
     max_date = today
 
+LEAGUE_FILTER_OPTIONS = [
+    {"label": "All Leagues", "value": "all"},
+    {"label": "-- Football --", "value": "divider_football", "disabled": True},
+    {"label": "NFL", "value": "NFL"},
+    {"label": "CFB", "value": "CFB"},
+    {"label": "-- Basketball --", "value": "divider_basketball", "disabled": True},
+    {"label": "NBA", "value": "NBA"},
+    {"label": "-- Soccer --", "value": "divider_soccer", "disabled": True},
+    {"label": "EPL", "value": "EPL"},
+    {"label": "La Liga", "value": "LALIGA"},
+    {"label": "Bundesliga", "value": "BUNDESLIGA"},
+    {"label": "Serie A", "value": "SERIEA"},
+    {"label": "Ligue 1", "value": "LIGUE1"},
+]
+
 
 app = Dash(__name__, external_stylesheets=EXTERNAL_STYLESHEETS, suppress_callback_exceptions=True, title="Forward Testing Dashboard")
 server = app.server
 
 
-app.layout = dbc.Container(
+def _navbar(pathname: Optional[str]) -> dbc.Nav:
+    pathname = pathname or "/"
+    return dbc.Nav(
+        [
+            dbc.NavLink("Dashboard", href="/", active=pathname == "/" or pathname == ""),
+            dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
+        ],
+        pills=True,
+        className="mb-4 gap-2",
+    )
+
+
+def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            dbc.Row(
+                [
+                    dbc.Col(html.H2("Forward Testing Dashboard"), md=8),
+                    dbc.Col(
+                        dbc.Button(
+                            "Manual Refresh",
+                            id="refresh-button",
+                            color="primary",
+                            className="float-md-end",
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(html.Div(id="last-updated-text", className="text-md-end text-muted"), md=2),
+                ],
+                className="align-items-center g-2",
+            ),
+            html.Hr(),
+            html.Div("All times shown in Eastern Time (ET).", className="text-muted mb-3"),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("League"),
+                                dcc.Dropdown(
+                                    id="league-select",
+                                    options=LEAGUE_FILTER_OPTIONS,
+                                    value="all",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        dcc.DatePickerRange(
+                            id="date-range-picker",
+                            min_date_allowed=min_date,
+                            max_date_allowed=max_date,
+                            start_date=min_date,
+                            end_date=max_date,
+                            display_format="YYYY-MM-DD",
+                        ),
+                        md=3,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Edge Threshold"),
+                                dcc.Slider(
+                                    id="edge-threshold-slider",
+                                    min=0.0,
+                                    max=0.2,
+                                    step=0.005,
+                                    value=DEFAULT_EDGE_THRESHOLD,
+                                    marks={
+                                        0.0: "0%",
+                                        0.05: "5%",
+                                        0.1: "10%",
+                                        0.15: "15%",
+                                        0.2: "20%",
+                                    },
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                ),
+                            ]
+                        ),
+                        md=3,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Performance Period"),
+                                dcc.Dropdown(
+                                    id="period-select",
+                                    options=[
+                                        {"label": "Daily", "value": "D"},
+                                        {"label": "Weekly", "value": "W"},
+                                        {"label": "Monthly", "value": "M"},
+                                    ],
+                                    value="W",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=3,
+                    ),
+                ],
+                className="g-3 mb-4",
+            ),
+            dcc.Tabs(
+                id="dashboard-tabs",
+                value="overview",
+                children=[
+                    dcc.Tab(
+                        label="Overview",
+                        value="overview",
+                        children=[
+                            dcc.Loading(html.Div(id="summary-cards"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="bankroll-cards"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="cumulative-profit-chart"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Performance",
+                        value="performance",
+                        children=[
+                            dcc.Loading(html.Div(id="roi-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="win-rate-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="period-chart"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Recommended Bets",
+                        value="recommended",
+                        children=[dcc.Loading(html.Div(id="recommended-bets-table"), type="circle")],
+                    ),
+                    dcc.Tab(
+                        label="Edge Analysis",
+                        value="edges",
+                        children=[
+                            dcc.Loading(html.Div(id="threshold-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="threshold-table"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Bets",
+                        value="bets",
+                        children=[dcc.Loading(html.Div(id="completed-bets-table"), type="circle")],
+                    ),
+                ],
+            ),
+            html.Br(),
+        ],
+        fluid=True,
+    )
+
+
+def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            html.H2("Winner Predictions vs. Sportsbooks"),
+            html.P(
+                "Compare our model's projected winners against sportsbook consensus, track where we agree, "
+                "and highlight situations where we outperform the market.",
+                className="text-muted",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("League"),
+                                dcc.Dropdown(
+                                    id="predictions-league-select",
+                                    options=LEAGUE_FILTER_OPTIONS,
+                                    value="all",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=3,
+                    ),
+                    dbc.Col(
+                        dcc.DatePickerRange(
+                            id="predictions-date-range",
+                            min_date_allowed=min_date,
+                            max_date_allowed=max_date,
+                            start_date=min_date,
+                            end_date=max_date,
+                            display_format="YYYY-MM-DD",
+                        ),
+                        md=4,
+                    ),
+                ],
+                className="g-3 mb-4",
+            ),
+            dcc.Loading(html.Div(id="prediction-summary-cards"), type="circle"),
+            html.Br(),
+            dcc.Loading(html.Div(id="prediction-table"), type="circle"),
+        ],
+        fluid=True,
+    )
+
+
+app.layout = html.Div(
     [
+        dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
-        html.Br(),
-        dbc.Row(
-            [
-                dbc.Col(html.H2("Forward Testing Dashboard"), md=8),
-                dbc.Col(
-                    dbc.Button(
-                        "Manual Refresh",
-                        id="refresh-button",
-                        color="primary",
-                        className="float-md-end",
-                    ),
-                    md=2,
-                ),
-                dbc.Col(html.Div(id="last-updated-text", className="text-md-end text-muted"), md=2),
-            ],
-            className="align-items-center g-2",
-        ),
-        html.Hr(),
-        html.Div("All times shown in Eastern Time (ET).", className="text-muted mb-3"),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.Div(
-                        [
-                            html.Label("League"),
-                            dcc.Dropdown(
-                                id="league-select",
-                                options=[
-                                    {"label": "All Leagues", "value": "all"},
-                                    {"label": "— Football —", "value": "divider_football", "disabled": True},
-                                    {"label": "NFL", "value": "NFL"},
-                                    {"label": "CFB", "value": "CFB"},
-                                    {"label": "— Basketball —", "value": "divider_basketball", "disabled": True},
-                                    {"label": "NBA", "value": "NBA"},
-                                    {"label": "— Soccer —", "value": "divider_soccer", "disabled": True},
-                                    {"label": "EPL", "value": "EPL"},
-                                    {"label": "La Liga", "value": "LALIGA"},
-                                    {"label": "Bundesliga", "value": "BUNDESLIGA"},
-                                    {"label": "Serie A", "value": "SERIEA"},
-                                    {"label": "Ligue 1", "value": "LIGUE1"},
-                                ],
-                                value="all",
-                                clearable=False,
-                            ),
-                        ]
-                    ),
-                    md=2,
-                ),
-                dbc.Col(
-                    dcc.DatePickerRange(
-                        id="date-range-picker",
-                        min_date_allowed=min_date,
-                        max_date_allowed=max_date,
-                        start_date=min_date,
-                        end_date=max_date,
-                        display_format="YYYY-MM-DD",
-                    ),
-                    md=3,
-                ),
-                dbc.Col(
-                    html.Div(
-                        [
-                            html.Label("Edge Threshold"),
-                            dcc.Slider(
-                                id="edge-threshold-slider",
-                                min=0.0,
-                                max=0.2,
-                                step=0.005,
-                                value=DEFAULT_EDGE_THRESHOLD,
-                                marks={
-                                    0.0: "0%",
-                                    0.05: "5%",
-                                    0.1: "10%",
-                                    0.15: "15%",
-                                    0.2: "20%",
-                                },
-                                tooltip={"placement": "bottom", "always_visible": False},
-                            ),
-                        ]
-                    ),
-                    md=3,
-                ),
-                dbc.Col(
-                    html.Div(
-                        [
-                            html.Label("Performance Period"),
-                            dcc.Dropdown(
-                                id="period-select",
-                                options=[
-                                    {"label": "Daily", "value": "D"},
-                                    {"label": "Weekly", "value": "W"},
-                                    {"label": "Monthly", "value": "M"},
-                                ],
-                                value="W",
-                                clearable=False,
-                            ),
-                        ]
-                    ),
-                    md=3,
-                ),
-            ],
-            className="g-3 mb-4",
-        ),
-        dcc.Tabs(
-            id="dashboard-tabs",
-            value="overview",
-            children=[
-                dcc.Tab(
-                    label="Overview",
-                    value="overview",
-                    children=[
-                        dcc.Loading(html.Div(id="summary-cards"), type="circle"),
-                        html.Br(),
-                        dcc.Loading(html.Div(id="bankroll-cards"), type="circle"),
-                        html.Br(),
-                        dcc.Loading(html.Div(id="cumulative-profit-chart"), type="circle"),
-                    ],
-                ),
-                dcc.Tab(
-                    label="Performance",
-                    value="performance",
-                    children=[
-                        dcc.Loading(html.Div(id="roi-chart"), type="circle"),
-                        html.Br(),
-                        dcc.Loading(html.Div(id="win-rate-chart"), type="circle"),
-                        html.Br(),
-                        dcc.Loading(html.Div(id="period-chart"), type="circle"),
-                    ],
-                ),
-                dcc.Tab(
-                    label="Recommended Bets",
-                    value="recommended",
-                    children=[dcc.Loading(html.Div(id="recommended-bets-table"), type="circle")],
-                ),
-                dcc.Tab(
-                    label="Edge Analysis",
-                    value="edges",
-                    children=[
-                        dcc.Loading(html.Div(id="threshold-chart"), type="circle"),
-                        html.Br(),
-                        dcc.Loading(html.Div(id="threshold-table"), type="circle"),
-                    ],
-                ),
-                dcc.Tab(
-                    label="Bets",
-                    value="bets",
-                    children=[dcc.Loading(html.Div(id="completed-bets-table"), type="circle")],
-                ),
-            ],
-        ),
-        html.Br(),
-    ],
-    fluid=True,
+        html.Div(id="page-content", children=_dashboard_layout("/")),
+    ]
 )
+
+
+@app.callback(Output("page-content", "children"), Input("url", "pathname"))
+def render_page(pathname: Optional[str]):
+    if pathname == "/predictions":
+        return _predictions_layout(pathname)
+    return _dashboard_layout(pathname)
 
 
 @app.callback(
@@ -389,6 +469,35 @@ def update_dashboard(
         components.performance_by_threshold_table(threshold_df),
         components.recommended_bets_table(recommended_df),
         components.completed_bets_table(completed_bets_df),
+    )
+
+
+@app.callback(
+    Output("prediction-summary-cards", "children"),
+    Output("prediction-table", "children"),
+    Input("forward-data-store", "data"),
+    Input("predictions-league-select", "value"),
+    Input("predictions-date-range", "start_date"),
+    Input("predictions-date-range", "end_date"),
+)
+def update_predictions_page(
+    data_json: Optional[str],
+    league: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+):
+    df = _df_from_json(data_json)
+    if not df.empty and league != "all" and "league" in df.columns:
+        df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
+
+    df = _filter_by_date(df, start_date, end_date)
+
+    comparison_df = build_prediction_comparison(df)
+    stats = summarize_prediction_comparison(comparison_df)
+
+    return (
+        components.prediction_summary(stats),
+        components.prediction_comparison_table(comparison_df),
     )
 
 

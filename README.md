@@ -136,9 +136,11 @@ Flags:
 
 ### Forward Testing & Dashboard
 
-- Dashboard entrypoint: `poetry run python -m src.dashboard --port 8050`.
+- UNIX environments: `./run_dashboard --port 8050` (wraps `poetry run python -m src.dashboard`).
+- PowerShell: `.\run_dashboard.ps1 --port 8050 -DashDebug` (same helper with PS-friendly args/`--` passthrough, use `-DashDebug` to enable Dash debug mode).
 - Forward-test driver: `poetry run python -m src.models.forward_test`.
 - PowerShell wrappers under `scripts/run_forward_test_*.ps1` simplify scheduling per league.
+- The dashboard exposes a `/predictions` route that compares our model's projected winners vs. sportsbook consensus, including league/date filters and accuracy summaries.
 
 The dashboard reads `data/forward_test/predictions_master.parquet` and surfaces ROI, win rate, cumulative profit, and upcoming recommendations with an adjustable edge slider.
 

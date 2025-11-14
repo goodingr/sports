@@ -1,1 +1,5 @@
 random forest model
+player level stats
+investigate high moneyline
+track moneyline over time
+per site moneyline

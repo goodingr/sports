@@ -3,7 +3,7 @@ import argparse
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from src.data.config import OddsAPISettings
 from src.data.ingest_odds import fetch_odds
+from src.data.ingest_results_soccer import fetch_from_espn
 from src.data.team_mappings import normalize_team_code
 from src.db.core import connect
 from src.models.feature_loader import FeatureLoader
@@ -52,6 +53,7 @@ SHORT_WEEK_THRESHOLD = 5.0
 BYE_THRESHOLD = 10.0
 ESPN_CFB_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
 EASTERN_TZ = ZoneInfo("America/New_York")
+SOCCER_SCORE_LOOKBACK_DAYS = 10
 
 
 def _get_sport_key(league: str) -> str:
@@ -1039,6 +1041,67 @@ def _fetch_espn_cfb_scores(dates: Iterable[date]) -> Dict[Tuple[str, str, date],
     return results
 
 
+def _fetch_soccer_scores_from_espn(
+    league_dates: Dict[str, List[pd.Timestamp]],
+) -> Dict[Tuple[str, str, str, date], Tuple[int, int]]:
+    """Pull final soccer scores from ESPN for the provided leagues/date ranges."""
+    if not league_dates:
+        return {}
+
+    lookup: Dict[Tuple[str, str, str, date], Tuple[int, int]] = {}
+    for league_code, timestamps in league_dates.items():
+        valid_dates = sorted(
+            {ts.date() for ts in timestamps if ts is not None and not pd.isna(ts)}
+        )
+        if not valid_dates:
+            continue
+        start_date = min(valid_dates)
+        end_date = max(valid_dates)
+        try:
+            espn_df = fetch_from_espn(
+                leagues=[league_code],
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as exc:  # pragma: no cover - network guard
+            LOGGER.warning("Failed to fetch ESPN soccer scores for %s: %s", league_code, exc)
+            continue
+        if espn_df.empty:
+            continue
+
+        for _, rec in espn_df.iterrows():
+            if not rec.get("is_final"):
+                continue
+            home_name = rec.get("home_team_name")
+            away_name = rec.get("away_team_name")
+            if not home_name or not away_name:
+                continue
+            home_code = normalize_team_code(league_code, home_name)
+            away_code = normalize_team_code(league_code, away_name)
+            if not home_code or not away_code:
+                continue
+            home_score = rec.get("home_score")
+            away_score = rec.get("away_score")
+            if home_score is None or away_score is None:
+                continue
+            try:
+                home_score_int = int(home_score)
+                away_score_int = int(away_score)
+            except (TypeError, ValueError):
+                continue
+            gameday = rec.get("gameday")
+            if not gameday:
+                continue
+            try:
+                game_date = datetime.strptime(str(gameday), "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                continue
+            key = (league_code.upper(), home_code.upper(), away_code.upper(), game_date)
+            lookup[key] = (home_score_int, away_score_int)
+
+    return lookup
+
+
 def update_results(
     *,
     league: Optional[str] = None,
@@ -1077,12 +1140,114 @@ def update_results(
 
     save_required = False
 
+    def _apply_result(index: int, home_score: int, away_score: int) -> None:
+        nonlocal save_required
+        if home_score > away_score:
+            result_str = "home"
+        elif away_score > home_score:
+            result_str = "away"
+        else:
+            result_str = "tie"
+        result_timestamp = datetime.now(timezone.utc).isoformat()
+        for frame in (predictions, target_predictions):
+            if index in frame.index:
+                frame.at[index, "home_score"] = home_score
+                frame.at[index, "away_score"] = away_score
+                frame.at[index, "result"] = result_str
+                frame.at[index, "result_updated_at"] = result_timestamp
+        save_required = True
+
     def _clear_result(index: int) -> None:
         nonlocal save_required
-        columns_to_clear = [col for col in ["result", "home_score", "away_score", "result_updated_at"] if col in predictions.columns]
+        columns_to_clear = [
+            col for col in ["result", "home_score", "away_score", "result_updated_at"] if col in predictions.columns
+        ]
         if columns_to_clear:
             predictions.loc[index, columns_to_clear] = None
+            if index in target_predictions.index:
+                target_predictions.loc[index, columns_to_clear] = None
             save_required = True
+
+    soccer_scores: Dict[Tuple[str, str, str, date], Tuple[int, int]] = {}
+    soccer_subset = pd.DataFrame()
+    if "league" in target_predictions.columns and "commence_time" in target_predictions.columns:
+        soccer_subset = target_predictions[
+            target_predictions["league"].astype(str).str.upper().isin(SOCCER_LEAGUES)
+            & target_predictions["commence_time"].notna()
+            & (target_predictions["commence_time"] <= now)
+            & (
+                target_predictions["result"].isna()
+                | (target_predictions["commence_time"] >= now - pd.Timedelta(days=SOCCER_SCORE_LOOKBACK_DAYS))
+            )
+        ]
+        if not soccer_subset.empty:
+            league_dates: Dict[str, List[pd.Timestamp]] = {}
+            grouped = soccer_subset.groupby(soccer_subset["league"].astype(str).str.upper())
+            for league_code, group in grouped:
+                league_dates[league_code] = [ts for ts in group["commence_time"] if pd.notna(ts)]
+            soccer_scores = _fetch_soccer_scores_from_espn(league_dates)
+
+    def _lookup_soccer_score(row: pd.Series) -> Optional[Tuple[int, int]]:
+        if not soccer_scores:
+            return None
+        league_code = str(row.get("league") or league_upper or "").upper()
+        if league_code not in SOCCER_LEAGUES:
+            return None
+        home_team = str(row.get("home_team") or "").upper()
+        away_team = str(row.get("away_team") or "").upper()
+        if not home_team or not away_team:
+            return None
+        ts = row.get("commence_time")
+        if ts is None or pd.isna(ts):
+            return None
+        if isinstance(ts, str):
+            try:
+                ts = pd.to_datetime(ts, utc=True)
+            except Exception:
+                return None
+        try:
+            base_date = ts.date()
+        except Exception:
+            return None
+        date_candidates = list(
+            dict.fromkeys(
+                [
+                    base_date,
+                    base_date - timedelta(days=1),
+                    base_date + timedelta(days=1),
+                ]
+            )
+        )
+        for cand in date_candidates:
+            key = (league_code, home_team, away_team, cand)
+            match = soccer_scores.get(key)
+            if match:
+                return match
+        return None
+
+    if soccer_scores and not soccer_subset.empty:
+        for idx, row in soccer_subset.iterrows():
+            match = _lookup_soccer_score(row)
+            if not match:
+                continue
+            stored_home = row.get("home_score")
+            stored_away = row.get("away_score")
+            try:
+                stored_home_int = None if pd.isna(stored_home) else int(stored_home)
+            except (TypeError, ValueError):
+                stored_home_int = None
+            try:
+                stored_away_int = None if pd.isna(stored_away) else int(stored_away)
+            except (TypeError, ValueError):
+                stored_away_int = None
+            if (
+                row.get("result") is None
+                or stored_home_int is None
+                or stored_away_int is None
+                or stored_home_int != match[0]
+                or stored_away_int != match[1]
+            ):
+                _apply_result(idx, match[0], match[1])
 
     # Clear any results that were accidentally recorded for future games
     if "result" in target_predictions.columns:
@@ -1286,15 +1451,13 @@ def update_results(
 
             if score_pair:
                 home_score, away_score = score_pair
-                result_str = "home" if home_score > away_score else "away" if away_score > home_score else "tie"
-                predictions.at[idx, "home_score"] = home_score
-                predictions.at[idx, "away_score"] = away_score
-                predictions.at[idx, "result"] = result_str
-                predictions.at[idx, "result_updated_at"] = datetime.now(timezone.utc).isoformat()
-                save_required = True
+                _apply_result(idx, home_score, away_score)
                 continue
 
             match = _find_final_score(row, conn)
+
+            if not match:
+                match = _lookup_soccer_score(row)
 
             if not match and league_upper == "CFB" and espn_cfb_scores:
                 ts = row.get("commence_time")
@@ -1310,19 +1473,7 @@ def update_results(
             if not match:
                 continue
             home_score, away_score = match
-            save_required = True
-
-            if home_score > away_score:
-                result_str = "home"
-            elif away_score > home_score:
-                result_str = "away"
-            else:
-                result_str = "tie"
-
-            predictions.at[idx, "home_score"] = home_score
-            predictions.at[idx, "away_score"] = away_score
-            predictions.at[idx, "result"] = result_str
-            predictions.at[idx, "result_updated_at"] = datetime.now(timezone.utc).isoformat()
+            _apply_result(idx, home_score, away_score)
 
     if not save_required:
         LOGGER.info("No completed games found to update")

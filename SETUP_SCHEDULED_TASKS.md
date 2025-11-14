@@ -7,8 +7,8 @@
    - Simple command-line approach (more reliable than XML)
 
 2. **Execution Scripts**:
-   - `scripts/run_forward_test_predict.ps1` - Makes predictions
-   - `scripts/run_forward_test_update.ps1` - Updates results
+   - `scripts/run_forward_test_predict.ps1` - Makes predictions for every supported league
+   - `scripts/run_forward_test_update.ps1` - Refreshes results (and runs league-specific ingesters when available)
 
 3. **Log Directory**: `logs/` - Stores daily execution logs
 
@@ -29,8 +29,8 @@ cd C:\Users\Bobby\Desktop\sports
 
 ```powershell
 # Check if tasks exist
-schtasks /Query /TN "NBA Forward Test - Predict"
-schtasks /Query /TN "NBA Forward Test - Update"
+schtasks /Query /TN "Forward Test - Predict"
+schtasks /Query /TN "Forward Test - Update"
 ```
 
 Or open Task Scheduler GUI:
@@ -40,15 +40,15 @@ Or open Task Scheduler GUI:
 ## 📅 Task Schedule
 
 ### Task 1: Make Predictions
-- **Name**: `NBA Forward Test - Predict`
+- **Name**: `Forward Test - Predict`
 - **Time**: Daily at 11:00 PM UTC (6:00 PM EST / 7:00 PM EDT)
-- **Purpose**: Fetches live games and makes predictions before they start
+- **Purpose**: Runs predictions for NBA, NFL, CFB (and any future leagues defined in `SUPPORTED_LEAGUES`)
 - **Logs**: `logs\forward_test_predict_YYYYMMDD.log`
 
 ### Task 2: Update Results
-- **Name**: `NBA Forward Test - Update`
+- **Name**: `Forward Test - Update`
 - **Time**: Daily at 7:00 AM UTC (2:00 AM EST / 3:00 AM EDT)
-- **Purpose**: Updates predictions with actual game results
+- **Purpose**: Ingests the latest results (where supported) and updates the forward-test ledger
 - **Logs**: `logs\forward_test_update_YYYYMMDD.log`
 
 ## 🎮 Manual Operations
@@ -57,18 +57,18 @@ Or open Task Scheduler GUI:
 
 ```powershell
 # Make predictions now
-schtasks /Run /TN "NBA Forward Test - Predict"
+schtasks /Run /TN "Forward Test - Predict"
 
 # Update results now
-schtasks /Run /TN "NBA Forward Test - Update"
+schtasks /Run /TN "Forward Test - Update"
 ```
 
 ### View Task Details
 
 ```powershell
 # View task information
-schtasks /Query /TN "NBA Forward Test - Predict" /V /FO LIST
-schtasks /Query /TN "NBA Forward Test - Update" /V /FO LIST
+schtasks /Query /TN "Forward Test - Predict" /V /FO LIST
+schtasks /Query /TN "Forward Test - Update" /V /FO LIST
 ```
 
 ### Check Logs
@@ -87,7 +87,7 @@ Get-Content logs\forward_test_predict_$(Get-Date -Format 'yyyyMMdd').log -Tail 2
 ### Change Times (via Task Scheduler GUI)
 
 1. Open Task Scheduler (`taskschd.msc`)
-2. Find the task (e.g., "NBA Forward Test - Predict")
+2. Find the task (e.g., "Forward Test - Predict")
 3. Right-click → Properties
 4. Go to "Triggers" tab
 5. Select trigger → Edit
@@ -97,10 +97,10 @@ Get-Content logs\forward_test_predict_$(Get-Date -Format 'yyyyMMdd').log -Tail 2
 
 ```powershell
 # Change prediction time to 5:00 PM EST (22:00 UTC)
-schtasks /Change /TN "NBA Forward Test - Predict" /ST 22:00
+schtasks /Change /TN "Forward Test - Predict" /ST 22:00
 
 # Change update time to 3:00 AM EST (08:00 UTC)
-schtasks /Change /TN "NBA Forward Test - Update" /ST 08:00
+schtasks /Change /TN "Forward Test - Update" /ST 08:00
 ```
 
 ## 🗑️ Remove Tasks
@@ -114,8 +114,8 @@ schtasks /Change /TN "NBA Forward Test - Update" /ST 08:00
 ### Remove Individual Tasks
 
 ```powershell
-schtasks /Delete /TN "NBA Forward Test - Predict" /F
-schtasks /Delete /TN "NBA Forward Test - Update" /F
+schtasks /Delete /TN "Forward Test - Predict" /F
+schtasks /Delete /TN "Forward Test - Update" /F
 ```
 
 ## 🔧 Troubleshooting
@@ -130,7 +130,7 @@ schtasks /Delete /TN "NBA Forward Test - Update" /F
 
 1. **Check if enabled:**
    ```powershell
-   schtasks /Query /TN "NBA Forward Test - Predict" /V /FO LIST | Select-String "Status"
+   schtasks /Query /TN "Forward Test - Predict" /V /FO LIST | Select-String "Status"
    ```
 
 2. **Check last run result:**
