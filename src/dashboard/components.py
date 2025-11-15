@@ -386,7 +386,18 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline)
+    def _render_moneyline(text: str) -> str:
+        if not text:
+            return ""
+        return (
+            "<div style='text-align:center; width:100%;'>"
+            "<span class='moneyline-link' style='color:#0d6efd; text-decoration:underline;'>"
+            f"{text}"
+            "</span>"
+            "</div>"
+        )
+
+    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline).apply(_render_moneyline)
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
@@ -413,6 +424,7 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
                 "color": "#0d6efd",
                 "textDecoration": "underline",
                 "cursor": "pointer",
+                "textAlign": "center",
             }
         ],
     )
