@@ -397,6 +397,7 @@ app.layout = html.Div(
         dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
         dcc.Store(id="book-odds-store"),
+        dcc.Store(id="moneyline-link-click"),
         html.Div(id="page-content", children=_dashboard_layout("/")),
     ]
 )
@@ -591,22 +592,28 @@ def update_predictions_page(
     Output("moneyline-modal-content", "children"),
     Input("recommended-bets-table-datatable", "active_cell"),
     Input("moneyline-modal-close", "n_clicks"),
+    Input("moneyline-link-click", "data"),
     State("recommended-bets-table-datatable", "data"),
     State("book-odds-store", "data"),
     prevent_initial_call=True,
 )
-def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json):
+def toggle_moneyline_modal(active_cell, close_clicks, link_click_data, table_data, book_odds_json):
     trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
     if trigger == "moneyline-modal-close":
         return False, no_update, no_update
-    if trigger != "recommended-bets-table-datatable":
-        raise PreventUpdate
-    if not active_cell or active_cell.get("column_id") not in {"moneyline", "moneyline_display"}:
-        raise PreventUpdate
-    if not table_data:
+    if trigger == "moneyline-link-click":
+        if not link_click_data:
+            raise PreventUpdate
+        row_index = link_click_data.get("row")
+    elif trigger == "recommended-bets-table-datatable":
+        if not active_cell or active_cell.get("column_id") not in {"moneyline_display"}:
+            raise PreventUpdate
+        row_index = active_cell.get("row")
+    else:
         raise PreventUpdate
 
-    row_index = active_cell.get("row")
+    if row_index is None or not table_data:
+        raise PreventUpdate
     if row_index is None or row_index >= len(table_data):
         raise PreventUpdate
 

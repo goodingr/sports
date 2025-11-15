@@ -386,18 +386,19 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    def _render_moneyline(text: str) -> str:
+    def _render_moneyline(text: str, index: int) -> str:
         if not text:
             return ""
         return (
             "<div style='text-align:center; width:100%;'>"
-            "<span class='moneyline-link' style='color:#0d6efd; text-decoration:underline;'>"
+            f"<span class='moneyline-link' data-row-index='{index}' style='color:#0d6efd; text-decoration:underline;'>"
             f"{text}"
             "</span>"
             "</div>"
         )
 
-    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline).apply(_render_moneyline)
+    df["row_index"] = range(len(df))
+    df["moneyline_display"] = df.apply(lambda row: _render_moneyline(row["moneyline"], int(row["row_index"])), axis=1)
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
@@ -407,6 +408,7 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Impl Prob", "id": "implied_prob"},
         {"name": "Edge", "id": "edge"},
+        {"name": "Row Index", "id": "row_index", "hideable": True, "hidden": True},
     ]
 
     return dash_table.DataTable(
