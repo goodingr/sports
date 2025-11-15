@@ -1,5 +1,7 @@
 import pandas as pd
 import pytest
+import sqlite3
+from pathlib import Path
 
 from src.dashboard import app as dashboard_app
 from src.dashboard import data as dashboard_data
@@ -169,3 +171,40 @@ def test_apply_best_moneylines_uses_least_negative_price():
     updated = dashboard_app._apply_best_moneylines(recommended, odds)
     assert updated.iloc[0]["moneyline"] == -196
     assert updated.iloc[0]["moneyline_book"] == "FanDuel"
+
+
+def test_map_game_ids_by_odds_api_matches_existing_games(tmp_path, monkeypatch):
+    db_path = Path(tmp_path) / "odds_test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE games (game_id TEXT PRIMARY KEY, odds_api_id TEXT)"
+    )
+    conn.execute("INSERT INTO games (game_id, odds_api_id) VALUES (?, ?)", ("NBA_custom123", "event123"))
+    conn.commit()
+    conn.close()
+
+    class DummyCtx:
+        def __enter__(self):
+            self.conn = sqlite3.connect(str(db_path))
+            return self.conn
+
+        def __exit__(self, exc_type, exc, tb):
+            self.conn.close()
+            return False
+
+    monkeypatch.setattr(dashboard_data, "connect", lambda: DummyCtx())
+
+    recommended = pd.DataFrame(
+        {
+            "game_id": ["event123"],
+            "league": ["NBA"],
+            "commence_time": [pd.Timestamp("2025-11-15T01:10:00Z")],
+            "team": ["HOU"],
+            "opponent": ["POR"],
+        }
+    )
+
+    mapping = dashboard_data._map_game_ids_by_odds_api(recommended)
+    assert len(mapping) == 1
+    assert mapping.iloc[0]["prediction_game_id"] == "event123"
+    assert mapping.iloc[0]["db_game_id"] == "NBA_custom123"

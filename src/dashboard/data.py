@@ -711,6 +711,37 @@ def get_upcoming_calendar(
     return bets[["date", "team", "opponent", "edge", "commence_time", "moneyline"]]
 
 
+def _map_game_ids_by_odds_api(recommended: pd.DataFrame) -> pd.DataFrame:
+    if recommended.empty or "game_id" not in recommended.columns:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    prediction_ids = [gid for gid in recommended["game_id"] if isinstance(gid, str) and gid.strip()]
+    if not prediction_ids:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    unique_ids = sorted(set(prediction_ids))
+    placeholders = ",".join("?" for _ in unique_ids)
+
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT odds_api_id, game_id
+            FROM games
+            WHERE odds_api_id IS NOT NULL
+              AND odds_api_id IN ({placeholders})
+            """,
+            unique_ids,
+        ).fetchall()
+
+    if not rows:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    mapping = pd.DataFrame(
+        [{"prediction_game_id": row[0], "db_game_id": row[1]} for row in rows if row[0] and row[1]]
+    )
+    return mapping.drop_duplicates(subset=["prediction_game_id"])
+
+
 def _to_utc_timestamp(value: object) -> Optional[pd.Timestamp]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
@@ -1006,7 +1037,17 @@ def summarize_prediction_comparison(df: pd.DataFrame) -> PredictionComparisonSta
 
 
 def get_moneylines_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
-    mapping = _match_games_to_db(recommended)
+    mapping = _map_game_ids_by_odds_api(recommended)
+    remaining = recommended
+    if not mapping.empty:
+        matched_ids = set(mapping["prediction_game_id"])
+        remaining = recommended[~recommended["game_id"].isin(matched_ids)]
+
+    if not remaining.empty:
+        extra = _match_games_to_db(remaining)
+        if not extra.empty:
+            mapping = pd.concat([mapping, extra], ignore_index=True) if not mapping.empty else extra
+
     if mapping.empty:
         return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
 
