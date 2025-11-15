@@ -348,10 +348,6 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
     return dbc.Container(
         [
             _navbar(pathname),
-            html.Div(
-                components.recommended_bets_table(pd.DataFrame()),
-                style={"display": "none"},
-            ),
             html.H2("Winner Predictions vs. Sportsbooks"),
             html.P(
                 "Compare our model's projected winners against sportsbook consensus, track where we agree, "
@@ -401,7 +397,6 @@ app.layout = html.Div(
         dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
         dcc.Store(id="book-odds-store"),
-        dcc.Input(id="moneyline-link-input", type="text", style={"display": "none"}),
         html.Div(id="page-content", children=_dashboard_layout("/")),
     ]
 )
@@ -594,28 +589,24 @@ def update_predictions_page(
     Output("moneyline-modal", "is_open"),
     Output("moneyline-modal-title", "children"),
     Output("moneyline-modal-content", "children"),
-    Output("moneyline-link-input", "value"),
-    Input("moneyline-link-input", "value"),
+    Input("recommended-bets-table-datatable", "active_cell"),
     Input("moneyline-modal-close", "n_clicks"),
     State("recommended-bets-table-datatable", "data"),
     State("book-odds-store", "data"),
     prevent_initial_call=True,
 )
-def toggle_moneyline_modal(link_value, close_clicks, table_data, book_odds_json):
+def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json):
     trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
     if trigger == "moneyline-modal-close":
-        return False, no_update, no_update, ""
-    if trigger != "moneyline-link-input" or not link_value:
+        return False, no_update, no_update
+    if trigger != "recommended-bets-table-datatable":
+        raise PreventUpdate
+    if not active_cell or active_cell.get("column_id") != "moneyline":
+        raise PreventUpdate
+    if not table_data:
         raise PreventUpdate
 
-    try:
-        payload = json.loads(link_value)
-    except (TypeError, json.JSONDecodeError):
-        raise PreventUpdate
-
-    row_index = payload.get("row")
-    if row_index is None or not table_data:
-        raise PreventUpdate
+    row_index = active_cell.get("row")
     if row_index is None or row_index >= len(table_data):
         raise PreventUpdate
 
@@ -656,7 +647,7 @@ def toggle_moneyline_modal(link_value, close_clicks, table_data, book_odds_json)
     else:
         content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 
-    return True, title, content, ""
+    return True, title, content
 
 
 def run(debug: bool = False, port: int = 8050, host: str = "0.0.0.0") -> None:
