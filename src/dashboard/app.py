@@ -590,6 +590,7 @@ def update_predictions_page(
     Output("moneyline-modal", "is_open"),
     Output("moneyline-modal-title", "children"),
     Output("moneyline-modal-content", "children"),
+    Output("moneyline-link-input", "value"),
     Input("moneyline-link-input", "value"),
     Input("moneyline-modal-close", "n_clicks"),
     State("recommended-bets-table-datatable", "data"),
@@ -599,7 +600,7 @@ def update_predictions_page(
 def toggle_moneyline_modal(link_value, close_clicks, table_data, book_odds_json):
     trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
     if trigger == "moneyline-modal-close":
-        return False, no_update, no_update
+        return False, no_update, no_update, ""
     if trigger != "moneyline-link-input" or not link_value:
         raise PreventUpdate
 
@@ -651,7 +652,7 @@ def toggle_moneyline_modal(link_value, close_clicks, table_data, book_odds_json)
     else:
         content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 
-    return True, title, content
+    return True, title, content, ""
 
 
 def run(debug: bool = False, port: int = 8050, host: str = "0.0.0.0") -> None:
