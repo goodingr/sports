@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from src.dashboard import app as dashboard_app
 from src.dashboard import data as dashboard_data
 
 
@@ -120,3 +121,51 @@ def test_get_recommended_bets_deduplicates_by_game(monkeypatch):
     assert len(bets) == 1
     assert bets.iloc[0]['team'] == 'ARS'
     assert bets.iloc[0]['edge'] == 0.12
+
+
+def test_apply_best_moneylines_uses_highest_positive_price():
+    recommended = pd.DataFrame(
+        {
+            "game_id": ["GAME1"],
+            "side": ["away"],
+            "team": ["ARK"],
+            "opponent": ["LSU"],
+            "moneyline": [164],
+            "moneyline_book": ["DraftKings"],
+        }
+    )
+    odds = pd.DataFrame(
+        [
+            {"forward_game_id": "GAME1", "outcome": "away", "book": "DraftKings", "moneyline": 164},
+            {"forward_game_id": "GAME1", "outcome": "away", "book": "BetMGM", "moneyline": 180},
+            {"forward_game_id": "GAME1", "outcome": "away", "book": "FanDuel", "moneyline": 170},
+        ]
+    )
+
+    updated = dashboard_app._apply_best_moneylines(recommended, odds)
+    assert updated.iloc[0]["moneyline"] == 180
+    assert updated.iloc[0]["moneyline_book"] == "BetMGM"
+
+
+def test_apply_best_moneylines_uses_least_negative_price():
+    recommended = pd.DataFrame(
+        {
+            "game_id": ["GAME2"],
+            "side": ["home"],
+            "team": ["LSU"],
+            "opponent": ["ARK"],
+            "moneyline": [-220],
+            "moneyline_book": ["Default"],
+        }
+    )
+    odds = pd.DataFrame(
+        [
+            {"forward_game_id": "GAME2", "outcome": "home", "book": "BetMGM", "moneyline": -220},
+            {"forward_game_id": "GAME2", "outcome": "home", "book": "FanDuel", "moneyline": -196},
+            {"forward_game_id": "GAME2", "outcome": "home", "book": "DraftKings", "moneyline": -205},
+        ]
+    )
+
+    updated = dashboard_app._apply_best_moneylines(recommended, odds)
+    assert updated.iloc[0]["moneyline"] == -196
+    assert updated.iloc[0]["moneyline_book"] == "FanDuel"

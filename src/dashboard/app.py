@@ -104,16 +104,27 @@ def _apply_best_moneylines(recommended: pd.DataFrame, odds_df: pd.DataFrame) -> 
         return recommended
 
     odds["outcome"] = odds["outcome"].astype(str).str.lower()
-    odds = odds.sort_values("moneyline", ascending=False)
     odds_game_key = "forward_game_id" if "forward_game_id" in odds.columns else "game_id"
-    best_lookup = {
-        (row[odds_game_key], row["outcome"]): (row["moneyline"], row.get("book"))
-        for _, row in odds.iterrows()
-    }
+
+    def _is_better(candidate: Optional[float], current: Optional[float]) -> bool:
+        if candidate is None or (isinstance(candidate, float) and pd.isna(candidate)):
+            return False
+        if current is None or (isinstance(current, float) and pd.isna(current)):
+            return True
+        return candidate > current
+
+    best_lookup: dict[tuple[Optional[str], Optional[str]], tuple[Optional[float], Optional[str]]] = {}
+    for _, row in odds.iterrows():
+        key = (row.get(odds_game_key), row.get("outcome"))
+        value = row.get("moneyline")
+        book = row.get("book")
+        current = best_lookup.get(key)
+        if current is None or _is_better(value, current[0]):
+            best_lookup[key] = (value, book)
 
     updated = recommended.copy()
-    best_values = []
-    best_books = []
+    best_values: list[Optional[float]] = []
+    best_books: list[Optional[str]] = []
     for _, row in updated.iterrows():
         key = (
             row.get("game_id"),
