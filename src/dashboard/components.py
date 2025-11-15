@@ -386,16 +386,13 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline).apply(
-        lambda text: f"<span class='moneyline-link'>{text}</span>" if text else ""
-    )
+    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline)
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
         {"name": "Team", "id": "team"},
         {"name": "Opponent", "id": "opponent"},
         {"name": "Moneyline", "id": "moneyline_display", "presentation": "markdown"},
-        {"name": "Moneyline (raw)", "id": "moneyline", "hideable": True, "hidden": True},
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Impl Prob", "id": "implied_prob"},
         {"name": "Edge", "id": "edge"},
