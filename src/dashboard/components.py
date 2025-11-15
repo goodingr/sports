@@ -32,6 +32,13 @@ def _format_currency(value: Optional[float], digits: int = 0) -> str:
     return f"{prefix}{abs(value):,.{digits}f}"
 
 
+def _format_moneyline(value: Optional[float]) -> str:
+    if value is None or (isinstance(value, float) and (pd.isna(value) or pd.isnull(value))):
+        return ""
+    value_int = int(value)
+    return f"+{value_int}" if value_int >= 0 else f"{value_int}"
+
+
 def _format_datetime(value: Optional[pd.Timestamp]) -> str:
     if value is None or pd.isna(value):
         return ""
@@ -362,18 +369,33 @@ def recent_predictions_table(predictions: pd.DataFrame, *, page_size: int = 20) 
 def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df = recommended.copy()
     if df.empty:
-        df = pd.DataFrame(columns=["commence_time", "team", "opponent", "moneyline", "predicted_prob", "implied_prob", "edge"])
+        df = pd.DataFrame(
+            columns=[
+                "commence_time",
+                "team",
+                "opponent",
+                "moneyline",
+                "predicted_prob",
+                "implied_prob",
+                "edge",
+                "moneyline_display",
+            ]
+        )
 
     df["commence_time"] = df["commence_time"].apply(_format_datetime)
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    df["moneyline_display"] = df["moneyline"].apply(_format_moneyline).apply(
+        lambda text: f"<span class='moneyline-link'>{text}</span>" if text else ""
+    )
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
         {"name": "Team", "id": "team"},
         {"name": "Opponent", "id": "opponent"},
-        {"name": "Moneyline", "id": "moneyline"},
+        {"name": "Moneyline", "id": "moneyline_display", "presentation": "markdown"},
+        {"name": "Moneyline (raw)", "id": "moneyline", "hideable": True, "hidden": True},
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Impl Prob", "id": "implied_prob"},
         {"name": "Edge", "id": "edge"},
@@ -384,9 +406,18 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
         columns=columns,
         data=df.to_dict("records"),
         sort_action="native",
+        markdown_options={"html": True},
         style_table={"overflowX": "auto"},
         style_cell={"padding": "0.5rem", "textAlign": "center"},
         style_header={"fontWeight": "bold"},
+        style_data_conditional=[
+            {
+                "if": {"column_id": "moneyline_display"},
+                "color": "#0d6efd",
+                "textDecoration": "underline",
+                "cursor": "pointer",
+            }
+        ],
     )
 
 

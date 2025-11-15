@@ -601,7 +601,7 @@ def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json
         return False, no_update, no_update
     if trigger != "recommended-bets-table-datatable":
         raise PreventUpdate
-    if not active_cell or active_cell.get("column_id") != "moneyline":
+    if not active_cell or active_cell.get("column_id") not in {"moneyline", "moneyline_display"}:
         raise PreventUpdate
     if not table_data:
         raise PreventUpdate
