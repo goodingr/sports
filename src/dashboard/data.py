@@ -14,12 +14,14 @@ except ImportError:  # pragma: no cover - fallback for Python <3.9
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from src.data.team_mappings import normalize_team_code
 from src.db.core import connect
 
 FORWARD_TEST_DIR = Path("data/forward_test")
 MASTER_PREDICTIONS_PATH = FORWARD_TEST_DIR / "predictions_master.parquet"
+VERSION_CONFIG_PATH = Path("config/versions.yml")
 
 DEFAULT_EDGE_THRESHOLD = 0.06
 DEFAULT_STAKE = 100.0
@@ -75,6 +77,96 @@ def _convert_to_display_timezone(series: pd.Series) -> pd.Series:
     if tz is None:
         return series.dt.tz_localize(DISPLAY_TIMEZONE)
     return series.dt.tz_convert(DISPLAY_TIMEZONE)
+
+
+@lru_cache(maxsize=1)
+def _load_version_config() -> dict:
+    if not VERSION_CONFIG_PATH.exists():
+        return {"versions": []}
+    try:
+        data = yaml.safe_load(VERSION_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {"versions": []}
+
+    parsed = []
+    for entry in data.get("versions", []):
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        start_value = entry.get("start")
+        start_ts = pd.to_datetime(start_value, utc=True, errors="coerce")
+        if start_ts is None or pd.isna(start_ts):
+            start_ts = pd.Timestamp.min.tz_localize("UTC")
+        elif start_ts.tzinfo is None:
+            start_ts = start_ts.tz_localize("UTC")
+        parsed.append({"name": name, "start": start_ts})
+
+    parsed.sort(key=lambda item: item["start"])
+    return {"versions": parsed, "current": data.get("current")}
+
+
+def get_version_options() -> list[str]:
+    config = _load_version_config()
+    return [entry["name"] for entry in config["versions"]]
+
+
+def get_default_version_value() -> str:
+    config = _load_version_config()
+    versions = config.get("versions", [])
+    current = config.get("current")
+    if current and any(entry.get("name") == current for entry in versions):
+        return current
+    if versions:
+        return versions[-1]["name"]
+    return "all"
+
+
+def _ensure_utc(ts: Optional[pd.Timestamp]) -> Optional[pd.Timestamp]:
+    if ts is None or pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
+def _assign_versions(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        df["version"] = []
+        return df
+
+    config = _load_version_config()
+    versions = config["versions"]
+    if not versions:
+        df["version"] = "v0.1"
+        return df
+
+    comparison_series = (
+        df["predicted_at"]
+        if "predicted_at" in df.columns
+        else df.get("commence_time")
+    )
+    if comparison_series is None:
+        df["version"] = versions[-1]["name"]
+        return df
+
+    timestamps = comparison_series.apply(_ensure_utc)
+
+    def lookup(ts: Optional[pd.Timestamp]) -> str:
+        if ts is None:
+            return versions[0]["name"]
+        for entry in reversed(versions):
+            if ts >= entry["start"]:
+                return entry["name"]
+        return versions[0]["name"]
+
+    df["version"] = timestamps.apply(lookup)
+    return df
+
+
+def filter_by_version(df: pd.DataFrame, version: Optional[str]) -> pd.DataFrame:
+    if df.empty or not version or version == "all" or "version" not in df.columns:
+        return df
+    return df[df["version"] == version].copy()
 
 
 @lru_cache(maxsize=1)
@@ -167,7 +259,7 @@ def load_forward_test_data(*, force_refresh: bool = False, path: Path = MASTER_P
     # Filter by league if specified
     if not df.empty and league and "league" in df.columns:
         df = df[df["league"].str.upper() == league.upper()].copy()
-    
+    df = _assign_versions(df)
     return df.copy() if not df.empty else df
 
 
@@ -1126,4 +1218,7 @@ __all__ = [
     "build_prediction_comparison",
     "summarize_prediction_comparison",
     "get_moneylines_for_recommended",
+    "get_version_options",
+    "get_default_version_value",
+    "filter_by_version",
 ]

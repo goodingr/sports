@@ -224,3 +224,81 @@ def test_moneyline_detail_table_filters_kaggle_books():
     assert isinstance(table.data, list)
     assert all("Kaggle" not in row["book"] for row in table.data)
     assert any(row["book"] == "FanDuel" for row in table.data)
+
+
+def test_assign_versions_uses_version_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "versions.yml"
+    config_path.write_text(
+        "versions:\n"
+        "  - name: v0.1\n"
+        "    start: 2025-01-01T00:00:00Z\n"
+        "  - name: v0.2\n"
+        "    start: 2025-11-14T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard_data, "VERSION_CONFIG_PATH", config_path)
+    dashboard_data._load_version_config.cache_clear()
+
+    try:
+        df = pd.DataFrame(
+            {
+                "predicted_at": [
+                    pd.Timestamp("2025-11-13T12:00:00Z"),
+                    pd.Timestamp("2025-11-15T12:00:00Z"),
+                ]
+            }
+        )
+
+        updated = dashboard_data._assign_versions(df.copy())
+        assert list(updated["version"]) == ["v0.1", "v0.2"]
+    finally:
+        dashboard_data._load_version_config.cache_clear()
+
+
+def test_filter_by_version_returns_matching_rows():
+    df = pd.DataFrame({"version": ["v0.1", "v0.2", "v0.2"], "value": [1, 2, 3]})
+
+    filtered = dashboard_data.filter_by_version(df, "v0.2")
+    assert len(filtered) == 2
+    assert filtered["version"].nunique() == 1
+    assert filtered["value"].tolist() == [2, 3]
+
+    filtered_all = dashboard_data.filter_by_version(df, "all")
+    assert filtered_all.equals(df)
+
+
+def test_get_default_version_value_prefers_current(tmp_path, monkeypatch):
+    config_path = tmp_path / "versions.yml"
+    config_path.write_text(
+        "current: v0.1\n"
+        "versions:\n"
+        "  - name: v0.1\n"
+        "    start: 2025-01-01T00:00:00Z\n"
+        "  - name: v0.2\n"
+        "    start: 2025-11-14T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard_data, "VERSION_CONFIG_PATH", config_path)
+    dashboard_data._load_version_config.cache_clear()
+    try:
+        assert dashboard_data.get_default_version_value() == "v0.1"
+    finally:
+        dashboard_data._load_version_config.cache_clear()
+
+
+def test_get_default_version_value_falls_back_to_latest(tmp_path, monkeypatch):
+    config_path = tmp_path / "versions.yml"
+    config_path.write_text(
+        "versions:\n"
+        "  - name: v0.1\n"
+        "    start: 2025-01-01T00:00:00Z\n"
+        "  - name: v0.2\n"
+        "    start: 2025-11-14T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard_data, "VERSION_CONFIG_PATH", config_path)
+    dashboard_data._load_version_config.cache_clear()
+    try:
+        assert dashboard_data.get_default_version_value() == "v0.2"
+    finally:
+        dashboard_data._load_version_config.cache_clear()

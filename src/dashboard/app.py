@@ -25,6 +25,9 @@ from .data import (
     get_performance_by_threshold,
     get_performance_over_time,
     get_recommended_bets,
+    get_default_version_value,
+    get_version_options,
+    filter_by_version,
     load_forward_test_data,
     summarize_prediction_comparison,
 )
@@ -167,6 +170,19 @@ LEAGUE_FILTER_OPTIONS = [
     {"label": "Ligue 1", "value": "LIGUE1"},
 ]
 
+def _build_version_dropdown_options() -> tuple[list[dict], str]:
+    version_names = get_version_options()
+    options = [{"label": "All Versions", "value": "all"}]
+    for name in version_names:
+        options.append({"label": name, "value": name})
+    default_value = get_default_version_value()
+    if default_value != "all" and default_value not in [opt["value"] for opt in options]:
+        options.append({"label": default_value, "value": default_value})
+    return options, default_value
+
+
+VERSION_FILTER_OPTIONS, VERSION_DEFAULT_VALUE = _build_version_dropdown_options()
+
 
 app = Dash(__name__, external_stylesheets=EXTERNAL_STYLESHEETS, suppress_callback_exceptions=True, title="Forward Testing Dashboard")
 server = app.server
@@ -211,7 +227,7 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                     dbc.Col(
                         html.Div(
                             [
-                                html.Label("League"),
+                                html.Label("League", htmlFor="league-select"),
                                 dcc.Dropdown(
                                     id="league-select",
                                     options=LEAGUE_FILTER_OPTIONS,
@@ -223,20 +239,39 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                         md=2,
                     ),
                     dbc.Col(
-                        dcc.DatePickerRange(
-                            id="date-range-picker",
-                            min_date_allowed=min_date,
-                            max_date_allowed=max_date,
-                            start_date=min_date,
-                            end_date=max_date,
-                            display_format="YYYY-MM-DD",
+                        html.Div(
+                            [
+                                html.Label("Version", htmlFor="version-select"),
+                                dcc.Dropdown(
+                                    id="version-select",
+                                    options=VERSION_FILTER_OPTIONS,
+                                    value=VERSION_DEFAULT_VALUE,
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Date Range", htmlFor="date-range-picker"),
+                                dcc.DatePickerRange(
+                                    id="date-range-picker",
+                                    min_date_allowed=min_date,
+                                    max_date_allowed=max_date,
+                                    start_date=min_date,
+                                    end_date=max_date,
+                                    display_format="YYYY-MM-DD",
+                                ),
+                            ]
                         ),
                         md=3,
                     ),
                     dbc.Col(
                         html.Div(
                             [
-                                html.Label("Edge Threshold"),
+                                html.Label("Edge Threshold", htmlFor="edge-threshold-slider"),
                                 dcc.Slider(
                                     id="edge-threshold-slider",
                                     min=0.0,
@@ -259,7 +294,7 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                     dbc.Col(
                         html.Div(
                             [
-                                html.Label("Performance Period"),
+                                html.Label("Performance Period", htmlFor="period-select"),
                                 dcc.Dropdown(
                                     id="period-select",
                                     options=[
@@ -272,7 +307,7 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                                 ),
                             ]
                         ),
-                        md=3,
+                        md=2,
                     ),
                 ],
                 className="g-3 mb-4",
@@ -359,7 +394,7 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
                     dbc.Col(
                         html.Div(
                             [
-                                html.Label("League"),
+                                html.Label("League", htmlFor="predictions-league-select"),
                                 dcc.Dropdown(
                                     id="predictions-league-select",
                                     options=LEAGUE_FILTER_OPTIONS,
@@ -371,13 +406,32 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
                         md=3,
                     ),
                     dbc.Col(
-                        dcc.DatePickerRange(
-                            id="predictions-date-range",
-                            min_date_allowed=min_date,
-                            max_date_allowed=max_date,
-                            start_date=min_date,
-                            end_date=max_date,
-                            display_format="YYYY-MM-DD",
+                        html.Div(
+                            [
+                                html.Label("Version", htmlFor="predictions-version-select"),
+                                dcc.Dropdown(
+                                    id="predictions-version-select",
+                                    options=VERSION_FILTER_OPTIONS,
+                                    value=VERSION_DEFAULT_VALUE,
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=3,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Date Range", htmlFor="predictions-date-range"),
+                                dcc.DatePickerRange(
+                                    id="predictions-date-range",
+                                    min_date_allowed=min_date,
+                                    max_date_allowed=max_date,
+                                    start_date=min_date,
+                                    end_date=max_date,
+                                    display_format="YYYY-MM-DD",
+                                ),
+                            ]
                         ),
                         md=4,
                     ),
@@ -442,6 +496,7 @@ def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
     Input("edge-threshold-slider", "value"),
     Input("period-select", "value"),
     Input("league-select", "value"),
+    Input("version-select", "value"),
 )
 def update_dashboard(
     data_json: Optional[str],
@@ -450,8 +505,10 @@ def update_dashboard(
     edge_threshold: float,
     period: str,
     league: str,
+    version: str,
 ):
     df = _df_from_json(data_json)
+    df = filter_by_version(df, version)
     
     # Add or fix league column if missing/None (for backward compatibility)
     if not df.empty:
@@ -563,14 +620,17 @@ def update_dashboard(
     Input("predictions-league-select", "value"),
     Input("predictions-date-range", "start_date"),
     Input("predictions-date-range", "end_date"),
+    Input("predictions-version-select", "value"),
 )
 def update_predictions_page(
     data_json: Optional[str],
     league: str,
     start_date: Optional[str],
     end_date: Optional[str],
+    version: str,
 ):
     df = _df_from_json(data_json)
+    df = filter_by_version(df, version)
     if not df.empty and league != "all" and "league" in df.columns:
         df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
 
