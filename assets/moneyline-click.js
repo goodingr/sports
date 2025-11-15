@@ -24,8 +24,8 @@
     };
 
     input.value = JSON.stringify(payload);
-    const changeEvent = new Event("change", { bubbles: true });
-    input.dispatchEvent(changeEvent);
+    const inputEvent = new Event("input", { bubbles: true });
+    input.dispatchEvent(inputEvent);
   }
 
   document.addEventListener("pointerdown", handleMoneylineEvent, true);
