@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from io import StringIO
 from typing import Optional
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Dash, Input, Output, dcc, html
+from dash import Dash, Input, Output, State, dcc, html, ctx, no_update
+from dash.exceptions import PreventUpdate
 
 from . import components
 from .data import (
@@ -19,6 +21,7 @@ from .data import (
     build_prediction_comparison,
     calculate_summary_metrics,
     get_completed_bets,
+    get_moneylines_for_recommended,
     get_performance_by_threshold,
     get_performance_over_time,
     get_recommended_bets,
@@ -89,6 +92,44 @@ def _filter_by_date(df: pd.DataFrame, start_date: Optional[str], end_date: Optio
     if end_ts is not None:
         mask &= df["commence_time"] <= end_ts
     return df.loc[mask].copy()
+
+
+def _apply_best_moneylines(recommended: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
+    if recommended.empty or odds_df.empty:
+        return recommended
+
+    odds = odds_df.copy()
+    odds = odds.dropna(subset=["moneyline"])
+    if odds.empty:
+        return recommended
+
+    odds["outcome"] = odds["outcome"].astype(str).str.lower()
+    odds = odds.sort_values("moneyline", ascending=False)
+    odds_game_key = "forward_game_id" if "forward_game_id" in odds.columns else "game_id"
+    best_lookup = {
+        (row[odds_game_key], row["outcome"]): (row["moneyline"], row.get("book"))
+        for _, row in odds.iterrows()
+    }
+
+    updated = recommended.copy()
+    best_values = []
+    best_books = []
+    for _, row in updated.iterrows():
+        key = (
+            row.get("game_id"),
+            str(row.get("side")).lower() if row.get("side") is not None else None,
+        )
+        best = best_lookup.get(key)
+        if best:
+            best_values.append(best[0])
+            best_books.append(best[1])
+        else:
+            best_values.append(row.get("moneyline"))
+            best_books.append(row.get("moneyline_book"))
+
+    updated["moneyline"] = best_values
+    updated["moneyline_book"] = best_books
+    return updated
 
 
 initial_df = load_forward_test_data()
@@ -254,7 +295,21 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                     dcc.Tab(
                         label="Recommended Bets",
                         value="recommended",
-                        children=[dcc.Loading(html.Div(id="recommended-bets-table"), type="circle")],
+                        children=[
+                            dcc.Loading(html.Div(id="recommended-bets-table"), type="circle"),
+                            dbc.Modal(
+                                [
+                                    dbc.ModalHeader(dbc.ModalTitle(id="moneyline-modal-title")),
+                                    dbc.ModalBody(html.Div(id="moneyline-modal-content")),
+                                    dbc.ModalFooter(
+                                        dbc.Button("Close", id="moneyline-modal-close", color="secondary", className="ms-auto")
+                                    ),
+                                ],
+                                id="moneyline-modal",
+                                is_open=False,
+                                size="lg",
+                            ),
+                        ],
                     ),
                     dcc.Tab(
                         label="Edge Analysis",
@@ -330,6 +385,7 @@ app.layout = html.Div(
     [
         dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
+        dcc.Store(id="book-odds-store"),
         html.Div(id="page-content", children=_dashboard_layout("/")),
     ]
 )
@@ -368,6 +424,7 @@ def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
     Output("threshold-table", "children"),
     Output("recommended-bets-table", "children"),
     Output("completed-bets-table", "children"),
+    Output("book-odds-store", "data"),
     Input("forward-data-store", "data"),
     Input("date-range-picker", "start_date"),
     Input("date-range-picker", "end_date"),
@@ -453,6 +510,21 @@ def update_dashboard(
     recommended_df = get_recommended_bets(df, edge_threshold=edge_threshold)
     completed_bets_df = get_completed_bets(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
 
+    book_odds_json = ""
+    recommended_display_df = recommended_df
+    if not recommended_df.empty:
+        book_odds_df = get_moneylines_for_recommended(recommended_df)
+        if not book_odds_df.empty:
+            recommended_df = _apply_best_moneylines(recommended_df, book_odds_df)
+            book_odds_json = book_odds_df.to_json(date_format="iso", orient="records")
+        recommended_display_df = recommended_df.copy()
+        if "moneyline" in recommended_display_df.columns:
+            recommended_display_df["moneyline"] = recommended_display_df["moneyline"].apply(
+                lambda x: f"{x:+.0f}" if pd.notna(x) else ""
+            )
+    else:
+        book_odds_json = ""
+
     period_chart_component = components.empty_state("No performance data yet.")
     if not performance_df.empty:
         freq = period or "W"
@@ -467,8 +539,9 @@ def update_dashboard(
         period_chart_component,
         components.performance_by_threshold_chart(threshold_df),
         components.performance_by_threshold_table(threshold_df),
-        components.recommended_bets_table(recommended_df),
+        components.recommended_bets_table(recommended_display_df),
         components.completed_bets_table(completed_bets_df),
+        book_odds_json,
     )
 
 
@@ -499,6 +572,71 @@ def update_predictions_page(
         components.prediction_summary(stats),
         components.prediction_comparison_table(comparison_df),
     )
+
+
+@app.callback(
+    Output("moneyline-modal", "is_open"),
+    Output("moneyline-modal-title", "children"),
+    Output("moneyline-modal-content", "children"),
+    Input("recommended-bets-table-datatable", "active_cell"),
+    Input("moneyline-modal-close", "n_clicks"),
+    State("recommended-bets-table-datatable", "data"),
+    State("book-odds-store", "data"),
+    prevent_initial_call=True,
+)
+def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json):
+    trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
+    if trigger == "moneyline-modal-close":
+        return False, no_update, no_update
+    if trigger != "recommended-bets-table-datatable":
+        raise PreventUpdate
+    if not active_cell or active_cell.get("column_id") != "moneyline":
+        raise PreventUpdate
+    if not table_data:
+        raise PreventUpdate
+
+    row_index = active_cell.get("row")
+    if row_index is None or row_index >= len(table_data):
+        raise PreventUpdate
+
+    row = table_data[row_index]
+    game_id = row.get("game_id")
+    if not game_id:
+        raise PreventUpdate
+
+    odds_df = pd.DataFrame()
+    if book_odds_json:
+        try:
+            odds_df = pd.read_json(StringIO(book_odds_json), orient="records")
+        except ValueError:
+            odds_df = pd.DataFrame()
+
+    if not odds_df.empty:
+        key_column = "forward_game_id" if "forward_game_id" in odds_df.columns else "game_id"
+        matchup_df = odds_df[odds_df[key_column] == game_id]
+    else:
+        matchup_df = pd.DataFrame()
+    title_team = row.get("team") or "Selected team"
+    opponent = row.get("opponent") or ""
+    title = f"Moneylines for {title_team} vs. {opponent}".strip()
+
+    home_team = row.get("home_team_name") or row.get("team")
+    away_team = row.get("away_team_name") or row.get("opponent")
+    if not home_team or not away_team:
+        side = (row.get("side") or "").lower() if isinstance(row.get("side"), str) else ""
+        if side == "home":
+            home_team = row.get("team")
+            away_team = row.get("opponent")
+        elif side == "away":
+            home_team = row.get("opponent")
+            away_team = row.get("team")
+
+    if matchup_df.empty:
+        content = components.empty_state("No sportsbook moneylines available for this matchup.")
+    else:
+        content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
+
+    return True, title, content
 
 
 def run(debug: bool = False, port: int = 8050, host: str = "0.0.0.0") -> None:

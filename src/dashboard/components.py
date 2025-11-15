@@ -380,6 +380,7 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     ]
 
     return dash_table.DataTable(
+        id="recommended-bets-table-datatable",
         columns=columns,
         data=df.to_dict("records"),
         sort_action="native",
@@ -656,6 +657,51 @@ def prediction_comparison_table(predictions: pd.DataFrame):
     )
 
 
+def moneyline_detail_table(book_rows: pd.DataFrame, *, home_team: Optional[str], away_team: Optional[str]):
+    if book_rows.empty:
+        return empty_state("No sportsbook moneylines available for this matchup.")
+
+    df = book_rows.copy()
+    df["outcome"] = df["outcome"].astype(str).str.lower()
+    pivot = df.pivot_table(index="book", columns="outcome", values="moneyline", aggfunc="first").reset_index()
+
+    def _fmt(val: Optional[float]) -> str:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return ""
+        return f"{val:+.0f}"
+
+    if "home" in pivot.columns:
+        pivot["home_display"] = pivot["home"].apply(_fmt)
+    else:
+        pivot["home_display"] = ""
+    if "away" in pivot.columns:
+        pivot["away_display"] = pivot["away"].apply(_fmt)
+    else:
+        pivot["away_display"] = ""
+    if "draw" in pivot.columns:
+        pivot["draw_display"] = pivot["draw"].apply(_fmt)
+
+    columns = [
+        {"name": "Sportsbook", "id": "book"},
+        {"name": f"Home ({home_team or 'Home'})", "id": "home_display"},
+        {"name": f"Away ({away_team or 'Away'})", "id": "away_display"},
+    ]
+
+    display_columns = ["book", "home_display", "away_display"]
+    if "draw_display" in pivot.columns:
+        columns.append({"name": "Draw", "id": "draw_display"})
+        display_columns.append("draw_display")
+
+    return dash_table.DataTable(
+        columns=columns,
+        data=pivot[display_columns].to_dict("records"),
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"padding": "0.5rem", "textAlign": "center"},
+        style_header={"fontWeight": "bold"},
+    )
+
+
 __all__ = [
     "metric_card",
     "summary_cards",
@@ -673,5 +719,6 @@ __all__ = [
     "empty_state",
     "prediction_summary",
     "prediction_comparison_table",
+    "moneyline_detail_table",
 ]
 

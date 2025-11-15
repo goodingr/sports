@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Dict
+from typing import Dict, Iterable, Optional, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -14,6 +14,9 @@ except ImportError:  # pragma: no cover - fallback for Python <3.9
 
 import numpy as np
 import pandas as pd
+
+from src.data.team_mappings import normalize_team_code
+from src.db.core import connect
 
 FORWARD_TEST_DIR = Path("data/forward_test")
 MASTER_PREDICTIONS_PATH = FORWARD_TEST_DIR / "predictions_master.parquet"
@@ -300,6 +303,9 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
                     "side": side,
                     "team": team,
                     "opponent": opponent,
+                    "league": row.get("league"),
+                    "home_team_name": row.get("home_team"),
+                    "away_team_name": row.get("away_team"),
                     "moneyline": float(moneyline) if moneyline is not None else np.nan,
                     "predicted_prob": float(predicted_prob) if predicted_prob is not None else np.nan,
                     "implied_prob": float(implied_prob) if implied_prob is not None else np.nan,
@@ -705,6 +711,118 @@ def get_upcoming_calendar(
     return bets[["date", "team", "opponent", "edge", "commence_time", "moneyline"]]
 
 
+def _to_utc_timestamp(value: object) -> Optional[pd.Timestamp]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    ts = pd.to_datetime(value, errors="coerce")
+    if ts is None or pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts
+
+
+def _lookup_team_id(conn, sport_id: int, team_code: str, cache: Dict[Tuple[int, str], Optional[int]]) -> Optional[int]:
+    key = (sport_id, team_code)
+    if key in cache:
+        return cache[key]
+    row = conn.execute(
+        "SELECT team_id FROM teams WHERE sport_id = ? AND code = ?",
+        (sport_id, team_code),
+    ).fetchone()
+    team_id = row[0] if row else None
+    cache[key] = team_id
+    return team_id
+
+
+def _match_games_to_db(recommended: pd.DataFrame) -> pd.DataFrame:
+    if recommended.empty or "league" not in recommended.columns:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    leagues = sorted({str(val).upper() for val in recommended["league"].dropna() if str(val).strip()})
+    if not leagues:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    placeholders = ",".join("?" for _ in leagues)
+    league_params = tuple(leagues)
+
+    with connect() as conn:
+        sport_rows = conn.execute(
+            f"SELECT league, sport_id FROM sports WHERE UPPER(league) IN ({placeholders})",
+            league_params,
+        ).fetchall()
+        sport_ids = {str(row[0]).upper(): row[1] for row in sport_rows}
+        team_cache: Dict[Tuple[int, str], Optional[int]] = {}
+        mapping: list[dict[str, object]] = []
+
+        for _, row in recommended.iterrows():
+            league = str(row.get("league") or "").upper()
+            sport_id = sport_ids.get(league)
+            if not sport_id:
+                continue
+
+            home_name = row.get("home_team_name") or row.get("team")
+            away_name = row.get("away_team_name") or row.get("opponent")
+            if not home_name or not away_name:
+                continue
+
+            home_code = normalize_team_code(league, home_name)
+            away_code = normalize_team_code(league, away_name)
+            if not home_code or not away_code:
+                continue
+
+            home_team_id = _lookup_team_id(conn, sport_id, home_code.upper(), team_cache)
+            away_team_id = _lookup_team_id(conn, sport_id, away_code.upper(), team_cache)
+            if not home_team_id or not away_team_id:
+                continue
+
+            commence_ts = _to_utc_timestamp(row.get("commence_time"))
+            if commence_ts is None:
+                continue
+            target_epoch = int(commence_ts.timestamp())
+
+            game_row = conn.execute(
+                """
+                SELECT game_id, start_time_utc
+                FROM games
+                WHERE sport_id = ?
+                  AND home_team_id = ?
+                  AND away_team_id = ?
+                ORDER BY ABS(strftime('%s', start_time_utc) - ?)
+                LIMIT 1
+                """,
+                (sport_id, home_team_id, away_team_id, target_epoch),
+            ).fetchone()
+
+            if not game_row:
+                continue
+
+            start_iso = game_row[1]
+            if start_iso:
+                try:
+                    start_epoch = int(pd.Timestamp(start_iso).tz_convert("UTC").timestamp())
+                except Exception:
+                    start_epoch = None
+                if start_epoch is not None and abs(start_epoch - target_epoch) > 3 * 24 * 3600:
+                    continue
+
+            mapping.append(
+                {
+                    "prediction_game_id": row.get("game_id"),
+                    "db_game_id": game_row[0],
+                }
+            )
+
+    if not mapping:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+
+    mapping_df = pd.DataFrame(mapping).dropna()
+    mapping_df = mapping_df.drop_duplicates(subset=["prediction_game_id"])
+    return mapping_df
+
+
 def _select_best_option(options: Dict[str, Tuple[Optional[float], Optional[str]]]) -> Tuple[Optional[str], Optional[str], Optional[float]]:
     best_side = None
     best_label = None
@@ -887,6 +1005,62 @@ def summarize_prediction_comparison(df: pd.DataFrame) -> PredictionComparisonSta
     )
 
 
+def get_moneylines_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
+    mapping = _match_games_to_db(recommended)
+    if mapping.empty:
+        return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
+
+    db_ids = mapping["db_game_id"].dropna().unique().tolist()
+    if not db_ids:
+        return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
+
+    placeholders = ",".join("?" for _ in db_ids)
+    query = f"""
+        WITH latest_snapshot AS (
+            SELECT
+                o.game_id,
+                o.book_id,
+                o.outcome,
+                MAX(s.fetched_at_utc) AS max_fetched
+            FROM odds o
+            JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+            WHERE o.market = 'h2h'
+              AND o.game_id IN ({placeholders})
+              AND o.outcome IN ('home', 'away', 'draw')
+            GROUP BY o.game_id, o.book_id, o.outcome
+        )
+        SELECT
+            o.game_id,
+            o.outcome,
+            b.name AS book,
+            o.price_american AS moneyline,
+            s.fetched_at_utc
+        FROM odds o
+        JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+        JOIN books b ON o.book_id = b.book_id
+        JOIN latest_snapshot ls
+          ON ls.game_id = o.game_id
+         AND ls.book_id = o.book_id
+         AND ls.outcome = o.outcome
+         AND ls.max_fetched = s.fetched_at_utc
+        WHERE o.market = 'h2h'
+          AND o.price_american IS NOT NULL
+          AND o.game_id IN ({placeholders})
+    """
+
+    params = db_ids + db_ids
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    if not rows:
+        return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
+
+    odds_df = pd.DataFrame([dict(row) for row in rows])
+    odds_df = odds_df.merge(mapping, how="left", left_on="game_id", right_on="db_game_id")
+    odds_df = odds_df.rename(columns={"prediction_game_id": "forward_game_id"})
+    return odds_df[["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"]]
+
+
 __all__ = [
     "SummaryMetrics",
     "PredictionComparisonStats",
@@ -904,4 +1078,5 @@ __all__ = [
     "get_upcoming_calendar",
     "build_prediction_comparison",
     "summarize_prediction_comparison",
+    "get_moneylines_for_recommended",
 ]
