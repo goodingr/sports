@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from src.dashboard import app as dashboard_app
+from src.dashboard import components as dashboard_components
 from src.dashboard import data as dashboard_data
 
 
@@ -208,3 +209,18 @@ def test_map_game_ids_by_odds_api_matches_existing_games(tmp_path, monkeypatch):
     assert len(mapping) == 1
     assert mapping.iloc[0]["prediction_game_id"] == "event123"
     assert mapping.iloc[0]["db_game_id"] == "NBA_custom123"
+
+
+def test_moneyline_detail_table_filters_kaggle_books():
+    df = pd.DataFrame(
+        [
+            {"book": "Kaggle Consensus (8 books)", "outcome": "home", "moneyline": -200},
+            {"book": "FanDuel", "outcome": "home", "moneyline": -180},
+            {"book": "FanDuel", "outcome": "away", "moneyline": 160},
+        ]
+    )
+
+    table = dashboard_components.moneyline_detail_table(df, home_team="HOU", away_team="POR")
+    assert isinstance(table.data, list)
+    assert all("Kaggle" not in row["book"] for row in table.data)
+    assert any(row["book"] == "FanDuel" for row in table.data)

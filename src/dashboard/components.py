@@ -662,6 +662,11 @@ def moneyline_detail_table(book_rows: pd.DataFrame, *, home_team: Optional[str],
         return empty_state("No sportsbook moneylines available for this matchup.")
 
     df = book_rows.copy()
+    if "book" in df.columns:
+        df = df[~df["book"].astype(str).str.contains("kaggle", case=False, na=False)].copy()
+    if df.empty:
+        return empty_state("No sportsbook moneylines available for this matchup.")
+
     df["outcome"] = df["outcome"].astype(str).str.lower()
     pivot = df.pivot_table(index="book", columns="outcome", values="moneyline", aggfunc="first").reset_index()
 

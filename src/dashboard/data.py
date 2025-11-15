@@ -1097,6 +1097,12 @@ def get_moneylines_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
 
     odds_df = pd.DataFrame([dict(row) for row in rows])
+    if not odds_df.empty and "book" in odds_df.columns:
+        odds_df = odds_df[~odds_df["book"].astype(str).str.contains("kaggle", case=False, na=False)].copy()
+
+    if odds_df.empty:
+        return pd.DataFrame(columns=["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"])
+
     odds_df = odds_df.merge(mapping, how="left", left_on="game_id", right_on="db_game_id")
     odds_df = odds_df.rename(columns={"prediction_game_id": "forward_game_id"})
     return odds_df[["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"]]
