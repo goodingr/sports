@@ -348,6 +348,10 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
     return dbc.Container(
         [
             _navbar(pathname),
+            html.Div(
+                components.recommended_bets_table(pd.DataFrame()),
+                style={"display": "none"},
+            ),
             html.H2("Winner Predictions vs. Sportsbooks"),
             html.P(
                 "Compare our model's projected winners against sportsbook consensus, track where we agree, "
@@ -397,7 +401,7 @@ app.layout = html.Div(
         dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
         dcc.Store(id="book-odds-store"),
-        dcc.Input(id="moneyline-link-input", type="hidden"),
+        dcc.Input(id="moneyline-link-input", type="text", style={"display": "none"}),
         html.Div(id="page-content", children=_dashboard_layout("/")),
     ]
 )
