@@ -391,9 +391,10 @@ def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
             return ""
         return (
             "<div style='text-align:center; width:100%;'>"
-            f"<span class='moneyline-link' data-row-index='{index}' style='color:#0d6efd; text-decoration:underline;'>"
+            f"<a href='#' class='moneyline-link' data-row-index='{index}' "
+            "style='color:#0d6efd; text-decoration:underline;'>"
             f"{text}"
-            "</span>"
+            "</a>"
             "</div>"
         )
 
