@@ -701,7 +701,7 @@ def get_completed_bets(
         return pd.DataFrame()
 
     # Check game status from database to exclude games that are still in progress
-    # If a game has results but status is not 'final', exclude it (likely still ongoing)
+    # If a game has results but status is clearly live/upcoming, exclude it
     if "game_id" in completed.columns:
         try:
             with connect() as conn:
@@ -756,13 +756,50 @@ def get_completed_bets(
                     # 1. Not in DB at all (show them - they have results so likely completed)
                     # 2. In DB with status='final' (show them - definitely completed)
                     # Exclude games that are in DB but status != 'final' (still in progress)
+                    # Map commence_time per game_id for smarter filtering
+                    commence_lookup: dict[str, Optional[pd.Timestamp]] = {}
+                    if "commence_time" in completed.columns:
+                        commence_lookup = (
+                            completed[["game_id", "commence_time"]]
+                            .dropna(subset=["game_id"])
+                            .groupby("game_id")["commence_time"]
+                            .first()
+                            .to_dict()
+                        )
+
                     final_game_ids = []
                     for pred_id in prediction_game_ids:
                         status = game_status_map.get(pred_id)
-                        if status is None or status == "final":
-                            # Not in DB or definitely final - show it
+                        if status is None:
                             final_game_ids.append(pred_id)
-                        # If status exists and is not 'final', exclude it
+                            continue
+
+                        status_normalized = str(status).strip().lower()
+                        commence_ts = commence_lookup.get(pred_id)
+                        if isinstance(commence_ts, pd.Timestamp):
+                            if commence_ts.tzinfo is None:
+                                commence_ts = commence_ts.tz_localize("UTC")
+                            else:
+                                commence_ts = commence_ts.tz_convert("UTC")
+
+                        # Explicit in-progress statuses should still be hidden
+                        if status_normalized in {"in_progress", "live", "halftime"}:
+                            continue
+
+                        # Upcoming games still scheduled should remain hidden if they have not started yet
+                        if status_normalized == "scheduled":
+                            if commence_ts is not None and commence_ts > now:
+                                continue
+                            # Game should have started; allow it to display since we have results
+                            final_game_ids.append(pred_id)
+                            continue
+
+                        if status_normalized == "final":
+                            final_game_ids.append(pred_id)
+                            continue
+
+                        # Default: allow other statuses (postponed/cancelled/etc.) to surface since we have results
+                        final_game_ids.append(pred_id)
                     
                     if final_game_ids:
                         completed = completed[completed["game_id"].isin(final_game_ids)].copy()

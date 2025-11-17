@@ -35,7 +35,7 @@ LEAGUE_SPORT_KEYS = {
     "LALIGA": "soccer_spain_la_liga",
     "BUNDESLIGA": "soccer_germany_bundesliga",
     "SERIEA": "soccer_italy_serie_a",
-    "LIGUE1": "soccer_france_ligue_1",
+    "LIGUE1": "soccer_france_ligue_one",
 }
 
 DEFAULT_BOOKMAKERS = ["pinnacle", "bet365", "williamhill"]

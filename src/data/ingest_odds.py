@@ -1,4 +1,4 @@
-"""Fetch NFL odds data from The Odds API and cache as JSON snapshots."""
+"""Fetch odds data from The Odds API and cache as JSON snapshots."""
 
 from __future__ import annotations
 
@@ -17,6 +17,18 @@ from .config import RAW_DATA_DIR, OddsAPISettings, ensure_directories
 
 
 LOGGER = logging.getLogger(__name__)
+
+# Maps our league codes to The Odds API sport keys so CLI users can invoke leagues.
+LEAGUE_TO_SPORT_KEY = {
+    "NFL": "americanfootball_nfl",
+    "CFB": "americanfootball_ncaaf",
+    "NBA": "basketball_nba",
+    "EPL": "soccer_epl",
+    "LALIGA": "soccer_spain_la_liga",
+    "BUNDESLIGA": "soccer_germany_bundesliga",
+    "SERIEA": "soccer_italy_serie_a",
+    "LIGUE1": "soccer_france_ligue_one",
+}
 
 
 def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
@@ -202,13 +214,35 @@ def run(
     return output_path
 
 
+def _resolve_sport_key(league: Optional[str], explicit_sport: Optional[str]) -> Optional[str]:
+    if league:
+        league_normalized = league.upper()
+        if league_normalized not in LEAGUE_TO_SPORT_KEY:
+            raise ValueError(
+                f"Unsupported league '{league}'. Choose from: {', '.join(sorted(LEAGUE_TO_SPORT_KEY))}"
+            )
+        league_sport = LEAGUE_TO_SPORT_KEY[league_normalized]
+        if explicit_sport and explicit_sport != league_sport:
+            raise ValueError(
+                f"Conflicting sport inputs: league '{league}' maps to '{league_sport}' but '--sport' was "
+                f"set to '{explicit_sport}'. Specify only one."
+            )
+        return league_sport
+    return explicit_sport
+
+
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Download NFL odds from The Odds API")
+    parser = argparse.ArgumentParser(description="Download odds from The Odds API")
     parser.add_argument(
         "--dotenv",
         type=Path,
         default=None,
         help="Optional path to .env file containing ODDS_API_KEY",
+    )
+    parser.add_argument(
+        "--league",
+        choices=sorted(LEAGUE_TO_SPORT_KEY.keys()),
+        help="Optional league identifier (e.g., NBA, NFL). Overrides --sport with the correct Odds API key.",
     )
     parser.add_argument(
         "--sport",
@@ -242,9 +276,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
+    sport_key = _resolve_sport_key(args.league, args.sport)
     run(
         args.dotenv,
-        sport_key=args.sport,
+        sport_key=sport_key,
         market=args.market,
         region=args.region,
         force_refresh=args.force_refresh,

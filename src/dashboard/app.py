@@ -479,6 +479,65 @@ def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
 
 
 @app.callback(
+    Output("date-range-picker", "min_date_allowed"),
+    Output("date-range-picker", "max_date_allowed"),
+    Output("date-range-picker", "start_date"),
+    Output("date-range-picker", "end_date"),
+    Output("predictions-date-range", "min_date_allowed"),
+    Output("predictions-date-range", "max_date_allowed"),
+    Output("predictions-date-range", "start_date"),
+    Output("predictions-date-range", "end_date"),
+    Input("forward-data-store", "data"),
+)
+def sync_date_range_controls(data_json: Optional[str]):
+    """Keep both date pickers aligned with the latest data window."""
+    df = _df_from_json(data_json)
+    if df.empty or "commence_time" not in df.columns:
+        default_start = (date.today() - timedelta(days=7)).isoformat()
+        default_end = date.today().isoformat()
+        return (
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+        )
+
+    commence = pd.to_datetime(df["commence_time"], errors="coerce")
+    commence = commence.dropna()
+    if commence.empty:
+        default_start = (date.today() - timedelta(days=7)).isoformat()
+        default_end = date.today().isoformat()
+        return (
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+            default_start,
+            default_end,
+        )
+
+    min_date_allowed = commence.min().date().isoformat()
+    max_date_allowed = commence.max().date().isoformat()
+
+    return (
+        min_date_allowed,
+        max_date_allowed,
+        min_date_allowed,
+        max_date_allowed,
+        min_date_allowed,
+        max_date_allowed,
+        min_date_allowed,
+        max_date_allowed,
+    )
+
+
+@app.callback(
     Output("summary-cards", "children"),
     Output("bankroll-cards", "children"),
     Output("cumulative-profit-chart", "children"),
@@ -587,6 +646,7 @@ def update_dashboard(
             book_odds_json = book_odds_df.to_json(date_format="iso", orient="records")
         recommended_display_df = recommended_df.copy()
         if "moneyline" in recommended_display_df.columns:
+            recommended_display_df["moneyline_value"] = recommended_display_df["moneyline"]
             recommended_display_df["moneyline"] = recommended_display_df["moneyline"].apply(
                 lambda x: f"{x:+.0f}" if pd.notna(x) else ""
             )
@@ -637,6 +697,11 @@ def update_predictions_page(
     df = _filter_by_date(df, start_date, end_date)
 
     comparison_df = build_prediction_comparison(df)
+    if not comparison_df.empty and "actual_winner_side" in comparison_df.columns:
+        comparison_df = comparison_df[comparison_df["actual_winner_side"].notna()].copy()
+    if not comparison_df.empty and "commence_time" in comparison_df.columns:
+        comparison_df = comparison_df.sort_values("commence_time", ascending=False)
+
     stats = summarize_prediction_comparison(comparison_df)
 
     return (
@@ -703,7 +768,44 @@ def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json
             away_team = row.get("team")
 
     if matchup_df.empty:
-        content = components.empty_state("No sportsbook moneylines available for this matchup.")
+        # Fallback to the stored moneyline on the recommendation itself (if available)
+        def _parse_moneyline(value):
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            try:
+                return float(str(value).replace("+", "").strip())
+            except (ValueError, TypeError):
+                return None
+
+        fallback_value = row.get("moneyline_value")
+        fallback_ml = _parse_moneyline(fallback_value)
+        if fallback_ml is None:
+            fallback_ml = _parse_moneyline(row.get("moneyline"))
+
+        fallback_side = (row.get("side") or "").lower() if isinstance(row.get("side"), str) else ""
+        if not fallback_side:
+            team_name = (row.get("team") or "").upper()
+            if team_name and home_team and team_name == str(home_team).upper():
+                fallback_side = "home"
+            elif team_name and away_team and team_name == str(away_team).upper():
+                fallback_side = "away"
+
+        if fallback_ml is not None:
+            fallback_book = row.get("moneyline_book") or "Forward Test"
+            fallback_rows = pd.DataFrame(
+                [
+                    {
+                        "book": fallback_book,
+                        "outcome": fallback_side or "home",
+                        "moneyline": fallback_ml,
+                    }
+                ]
+            )
+            content = components.moneyline_detail_table(fallback_rows, home_team=home_team, away_team=away_team)
+        else:
+            content = components.empty_state("No sportsbook moneylines available for this matchup.")
     else:
         content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 

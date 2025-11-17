@@ -268,6 +268,20 @@ if soccer_leagues:
     Write-Log "ERROR: Ingestion step failed: $_"
 }
 
+Write-Log "Step 1b: Fetching The Odds API snapshots..."
+$theOddsLeagues = @("NFL", "NBA", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
+foreach ($league in $targetLeagues) {
+    if ($theOddsLeagues -notcontains $league) {
+        continue
+    }
+    try {
+        Write-Log "Requesting Odds API snapshot for $league..."
+        & poetry run python -m src.data.ingest_odds --league $league --force-refresh | Out-Null
+    } catch {
+        Write-Log ("WARNING: Odds API snapshot failed for {0}: {1}" -f $league, $_)
+    }
+}
+
 if ($targetSoccerLeagues.Count) {
     $understatTargets = @($targetSoccerLeagues | Where-Object { $understatLeagueMap.ContainsKey($_) } | ForEach-Object { $understatLeagueMap[$_] })
     if ($understatTargets.Count) {

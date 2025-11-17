@@ -15,7 +15,10 @@ from typing import Any, Dict, List, Tuple
 import joblib  # type: ignore[import]
 import numpy as np  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
-from lightgbm import LGBMClassifier  # type: ignore[import]
+try:  # pragma: no cover - optional dependency for certain model types
+    from lightgbm import LGBMClassifier  # type: ignore[import]
+except ImportError:  # noqa: F401
+    LGBMClassifier = None  # type: ignore[assignment]
 from sklearn.base import clone  # type: ignore[import]
 from sklearn.ensemble import HistGradientBoostingClassifier  # type: ignore[import]
 from sklearn.impute import SimpleImputer  # type: ignore[import]
@@ -26,9 +29,11 @@ from sklearn.model_selection import TimeSeriesSplit  # type: ignore[import]
 from sklearn.neural_network import MLPClassifier  # type: ignore[import]
 from sklearn.pipeline import Pipeline  # type: ignore[import]
 from sklearn.preprocessing import StandardScaler  # type: ignore[import]
-from xgboost import XGBClassifier  # type: ignore[import]
+try:  # pragma: no cover - optional dependency for certain model types
+    from xgboost import XGBClassifier  # type: ignore[import]
+except ImportError:  # noqa: F401
+    XGBClassifier = None  # type: ignore[assignment]
 
-from src.features.moneyline_dataset import build_dataset
 from src.data.config import PROCESSED_DATA_DIR, ensure_directories
 from src.db.models import persist_model_predictions, register_model
 
@@ -236,6 +241,7 @@ def _ensure_dataset(seasons: List[int], league: str) -> Path:
     dataset_path = _dataset_path(league, season_min, season_max)
     if not dataset_path.exists():
         LOGGER.info("Processed dataset not found for %s. Building now.", league)
+        from src.features.moneyline_dataset import build_dataset
         build_dataset(seasons, league=league)
     return dataset_path
 
@@ -319,6 +325,10 @@ def _build_estimator(model_type: str) -> Pipeline:
         )
 
     if model_type == "lightgbm":
+        if LGBMClassifier is None:
+            raise ImportError(
+                "lightgbm is required for model_type='lightgbm'. Install it via `pip install lightgbm`."
+            )
         return Pipeline(
             steps=[
                 ("imputer", SimpleImputer(strategy="median")),
@@ -342,6 +352,10 @@ def _build_estimator(model_type: str) -> Pipeline:
         )
 
     if model_type == "xgboost":
+        if XGBClassifier is None:
+            raise ImportError(
+                "xgboost is required for model_type='xgboost'. Install it via `pip install xgboost`."
+            )
         return Pipeline(
             steps=[
                 ("imputer", SimpleImputer(strategy="median")),

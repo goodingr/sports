@@ -601,7 +601,7 @@ SPORT_CONFIG = {
     "soccer_spain_la_liga": {"league": "LALIGA", "sport_name": "Soccer", "default_market": "moneyline"},
     "soccer_germany_bundesliga": {"league": "BUNDESLIGA", "sport_name": "Soccer", "default_market": "moneyline"},
     "soccer_italy_serie_a": {"league": "SERIEA", "sport_name": "Soccer", "default_market": "moneyline"},
-    "soccer_france_ligue_1": {"league": "LIGUE1", "sport_name": "Soccer", "default_market": "moneyline"},
+    "soccer_france_ligue_one": {"league": "LIGUE1", "sport_name": "Soccer", "default_market": "moneyline"},
 }
 
 SPORT_CONFIG_BY_LEAGUE = {config["league"].upper(): config for config in SPORT_CONFIG.values()}

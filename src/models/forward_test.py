@@ -41,7 +41,7 @@ LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "LALIGA": "soccer_spain_la_liga",
     "BUNDESLIGA": "soccer_germany_bundesliga",
     "SERIEA": "soccer_italy_serie_a",
-    "LIGUE1": "soccer_france_ligue_1",
+    "LIGUE1": "soccer_france_ligue_one",
 }
 
 FORWARD_TEST_DIR = Path("data/forward_test")
@@ -1590,8 +1590,8 @@ def main() -> None:
     parser.add_argument(
         "--league",
         choices=SUPPORTED_LEAGUES + ["ALL"],
-        default=SUPPORTED_LEAGUES[0],
-        help="League to use (default: NBA). Specify ALL to process every league.",
+        default=None,
+        help="League to use (default varies by action: NBA for predict/report, ALL for update).",
     )
     parser.add_argument(
         "--model",
@@ -1615,14 +1615,15 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level))
     
     if args.action == "predict":
-        model = load_model(args.model, league=args.league)
-        games = fetch_live_games(league=args.league, dotenv_path=args.dotenv)
+        league = args.league or SUPPORTED_LEAGUES[0]
+        model = load_model(args.model, league=league)
+        games = fetch_live_games(league=league, dotenv_path=args.dotenv)
         
         if not games:
             LOGGER.warning("No live games found")
             return
         
-        predictions = make_predictions(games, model, league=args.league, model_path=args.model)
+        predictions = make_predictions(games, model, league=league, model_path=args.model)
         save_predictions(predictions)
         
         # Show recommendations
@@ -1656,18 +1657,19 @@ def main() -> None:
             LOGGER.info("No bets meet edge threshold of %.2f", edge_threshold)
     
     elif args.action == "update":
-        target_league = None if args.league == "ALL" else args.league
+        target_league = None if args.league in (None, "ALL") else args.league
         update_results(league=target_league, dotenv_path=args.dotenv)
     
     elif args.action == "report":
-        report = generate_report(league=args.league)
+        league = args.league or SUPPORTED_LEAGUES[0]
+        report = generate_report(league=league)
         
         if "error" in report:
             print(f"Error: {report['error']}")
         elif "message" in report:
             print(report["message"])
         else:
-            print(f"\n=== FORWARD TESTING REPORT ({args.league}) ===")
+            print(f"\n=== FORWARD TESTING REPORT ({league}) ===")
             print(f"Total Predictions: {report['total_predictions']}")
             print(f"Completed Games: {report['completed_games']}")
             print(f"Recommended Bets: {report['recommended_bets']}")
