@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 from io import StringIO
-from typing import Optional
+from typing import Optional, Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -20,11 +20,17 @@ from .data import (
     SummaryMetrics,
     build_prediction_comparison,
     calculate_summary_metrics,
+    calculate_totals_metrics,
     get_completed_bets,
+    get_overunder_completed,
+    get_overunder_recommendations,
     get_moneylines_for_recommended,
+    get_totals_odds_for_recommended,
     get_performance_by_threshold,
     get_performance_over_time,
     get_recommended_bets,
+    get_totals_performance_by_threshold,
+    get_totals_performance_over_time,
     get_default_version_value,
     get_version_options,
     filter_by_version,
@@ -194,6 +200,7 @@ def _navbar(pathname: Optional[str]) -> dbc.Nav:
         [
             dbc.NavLink("Dashboard", href="/", active=pathname == "/" or pathname == ""),
             dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
+            dbc.NavLink("Over/Under", href="/overunder", active=pathname == "/overunder"),
         ],
         pills=True,
         className="mb-4 gap-2",
@@ -446,11 +453,160 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
     )
 
 
+def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            dbc.Row(
+                [
+                    dbc.Col(html.H2("Over/Under Dashboard"), md=8),
+                    dbc.Col(
+                        dbc.Button(
+                            "Manual Refresh",
+                            id="refresh-button",
+                            color="primary",
+                            className="float-md-end",
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(html.Div(id="last-updated-text", className="text-md-end text-muted"), md=2),
+                ],
+                className="align-items-center g-2",
+            ),
+            html.Hr(),
+            html.Div("All times shown in Eastern Time (ET).", className="text-muted mb-3"),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("League", htmlFor="ou-league-select"),
+                                dcc.Dropdown(
+                                    id="ou-league-select",
+                                    options=LEAGUE_FILTER_OPTIONS,
+                                    value="all",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Version", htmlFor="ou-version-select"),
+                                dcc.Dropdown(
+                                    id="ou-version-select",
+                                    options=VERSION_FILTER_OPTIONS,
+                                    value=VERSION_DEFAULT_VALUE,
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Date Range", htmlFor="ou-date-range"),
+                                dcc.DatePickerRange(
+                                    id="ou-date-range",
+                                    min_date_allowed=min_date,
+                                    max_date_allowed=max_date,
+                                    start_date=min_date,
+                                    end_date=max_date,
+                                    display_format="YYYY-MM-DD",
+                                ),
+                            ]
+                        ),
+                        md=4,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Edge Threshold", htmlFor="ou-edge-slider"),
+                                dcc.Slider(
+                                    id="ou-edge-slider",
+                                    min=0.0,
+                                    max=0.2,
+                                    step=0.005,
+                                    value=DEFAULT_EDGE_THRESHOLD,
+                                    marks={0.0: "0%", 0.05: "5%", 0.1: "10%", 0.15: "15%", 0.2: "20%"},
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                ),
+                            ]
+                        ),
+                        md=4,
+                    ),
+                ],
+                className="g-3 mb-4",
+            ),
+            dcc.Tabs(
+                id="overunder-tabs",
+                value="ou-overview",
+                children=[
+                    dcc.Tab(
+                        label="Overview",
+                        value="ou-overview",
+                        children=[
+                            dcc.Loading(html.Div(id="overunder-summary"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="overunder-bankroll"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Performance",
+                        value="ou-performance",
+                        children=[
+                            dcc.Loading(html.Div(id="overunder-performance"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Recommended Totals",
+                        value="ou-recommended",
+                        children=[
+                            dcc.Loading(html.Div(id="overunder-recommended-table"), type="circle"),
+                            dbc.Modal(
+                                [
+                                    dbc.ModalHeader(dbc.ModalTitle(id="ou-odds-modal-title")),
+                                    dbc.ModalBody(html.Div(id="ou-odds-modal-content")),
+                                    dbc.ModalFooter(
+                                        dbc.Button("Close", id="ou-odds-modal-close", color="secondary", className="ms-auto")
+                                    ),
+                                ],
+                                id="ou-odds-modal",
+                                is_open=False,
+                                size="lg",
+                            ),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Completed Totals",
+                        value="ou-completed",
+                        children=[
+                            dcc.Loading(html.Div(id="overunder-completed-table"), type="circle"),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Edge Analysis",
+                        value="ou-edge",
+                        children=[
+                            dcc.Loading(html.Div(id="overunder-edge"), type="circle"),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        fluid=True,
+    )
+
+
 app.layout = html.Div(
     [
         dcc.Location(id="url"),
         dcc.Store(id="forward-data-store", data=_df_to_json(initial_df)),
         dcc.Store(id="book-odds-store"),
+        dcc.Store(id="ou-book-odds-store"),
         html.Div(id="page-content", children=_dashboard_layout("/")),
     ]
 )
@@ -460,6 +616,8 @@ app.layout = html.Div(
 def render_page(pathname: Optional[str]):
     if pathname == "/predictions":
         return _predictions_layout(pathname)
+    if pathname == "/overunder":
+        return _overunder_layout(pathname)
     return _dashboard_layout(pathname)
 
 
@@ -467,13 +625,12 @@ def render_page(pathname: Optional[str]):
     Output("forward-data-store", "data"),
     Output("last-updated-text", "children"),
     Input("refresh-button", "n_clicks"),
-    Input("league-select", "value"),
     prevent_initial_call=False,
 )
-def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
+def refresh_data(n_clicks: Optional[int]) -> tuple[str, str]:
+    """Refresh the cached predictions when the manual refresh button is clicked."""
     force_refresh = bool(n_clicks)
-    league_filter = None if league == "all" else league
-    df = load_forward_test_data(force_refresh=force_refresh, league=league_filter)
+    df = load_forward_test_data(force_refresh=force_refresh, league=None)
     metrics = calculate_summary_metrics(df)
     return _df_to_json(df), _format_timestamp(metrics.last_updated)
 
@@ -487,54 +644,46 @@ def refresh_data(n_clicks: Optional[int], league: str) -> tuple[str, str]:
     Output("predictions-date-range", "max_date_allowed"),
     Output("predictions-date-range", "start_date"),
     Output("predictions-date-range", "end_date"),
+    Output("ou-date-range", "min_date_allowed"),
+    Output("ou-date-range", "max_date_allowed"),
+    Output("ou-date-range", "start_date"),
+    Output("ou-date-range", "end_date"),
     Input("forward-data-store", "data"),
 )
 def sync_date_range_controls(data_json: Optional[str]):
     """Keep both date pickers aligned with the latest data window."""
     df = _df_from_json(data_json)
+    def _payload(min_date: str, max_date: str) -> Tuple[str, ...]:
+        return (
+            min_date,
+            max_date,
+            min_date,
+            max_date,
+            min_date,
+            max_date,
+            min_date,
+            max_date,
+            min_date,
+            max_date,
+            min_date,
+            max_date,
+        )
+
     if df.empty or "commence_time" not in df.columns:
         default_start = (date.today() - timedelta(days=7)).isoformat()
         default_end = date.today().isoformat()
-        return (
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-        )
+        return _payload(default_start, default_end)
 
-    commence = pd.to_datetime(df["commence_time"], errors="coerce")
-    commence = commence.dropna()
+    commence = pd.to_datetime(df["commence_time"], errors="coerce").dropna()
     if commence.empty:
         default_start = (date.today() - timedelta(days=7)).isoformat()
         default_end = date.today().isoformat()
-        return (
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-            default_start,
-            default_end,
-        )
+        return _payload(default_start, default_end)
 
     min_date_allowed = commence.min().date().isoformat()
     max_date_allowed = commence.max().date().isoformat()
 
-    return (
-        min_date_allowed,
-        max_date_allowed,
-        min_date_allowed,
-        max_date_allowed,
-        min_date_allowed,
-        max_date_allowed,
-        min_date_allowed,
-        max_date_allowed,
-    )
+    return _payload(min_date_allowed, max_date_allowed)
 
 
 @app.callback(
@@ -711,6 +860,90 @@ def update_predictions_page(
 
 
 @app.callback(
+    Output("overunder-summary", "children"),
+    Output("overunder-bankroll", "children"),
+    Output("overunder-performance", "children"),
+    Output("overunder-recommended-table", "children"),
+    Output("overunder-completed-table", "children"),
+    Output("overunder-edge", "children"),
+    Output("ou-book-odds-store", "data"),
+    Input("forward-data-store", "data"),
+    Input("ou-league-select", "value"),
+    Input("ou-date-range", "start_date"),
+    Input("ou-date-range", "end_date"),
+    Input("ou-version-select", "value"),
+    Input("ou-edge-slider", "value"),
+)
+def update_overunder_page(data_json: Optional[str], league: str, start_date: Optional[str], end_date: Optional[str], version: str, edge_threshold: float):
+    df = _df_from_json(data_json)
+    df = filter_by_version(df, version)
+    if not df.empty and league != "all" and "league" in df.columns:
+        df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
+    df = _filter_by_date(df, start_date, end_date)
+
+    if df.empty:
+        empty = components.empty_state("No totals data available yet.")
+        return empty, empty, empty, empty, empty, empty
+    metrics = calculate_totals_metrics(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    performance_df = get_totals_performance_over_time(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    threshold_df = get_totals_performance_by_threshold(df, stake=DEFAULT_STAKE)
+    recommended = get_overunder_recommendations(df, edge_threshold=edge_threshold)
+    completed = get_overunder_completed(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+
+    recommended_table = components.overunder_recommended_table(recommended)
+    completed_table = components.overunder_completed_table(completed)
+    totals_odds_json = ""
+    totals_odds_df = get_totals_odds_for_recommended(recommended)
+    if not totals_odds_df.empty:
+        totals_odds_json = totals_odds_df.to_json(date_format="iso", orient="records")
+
+    summary_section = components.summary_cards(metrics)
+    bankroll_section = components.bankroll_cards(metrics)
+
+    performance_section = components.empty_state("No completed totals with enough edge yet.")
+    if not performance_df.empty:
+        performance_section = html.Div(
+            [
+                dbc.Row(
+                    [
+                        dbc.Col(components.cumulative_profit_chart(performance_df), md=6),
+                        dbc.Col(components.roi_over_time_chart(performance_df), md=6),
+                    ],
+                    className="g-3",
+                ),
+                html.Br(),
+                dbc.Row(
+                    [
+                        dbc.Col(components.win_rate_over_time_chart(performance_df), md=6),
+                        dbc.Col(components.performance_by_period_chart(performance_df, period="W"), md=6),
+                    ],
+                    className="g-3",
+                ),
+            ]
+        )
+
+    edge_section = components.empty_state("Not enough completed totals to analyze edge buckets yet.")
+    if not threshold_df.empty:
+        edge_section = dbc.Row(
+            [
+                dbc.Col(components.performance_by_threshold_chart(threshold_df), md=6),
+                dbc.Col(components.performance_by_threshold_table(threshold_df), md=6),
+            ],
+            className="g-3",
+        )
+
+    return (
+        summary_section,
+        bankroll_section,
+        performance_section,
+        recommended_table,
+        completed_table,
+        edge_section,
+        totals_odds_json,
+    )
+
+
+@app.callback(
     Output("moneyline-modal", "is_open"),
     Output("moneyline-modal-title", "children"),
     Output("moneyline-modal-content", "children"),
@@ -808,6 +1041,85 @@ def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json
             content = components.empty_state("No sportsbook moneylines available for this matchup.")
     else:
         content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
+
+    return True, title, content
+
+
+@app.callback(
+    Output("ou-odds-modal", "is_open"),
+    Output("ou-odds-modal-title", "children"),
+    Output("ou-odds-modal-content", "children"),
+    Input("overunder-recommended-table-datatable", "active_cell"),
+    Input("ou-odds-modal-close", "n_clicks"),
+    State("overunder-recommended-table-datatable", "data"),
+    State("ou-book-odds-store", "data"),
+    prevent_initial_call=True,
+)
+def toggle_overunder_modal(active_cell, close_clicks, table_data, book_odds_json):
+    trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
+    if trigger == "ou-odds-modal-close":
+        return False, no_update, no_update
+    if trigger != "overunder-recommended-table-datatable":
+        raise PreventUpdate
+    if not active_cell or active_cell.get("column_id") != "moneyline":
+        raise PreventUpdate
+    if not table_data:
+        raise PreventUpdate
+
+    row_index = active_cell.get("row")
+    if row_index is None or row_index >= len(table_data):
+        raise PreventUpdate
+
+    row = table_data[row_index]
+    game_id = row.get("game_id")
+    if not game_id:
+        raise PreventUpdate
+
+    odds_df = pd.DataFrame()
+    if book_odds_json:
+        try:
+            odds_df = pd.read_json(StringIO(book_odds_json), orient="records")
+        except ValueError:
+            odds_df = pd.DataFrame()
+
+    matchup_df = pd.DataFrame()
+    if not odds_df.empty:
+        matchup_df = odds_df[odds_df["forward_game_id"] == game_id]
+
+    home_team = row.get("home_team") or "Home"
+    away_team = row.get("away_team") or "Away"
+    title = f"Totals for {home_team} vs. {away_team}"
+
+    def _parse_price(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(str(value).replace("+", "").strip())
+        except (ValueError, TypeError):
+            return None
+
+    if matchup_df.empty:
+        fallback_ml = _parse_price(row.get("moneyline_value")) or _parse_price(row.get("moneyline"))
+        fallback_line = row.get("total_line_value")
+        fallback_outcome = (row.get("side") or "over").title()
+        if fallback_ml is not None or fallback_line is not None:
+            fallback_rows = pd.DataFrame(
+                [
+                    {
+                        "book": row.get("moneyline_book") or "Forward Test",
+                        "outcome": fallback_outcome,
+                        "moneyline": fallback_ml,
+                        "line": fallback_line,
+                    }
+                ]
+            )
+            content = components.totals_detail_table(fallback_rows, home_team=home_team, away_team=away_team)
+        else:
+            content = components.empty_state("No sportsbook totals available for this matchup.")
+    else:
+        content = components.totals_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 
     return True, title, content
 

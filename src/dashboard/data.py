@@ -428,6 +428,95 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
     return bets
 
 
+def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    required = [
+        "game_id",
+        "league",
+        "commence_time",
+        "predicted_at",
+        "total_line",
+        "over_moneyline",
+        "under_moneyline",
+        "over_predicted_prob",
+        "under_predicted_prob",
+        "over_implied_prob",
+        "under_implied_prob",
+        "over_edge",
+        "under_edge",
+        "home_score",
+        "away_score",
+    ]
+
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        LOGGER.warning("Totals expansion skipped, missing columns: %s", missing)
+        return pd.DataFrame()
+
+    records: list[dict[str, object]] = []
+    for _, row in df.iterrows():
+        line = row.get("total_line")
+        over_ml = row.get("over_moneyline")
+        under_ml = row.get("under_moneyline")
+        if pd.isna(line) or pd.isna(over_ml) or pd.isna(under_ml):
+            continue
+
+        for side in ("over", "under"):
+            price = row.get(f"{side}_moneyline")
+            pred = row.get(f"{side}_predicted_prob")
+            implied = row.get(f"{side}_implied_prob")
+            edge = row.get(f"{side}_edge")
+
+            actual_total = None
+            if pd.notna(row.get("home_score")) and pd.notna(row.get("away_score")):
+                actual_total = float(row.get("home_score") + row.get("away_score"))
+
+            if actual_total is None:
+                won = None
+            else:
+                if actual_total > line:
+                    winner = "over"
+                elif actual_total < line:
+                    winner = "under"
+                else:
+                    winner = None
+                won = winner == side if winner is not None else None
+
+            profit = _bet_profit(float(price), stake, won)
+            description = f"{side.title()} {line:.1f}" if pd.notna(line) else side.title()
+
+            records.append(
+                {
+                    "game_id": row.get("game_id"),
+                    "league": row.get("league"),
+                    "home_team": row.get("home_team"),
+                    "away_team": row.get("away_team"),
+                    "side": side,
+                    "description": description,
+                    "total_line": float(line),
+                    "moneyline": float(price) if price is not None else np.nan,
+                    "predicted_prob": float(pred) if pred is not None else np.nan,
+                    "implied_prob": float(implied) if implied is not None else np.nan,
+                    "edge": float(edge) if edge is not None else np.nan,
+                    "won": won,
+                    "profit": profit,
+                    "stake": stake if won is not None else np.nan,
+                    "commence_time": row.get("commence_time"),
+                    "predicted_at": row.get("predicted_at"),
+                    "settled_at": row.get("predicted_at"),
+                    "total_points": actual_total,
+                }
+            )
+
+    totals_df = pd.DataFrame(records)
+    if not totals_df.empty:
+        totals_df["commence_time"] = _to_datetime(totals_df["commence_time"])
+        totals_df["predicted_at"] = _to_datetime(totals_df["predicted_at"])
+    return totals_df
+
+
 def calculate_summary_metrics(
     df: pd.DataFrame,
     *,
@@ -527,6 +616,106 @@ def calculate_summary_metrics(
     )
 
 
+def calculate_totals_metrics(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    stake: float = DEFAULT_STAKE,
+) -> SummaryMetrics:
+    if df.empty:
+        return SummaryMetrics(
+            total_predictions=0,
+            completed_games=0,
+            pending_games=0,
+            recommended_bets=0,
+            recommended_completed=0,
+            win_rate=None,
+            roi=None,
+            net_profit=0.0,
+            max_drawdown=None,
+            cumulative_profit=0.0,
+            last_updated=None,
+            starting_bankroll=DEFAULT_STARTING_BANKROLL,
+            current_bankroll=DEFAULT_STARTING_BANKROLL,
+            total_staked=0.0,
+            bankroll_growth=None,
+        )
+
+    totals = _expand_totals(df, stake=stake)
+    if totals.empty or "edge" not in totals.columns:
+        total_predictions = int(df["total_line"].notna().sum()) if "total_line" in df.columns else 0
+        completed_games = int(df["home_score"].notna().sum()) if "home_score" in df.columns else 0
+        pending_games = total_predictions - completed_games
+        return SummaryMetrics(
+            total_predictions=total_predictions,
+            completed_games=max(completed_games, 0),
+            pending_games=max(pending_games, 0),
+            recommended_bets=0,
+            recommended_completed=0,
+            win_rate=None,
+            roi=None,
+            net_profit=0.0,
+            max_drawdown=None,
+            cumulative_profit=0.0,
+            last_updated=None,
+            starting_bankroll=DEFAULT_STARTING_BANKROLL,
+            current_bankroll=DEFAULT_STARTING_BANKROLL,
+            total_staked=0.0,
+            bankroll_growth=None,
+        )
+
+    totals = totals.copy()
+    total_predictions = len(totals)
+    completed_games = int(totals["won"].notna().sum())
+    pending_games = total_predictions - completed_games
+
+    mask = totals["edge"].notna() & (totals["edge"] >= edge_threshold)
+    recommended = totals.loc[mask].copy()
+    recommended_completed = recommended[recommended["won"].notna()]
+    wins = recommended_completed[recommended_completed["won"] == True]  # noqa: E712
+
+    total_staked = stake * len(recommended_completed)
+    net_profit = float(recommended_completed["profit"].fillna(0.0).sum())
+    cumulative_profit = net_profit
+    win_rate = (len(wins) / len(recommended_completed)) if len(recommended_completed) else None
+    roi = (net_profit / total_staked) if total_staked else None
+
+    starting_bankroll = DEFAULT_STARTING_BANKROLL
+    current_bankroll = starting_bankroll + net_profit
+    bankroll_growth = ((current_bankroll - starting_bankroll) / starting_bankroll) if starting_bankroll > 0 else None
+
+    if not recommended_completed.empty:
+        recommended_completed = recommended_completed.sort_values("settled_at")
+        cum_profit_series = recommended_completed["profit"].fillna(0.0).cumsum()
+        max_drawdown = _max_drawdown(cum_profit_series)
+    else:
+        max_drawdown = None
+
+    last_updated = None
+    if "result_updated_at" in df.columns and df["result_updated_at"].notna().any():
+        last_updated = df["result_updated_at"].dropna().max()
+    elif "predicted_at" in totals.columns and totals["predicted_at"].notna().any():
+        last_updated = totals["predicted_at"].dropna().max()
+
+    return SummaryMetrics(
+        total_predictions=total_predictions,
+        completed_games=completed_games,
+        pending_games=pending_games,
+        recommended_bets=int(mask.sum()),
+        recommended_completed=len(recommended_completed),
+        win_rate=win_rate,
+        roi=roi,
+        net_profit=net_profit,
+        max_drawdown=max_drawdown,
+        cumulative_profit=cumulative_profit,
+        last_updated=last_updated,
+        starting_bankroll=starting_bankroll,
+        current_bankroll=current_bankroll,
+        total_staked=float(total_staked),
+        bankroll_growth=bankroll_growth,
+    )
+
+
 def get_performance_over_time(
     df: pd.DataFrame,
     *,
@@ -551,6 +740,42 @@ def get_performance_over_time(
 
     grouped = completed.groupby("date")
 
+    summary = grouped.agg(
+        bets=("won", "count"),
+        wins=("won", lambda x: int((x == True).sum())),  # noqa: E712
+        profit=("profit", "sum"),
+    ).reset_index()
+
+    summary["roi"] = np.where(summary["bets"] > 0, summary["profit"] / (stake * summary["bets"]), np.nan)
+    summary["win_rate"] = np.where(summary["bets"] > 0, summary["wins"] / summary["bets"], np.nan)
+    summary["cumulative_profit"] = summary["profit"].cumsum().round(2)
+
+    return summary
+
+
+def get_totals_performance_over_time(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    stake: float = DEFAULT_STAKE,
+    freq: str = "D",
+) -> pd.DataFrame:
+    totals = _expand_totals(df, stake=stake)
+    if totals.empty or "won" not in totals.columns:
+        return pd.DataFrame(columns=["date", "bets", "wins", "profit", "roi", "win_rate", "cumulative_profit"])
+
+    mask = totals["edge"].notna() & (totals["edge"] >= edge_threshold)
+    completed = totals.loc[mask & totals["won"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame(columns=["date", "bets", "wins", "profit", "roi", "win_rate", "cumulative_profit"])
+
+    if "settled_at" not in completed.columns or completed["settled_at"].isna().all():
+        completed["settled_at"] = completed["commence_time"]
+
+    completed = completed.sort_values("settled_at")
+    completed["date"] = completed["settled_at"].dt.to_period(freq).dt.to_timestamp()
+
+    grouped = completed.groupby("date")
     summary = grouped.agg(
         bets=("won", "count"),
         wins=("won", lambda x: int((x == True).sum())),  # noqa: E712
@@ -652,6 +877,49 @@ def get_performance_by_threshold(
     completed["bucket"] = pd.cut(completed["edge"], bins=buckets)
 
     grouped = completed.groupby("bucket")
+    summary = grouped.agg(
+        bets=("won", "count"),
+        wins=("won", lambda x: int((x == True).sum())),  # noqa: E712
+        profit=("profit", "sum"),
+    ).reset_index()
+
+    summary["win_rate"] = np.where(summary["bets"] > 0, summary["wins"] / summary["bets"], np.nan)
+    summary["roi"] = np.where(summary["bets"] > 0, summary["profit"] / (stake * summary["bets"]), np.nan)
+    summary["bucket_label"] = summary["bucket"].astype(str)
+
+    return summary[["bucket_label", "bets", "wins", "win_rate", "profit", "roi"]]
+
+
+def get_totals_performance_by_threshold(
+    df: pd.DataFrame,
+    *,
+    thresholds: Optional[Iterable[float]] = None,
+    stake: float = DEFAULT_STAKE,
+) -> pd.DataFrame:
+    totals = _expand_totals(df, stake=stake)
+    if totals.empty or "won" not in totals.columns:
+        return pd.DataFrame(columns=["bucket_label", "bets", "wins", "win_rate", "profit", "roi"])
+
+    completed = totals[totals["won"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame(columns=["bucket_label", "bets", "wins", "win_rate", "profit", "roi"])
+
+    if thresholds is None:
+        thresholds = [0.0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15, 0.2]
+
+    bins = sorted(set(float(t) for t in thresholds))
+    if bins[0] > 0.0:
+        bins.insert(0, 0.0)
+
+    buckets = pd.IntervalIndex.from_breaks(bins + [np.inf], closed="left")
+
+    completed = completed[completed["edge"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame(columns=["bucket_label", "bets", "wins", "win_rate", "profit", "roi"])
+
+    completed["bucket"] = pd.cut(completed["edge"], bins=buckets)
+    grouped = completed.groupby("bucket")
+
     summary = grouped.agg(
         bets=("won", "count"),
         wins=("won", lambda x: int((x == True).sum())),  # noqa: E712
@@ -838,6 +1106,41 @@ def get_upcoming_calendar(
     bets = bets.copy()
     bets["date"] = bets["commence_time"].dt.date
     return bets[["date", "team", "opponent", "edge", "commence_time", "moneyline"]]
+
+
+def get_overunder_recommendations(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+) -> pd.DataFrame:
+    totals = _expand_totals(df)
+    if totals.empty or "edge" not in totals.columns:
+        return pd.DataFrame()
+
+    upcoming = totals[totals["won"].isna()]
+    upcoming = upcoming[upcoming["edge"].notna() & (upcoming["edge"] >= edge_threshold)]
+    if upcoming.empty:
+        return pd.DataFrame()
+
+    upcoming = upcoming.sort_values(by=["edge", "commence_time"], ascending=[False, True], na_position="last")
+    return upcoming
+
+
+def get_overunder_completed(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    stake: float = DEFAULT_STAKE,
+) -> pd.DataFrame:
+    totals = _expand_totals(df, stake=stake)
+    if totals.empty:
+        return pd.DataFrame()
+    completed = totals[totals["won"].notna() & totals["edge"].notna() & (totals["edge"] >= edge_threshold)].copy()
+    if completed.empty:
+        return pd.DataFrame()
+    if "commence_time" in completed.columns:
+        completed = completed.sort_values("commence_time", ascending=False)
+    return completed
 
 
 def _map_game_ids_by_odds_api(recommended: pd.DataFrame) -> pd.DataFrame:
@@ -1237,6 +1540,80 @@ def get_moneylines_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
     return odds_df[["forward_game_id", "outcome", "book", "moneyline", "fetched_at_utc"]]
 
 
+def get_totals_odds_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
+    mapping = _map_game_ids_by_odds_api(recommended)
+    remaining = recommended
+    if not mapping.empty:
+        matched_ids = set(mapping["prediction_game_id"])
+        remaining = recommended[~recommended["game_id"].isin(matched_ids)]
+
+    if not remaining.empty:
+        extra = _match_games_to_db(remaining)
+        if not extra.empty:
+            mapping = pd.concat([mapping, extra], ignore_index=True) if not mapping.empty else extra
+
+    if mapping.empty:
+        return pd.DataFrame(
+            columns=["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]
+        )
+
+    db_ids = mapping["db_game_id"].dropna().unique().tolist()
+    if not db_ids:
+        return pd.DataFrame(
+            columns=["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]
+        )
+
+    placeholders = ",".join("?" for _ in db_ids)
+    query = f"""
+        WITH latest_snapshot AS (
+            SELECT
+                o.game_id,
+                o.book_id,
+                MAX(s.fetched_at_utc) AS max_fetched
+            FROM odds o
+            JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+            WHERE o.market = 'totals'
+              AND o.game_id IN ({placeholders})
+              AND LOWER(o.outcome) IN ('over', 'under')
+            GROUP BY o.game_id, o.book_id
+        )
+        SELECT
+            o.game_id,
+            o.outcome,
+            o.line,
+            o.price_american AS moneyline,
+            b.name AS book,
+            s.fetched_at_utc
+        FROM odds o
+        JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+        JOIN books b ON o.book_id = b.book_id
+        JOIN latest_snapshot ls
+          ON ls.game_id = o.game_id
+         AND ls.book_id = o.book_id
+         AND ls.max_fetched = s.fetched_at_utc
+        WHERE o.market = 'totals'
+          AND LOWER(o.outcome) IN ('over', 'under')
+          AND o.price_american IS NOT NULL
+          AND o.game_id IN ({placeholders})
+    """
+
+    params = db_ids + db_ids
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    if not rows:
+        return pd.DataFrame(
+            columns=["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]
+        )
+
+    odds_df = pd.DataFrame(rows, columns=["db_game_id", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    odds_df["outcome"] = odds_df["outcome"].astype(str).str.lower()
+    odds_df = odds_df.merge(mapping, how="left", left_on="db_game_id", right_on="db_game_id")
+    odds_df = odds_df.rename(columns={"prediction_game_id": "forward_game_id"})
+    odds_df = odds_df.dropna(subset=["forward_game_id"])
+    return odds_df[["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]]
+
+
 __all__ = [
     "SummaryMetrics",
     "PredictionComparisonStats",
@@ -1246,15 +1623,21 @@ __all__ = [
     "DISPLAY_TIMEZONE",
     "load_forward_test_data",
     "calculate_summary_metrics",
+    "calculate_totals_metrics",
     "get_performance_over_time",
+    "get_totals_performance_over_time",
     "get_recent_predictions",
     "get_recommended_bets",
     "get_completed_bets",
     "get_performance_by_threshold",
+    "get_totals_performance_by_threshold",
     "get_upcoming_calendar",
+    "get_overunder_recommendations",
+    "get_overunder_completed",
     "build_prediction_comparison",
     "summarize_prediction_comparison",
     "get_moneylines_for_recommended",
+    "get_totals_odds_for_recommended",
     "get_version_options",
     "get_default_version_value",
     "filter_by_version",

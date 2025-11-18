@@ -518,6 +518,142 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
     )
 
 
+def overunder_recommended_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
+    df = totals_df.copy()
+    if df.empty:
+        df = pd.DataFrame(
+            columns=[
+                "game_id",
+                "commence_time",
+                "league",
+                "home_team",
+                "away_team",
+                "description",
+                "total_line",
+                "moneyline",
+                "predicted_prob",
+                "edge",
+                "side",
+            ]
+        )
+
+    if "commence_time" in df.columns:
+        df["commence_time"] = df["commence_time"].apply(_format_datetime)
+    for col in ("home_team", "away_team"):
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
+    df["moneyline_value"] = df["moneyline"]
+    df["total_line_value"] = df["total_line"]
+    df["moneyline"] = df["moneyline"].apply(lambda x: f"{x:+.0f}" if pd.notna(x) else "")
+    df["total_line"] = df["total_line"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "")
+    df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+
+    columns = [
+        {"name": "Commence", "id": "commence_time"},
+        {"name": "League", "id": "league"},
+        {"name": "Home", "id": "home_team"},
+        {"name": "Away", "id": "away_team"},
+        {"name": "Pick", "id": "description"},
+        {"name": "Total Line", "id": "total_line"},
+        {"name": "Moneyline", "id": "moneyline"},
+        {"name": "Pred Prob", "id": "predicted_prob"},
+        {"name": "Edge", "id": "edge"},
+    ]
+
+    return dash_table.DataTable(
+        id="overunder-recommended-table-datatable",
+        columns=columns,
+        data=df.to_dict("records"),
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"padding": "0.5rem", "textAlign": "center"},
+        style_header={"fontWeight": "bold"},
+    )
+
+
+def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
+    df = totals_df.copy()
+    if df.empty:
+        df = pd.DataFrame(
+            columns=[
+                "commence_time",
+                "league",
+                "home_team",
+                "away_team",
+                "description",
+                "total_line",
+                "moneyline",
+                "predicted_prob",
+                "edge",
+                "won",
+                "profit",
+                "total_points",
+            ]
+        )
+
+    if "commence_time" in df.columns:
+        df["commence_time"] = df["commence_time"].apply(_format_datetime)
+    for col in ("home_team", "away_team"):
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
+    df["moneyline"] = df["moneyline"].apply(lambda x: f"{x:+.0f}" if pd.notna(x) else "")
+    df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    df["won"] = df["won"].apply(lambda v: "Win" if v is True else "Loss" if v is False else "")
+    df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "")
+
+    columns = [
+        {"name": "Commence", "id": "commence_time"},
+        {"name": "League", "id": "league"},
+        {"name": "Home", "id": "home_team"},
+        {"name": "Away", "id": "away_team"},
+        {"name": "Pick", "id": "description"},
+        {"name": "Total Line", "id": "total_line"},
+        {"name": "Moneyline", "id": "moneyline"},
+        {"name": "Pred Prob", "id": "predicted_prob"},
+        {"name": "Edge", "id": "edge"},
+        {"name": "Result", "id": "won"},
+        {"name": "Total Points", "id": "total_points"},
+        {"name": "Profit/Loss", "id": "profit"},
+    ]
+
+    return dash_table.DataTable(
+        columns=columns,
+        data=df.to_dict("records"),
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"padding": "0.5rem", "textAlign": "center"},
+        style_header={"fontWeight": "bold"},
+        style_data_conditional=[
+            {
+                "if": {"filter_query": "{won} = Win"},
+                "backgroundColor": "#d4edda",
+                "color": "black",
+            },
+            {
+                "if": {"filter_query": "{won} = Loss"},
+                "backgroundColor": "#f8d7da",
+                "color": "black",
+            },
+            {
+                "if": {"state": "selected"},
+                "backgroundColor": "#007bff",
+                "color": "white",
+            },
+        ],
+        style_cell_conditional=[
+            {
+                "if": {"state": "selected"},
+                "backgroundColor": "#007bff",
+                "color": "white",
+            },
+        ],
+    )
+
+
 def empty_state(message: str) -> html.Div:
     return html.Div(
         dbc.Alert(message, color="warning", className="text-center"),
@@ -707,6 +843,43 @@ def moneyline_detail_table(book_rows: pd.DataFrame, *, home_team: Optional[str],
     )
 
 
+def totals_detail_table(
+    book_rows: pd.DataFrame,
+    *,
+    home_team: Optional[str],
+    away_team: Optional[str],
+) -> dash_table.DataTable | html.Div:
+    if book_rows.empty:
+        return empty_state("No sportsbook totals available for this matchup.")
+
+    df = book_rows.copy()
+    if "book" in df.columns:
+        df = df[~df["book"].astype(str).str.contains("kaggle", case=False, na=False)].copy()
+    if df.empty:
+        return empty_state("No sportsbook totals available for this matchup.")
+
+    df["outcome"] = df["outcome"].astype(str).str.title()
+    df["line_display"] = df["line"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "")
+    df["moneyline_display"] = df["moneyline"].apply(lambda x: f"{x:+.0f}" if pd.notna(x) else "")
+    df = df.sort_values(["book", "outcome"])
+
+    columns = [
+        {"name": "Sportsbook", "id": "book"},
+        {"name": "Outcome", "id": "outcome"},
+        {"name": "Line", "id": "line_display"},
+        {"name": "Price", "id": "moneyline_display"},
+    ]
+
+    return dash_table.DataTable(
+        columns=columns,
+        data=df[["book", "outcome", "line_display", "moneyline_display"]].to_dict("records"),
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"padding": "0.5rem", "textAlign": "center"},
+        style_header={"fontWeight": "bold"},
+    )
+
+
 __all__ = [
     "metric_card",
     "summary_cards",
@@ -720,10 +893,13 @@ __all__ = [
     "recent_predictions_table",
     "recommended_bets_table",
     "completed_bets_table",
+    "overunder_recommended_table",
+    "overunder_completed_table",
     "calendar_table",
     "empty_state",
     "prediction_summary",
     "prediction_comparison_table",
     "moneyline_detail_table",
+    "totals_detail_table",
 ]
 

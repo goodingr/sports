@@ -2,6 +2,7 @@
 import argparse
 import json
 import logging
+import math
 import sqlite3
 from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
@@ -28,6 +29,13 @@ from src.models.train import (
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
 
 # Soccer leagues use three-way markets (home/draw/away)
@@ -43,6 +51,209 @@ LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "SERIEA": "soccer_italy_serie_a",
     "LIGUE1": "soccer_france_ligue_one",
 }
+
+TOTAL_STD_BY_LEAGUE = {
+    "NBA": 12.0,
+    "NFL": 10.0,
+    "CFB": 14.0,
+    "EPL": 2.8,
+    "LALIGA": 2.8,
+    "BUNDESLIGA": 3.0,
+    "SERIEA": 2.7,
+    "LIGUE1": 2.6,
+}
+
+LEAGUE_DEFAULT_TOTAL = {
+    "NBA": 228.0,
+    "NFL": 44.0,
+    "CFB": 56.0,
+    "EPL": 2.8,
+    "LALIGA": 2.7,
+    "BUNDESLIGA": 3.0,
+    "SERIEA": 2.6,
+    "LIGUE1": 2.5,
+}
+
+_SCORING_CACHE_VERSION: Optional[float] = None
+_TEAM_SCORING_CACHE: Dict[str, Dict[str, Dict[str, float]]] = {}
+_LEAGUE_TOTAL_AVG: Dict[str, float] = {}
+
+
+def _load_scoring_cache_for_league(league: str) -> Dict[str, Dict[str, float]]:
+    """Load per-team scoring averages from the forward test predictions file."""
+    global _SCORING_CACHE_VERSION
+    path = FORWARD_TEST_DIR / "predictions_master.parquet"
+    if not path.exists():
+        _TEAM_SCORING_CACHE.setdefault(league, {})
+        if league not in _LEAGUE_TOTAL_AVG:
+            _LEAGUE_TOTAL_AVG[league] = float("nan")
+        return _TEAM_SCORING_CACHE[league]
+
+    mtime = path.stat().st_mtime
+    if _SCORING_CACHE_VERSION != mtime:
+        _TEAM_SCORING_CACHE.clear()
+        _LEAGUE_TOTAL_AVG.clear()
+        _SCORING_CACHE_VERSION = mtime
+
+    if league in _TEAM_SCORING_CACHE:
+        return _TEAM_SCORING_CACHE[league]
+
+    try:
+        df = pd.read_parquet(path)
+    except Exception:  # pragma: no cover - defensive guard
+        _TEAM_SCORING_CACHE[league] = {}
+        _LEAGUE_TOTAL_AVG[league] = float("nan")
+        return _TEAM_SCORING_CACHE[league]
+
+    if df.empty or "league" not in df.columns:
+        _TEAM_SCORING_CACHE[league] = {}
+        _LEAGUE_TOTAL_AVG[league] = float("nan")
+        return _TEAM_SCORING_CACHE[league]
+
+    mask = df["league"].astype(str).str.upper() == league
+    df = df[mask].copy()
+    df = df.dropna(subset=["home_score", "away_score"])
+    if df.empty:
+        _TEAM_SCORING_CACHE[league] = {}
+        _LEAGUE_TOTAL_AVG[league] = float("nan")
+        return _TEAM_SCORING_CACHE[league]
+
+    stats: Dict[str, Dict[str, float]] = {}
+    totals: list[float] = []
+    for _, row in df.iterrows():
+        home_team = normalize_team_code(league, row.get("home_team"))
+        away_team = normalize_team_code(league, row.get("away_team"))
+        try:
+            home_score = float(row.get("home_score"))
+            away_score = float(row.get("away_score"))
+        except (TypeError, ValueError):
+            continue
+        totals.append(home_score + away_score)
+        for team_code, points_for, points_against in [
+            (home_team, home_score, away_score),
+            (away_team, away_score, home_score),
+        ]:
+            if not team_code:
+                continue
+            record = stats.setdefault(
+                team_code,
+                {"for_sum": 0.0, "against_sum": 0.0, "games": 0.0},
+            )
+            record["for_sum"] += points_for
+            record["against_sum"] += points_against
+            record["games"] += 1.0
+
+    for team_code, record in stats.items():
+        games = max(record["games"], 1.0)
+        record["for_avg"] = record["for_sum"] / games
+        record["against_avg"] = record["against_sum"] / games
+
+    _TEAM_SCORING_CACHE[league] = stats
+    _LEAGUE_TOTAL_AVG[league] = float(np.mean(totals)) if totals else float("nan")
+    return stats
+
+
+def _estimate_total_from_scoring_history(
+    league: str, home_team: str, away_team: str
+) -> Optional[float]:
+    stats = _load_scoring_cache_for_league(league)
+    league_avg = _LEAGUE_TOTAL_AVG.get(league)
+    if league_avg is None or np.isnan(league_avg):
+        league_avg = LEAGUE_DEFAULT_TOTAL.get(league)
+    if not stats and league_avg is None:
+        return None
+
+    def _expected_points(team: Optional[str], opponent: Optional[str]) -> Optional[float]:
+        team_code = normalize_team_code(league, team) if team else None
+        opp_code = normalize_team_code(league, opponent) if opponent else None
+        team_stats = stats.get(team_code) if team_code else None
+        opp_stats = stats.get(opp_code) if opp_code else None
+        values = []
+        if team_stats and "for_avg" in team_stats:
+            values.append(team_stats["for_avg"])
+        if opp_stats and "against_avg" in opp_stats:
+            values.append(opp_stats["against_avg"])
+        if values:
+            return float(np.mean(values))
+        return None
+
+    home_expected = _expected_points(home_team, away_team)
+    away_expected = _expected_points(away_team, home_team)
+
+    if home_expected is None and away_expected is None:
+        if league_avg is None or np.isnan(league_avg):
+            return None
+        return float(league_avg)
+
+    if home_expected is None:
+        if league_avg is not None and not np.isnan(league_avg):
+            home_expected = max(league_avg - (away_expected or 0.0), league_avg / 2.0)
+        else:
+            home_expected = away_expected or 0.0
+
+    if away_expected is None:
+        if league_avg is not None and not np.isnan(league_avg):
+            away_expected = max(league_avg - (home_expected or 0.0), league_avg / 2.0)
+        else:
+            away_expected = home_expected or 0.0
+
+    return float((home_expected or 0.0) + (away_expected or 0.0))
+
+
+def _estimate_totals_probabilities(
+    *,
+    loader: FeatureLoader,
+    league: str,
+    home_team: str,
+    away_team: str,
+    season: Optional[int],
+    total_line: Optional[float],
+    over_price: Optional[float],
+    under_price: Optional[float],
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    if (
+        total_line is None
+        or over_price is None
+        or under_price is None
+        or pd.isna(total_line)
+        or pd.isna(over_price)
+        or pd.isna(under_price)
+    ):
+        return None, None, None, None
+
+    league_upper = league.upper()
+    std = TOTAL_STD_BY_LEAGUE.get(league_upper, 12.0)
+    if std <= 0:
+        std = 12.0
+
+    home_off = loader.get_team_metric(home_team, "E_OFF_RATING", season=season, default=np.nan)
+    away_off = loader.get_team_metric(away_team, "E_OFF_RATING", season=season, default=np.nan)
+    home_pace = loader.get_team_metric(home_team, "E_PACE", season=season, default=np.nan)
+    away_pace = loader.get_team_metric(away_team, "E_PACE", season=season, default=np.nan)
+
+    expected_total: Optional[float] = None
+    metrics_missing = any(pd.isna(val) for val in (home_off, away_off, home_pace, away_pace))
+    if not metrics_missing:
+        combined_pace = float(np.nanmean([home_pace, away_pace]))
+        expected_total = combined_pace * (home_off + away_off) / 100.0
+    else:
+        expected_total = _estimate_total_from_scoring_history(league_upper, home_team, away_team)
+
+    if expected_total is None:
+        return None, None, None, None
+
+    diff = expected_total - float(total_line)
+    over_prob = 0.5 * (1.0 + math.erf(diff / (std * math.sqrt(2.0))))
+    over_prob = min(max(over_prob, 0.0), 1.0)
+    under_prob = 1.0 - over_prob
+
+    over_implied = _moneyline_to_prob(over_price)
+    under_implied = _moneyline_to_prob(under_price)
+
+    over_edge = over_prob - over_implied if over_implied is not None else None
+    under_edge = under_prob - under_implied if under_implied is not None else None
+
+    return over_prob, under_prob, over_edge, under_edge
 
 FORWARD_TEST_DIR = Path("data/forward_test")
 FORWARD_TEST_DIR.mkdir(parents=True, exist_ok=True)
@@ -224,6 +435,17 @@ def load_model(model_path: Optional[Path] = None, league: str = "NBA") -> object
     return joblib.load(model_path)
 
 
+def load_totals_model(league: str) -> Optional[dict]:
+    path = Path("models") / f"{league.lower()}_totals_gradient_boosting.pkl"
+    if not path.exists():
+        return None
+    try:
+        return joblib.load(path)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Failed to load totals model for %s: %s", league, exc)
+        return None
+
+
 def fetch_live_games(league: str = "NBA", dotenv_path: Optional[Path] = None) -> List[Dict]:
     """Fetch current/upcoming games with odds for the specified league."""
     league_upper = league.upper()
@@ -343,7 +565,9 @@ def prepare_features(
     # Extract spreads/totals (use first available)
     home_spread = None
     away_spread = None
-    total = None
+    posted_total = None
+    over_price = None
+    under_price = None
     for bookmaker in game.get("bookmakers", []):
         for market in bookmaker.get("markets", []):
             market_key = (market.get("key") or "").lower()
@@ -361,12 +585,25 @@ def prepare_features(
                         home_spread = float(point)
                     elif outcome_team == away_team:
                         away_spread = float(point)
-            elif market_key == "totals" and total is None:
+            elif market_key == "totals":
                 for outcome in market.get("outcomes", []):
                     point = outcome.get("point")
-                    if point is not None:
-                        total = float(point)
-        if home_spread is not None and away_spread is not None and total is not None:
+                    name_lower = (outcome.get("name") or "").strip().lower()
+                    if point is not None and posted_total is None:
+                        posted_total = float(point)
+                    price_raw = outcome.get("price")
+                    price_val = _safe_float(price_raw)
+                    if name_lower.startswith("over") and over_price is None:
+                        over_price = price_val
+                    elif name_lower.startswith("under") and under_price is None:
+                        under_price = price_val
+        if (
+            home_spread is not None
+            and away_spread is not None
+            and posted_total is not None
+            and over_price is not None
+            and under_price is not None
+        ):
             break
     
     # Create features for home team
@@ -398,10 +635,10 @@ def prepare_features(
         # Two-way market: normalize home + away to 1.0
         home_implied_raw = implied_prob(home_ml)
         away_implied_raw = implied_prob(away_ml)
-        total = (home_implied_raw or 0) + (away_implied_raw or 0)
-        if total > 0:
-            home_implied = (home_implied_raw or 0) / total
-            away_implied = (away_implied_raw or 0) / total
+        prob_sum = (home_implied_raw or 0) + (away_implied_raw or 0)
+        if prob_sum > 0:
+            home_implied = (home_implied_raw or 0) / prob_sum
+            away_implied = (away_implied_raw or 0) / prob_sum
         else:
             home_implied = home_implied_raw
             away_implied = away_implied_raw
@@ -415,13 +652,17 @@ def prepare_features(
         "moneyline": [home_ml if home_ml is not None else np.nan, away_ml if away_ml is not None else np.nan],
         "implied_prob": [home_implied if home_implied is not None else np.nan, away_implied if away_implied is not None else np.nan],
         "spread_line": [spread_home if spread_home is not None else np.nan, spread_away if spread_away is not None else np.nan],
-        "total_line": [total if total is not None else np.nan, total if total is not None else np.nan],
+        "total_line": [posted_total if posted_total is not None else np.nan, posted_total if posted_total is not None else np.nan],
         "espn_moneyline_open": [home_ml if home_ml is not None else np.nan, away_ml if away_ml is not None else np.nan],
         "espn_moneyline_close": [home_ml if home_ml is not None else np.nan, away_ml if away_ml is not None else np.nan],
         "espn_spread_open": [spread_home if spread_home is not None else np.nan, spread_away if spread_away is not None else np.nan],
         "espn_spread_close": [spread_home if spread_home is not None else np.nan, spread_away if spread_away is not None else np.nan],
-        "espn_total_open": [total if total is not None else np.nan, total if total is not None else np.nan],
-        "espn_total_close": [total if total is not None else np.nan, total if total is not None else np.nan],
+        "espn_total_open": [posted_total if posted_total is not None else np.nan, posted_total if posted_total is not None else np.nan],
+        "espn_total_close": [posted_total if posted_total is not None else np.nan, posted_total if posted_total is not None else np.nan],
+        "over_moneyline": [over_price if over_price is not None else np.nan, over_price if over_price is not None else np.nan],
+        "under_moneyline": [under_price if under_price is not None else np.nan, under_price if under_price is not None else np.nan],
+        "over_implied_prob": [implied_prob(over_price) if over_price is not None else np.nan] * 2,
+        "under_implied_prob": [implied_prob(under_price) if under_price is not None else np.nan] * 2,
     }
     
     # Create feature rows for both teams
@@ -647,6 +888,7 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
     
     league_upper = league.upper()
     feature_loader = FeatureLoader(league_upper)
+    totals_model_bundle = load_totals_model(league_upper)
     
     for game in games:
         try:
@@ -654,6 +896,21 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
             home_team = normalize_team_code(league_upper, game.get("home_team", ""))
             away_team = normalize_team_code(league_upper, game.get("away_team", ""))
             commence_time = game.get("commence_time", "")
+            season_year = datetime.now().year
+            commence_dt = None
+            if commence_time:
+                try:
+                    commence_dt = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+                except Exception:
+                    commence_dt = None
+            if commence_dt:
+                if league_upper in {"NBA", "NFL"}:
+                    if commence_dt.month >= 8:
+                        season_year = commence_dt.year
+                    else:
+                        season_year = commence_dt.year - 1
+                else:
+                    season_year = commence_dt.year
             is_soccer = league_upper in SOCCER_LEAGUES
             moneyline_prices = _extract_moneyline_prices(game, league_upper, home_team, away_team)
             
@@ -713,6 +970,60 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
             away_ml = features_df.iloc[1]["moneyline"]
             home_implied = features_df.iloc[0]["implied_prob"]
             away_implied = features_df.iloc[1]["implied_prob"]
+            spread_home = features_df.iloc[0].get("spread_line")
+            total_line_value = features_df.iloc[0].get("total_line")
+            over_price = features_df.iloc[0].get("over_moneyline")
+            under_price = features_df.iloc[0].get("under_moneyline")
+            over_implied = features_df.iloc[0].get("over_implied_prob")
+            under_implied = features_df.iloc[0].get("under_implied_prob")
+            total_line_numeric = float(total_line_value) if total_line_value is not None and not pd.isna(total_line_value) else None
+            over_price_numeric = float(over_price) if over_price is not None and not pd.isna(over_price) else None
+            under_price_numeric = float(under_price) if under_price is not None and not pd.isna(under_price) else None
+            predicted_total = None
+            if totals_model_bundle and total_line_numeric is not None and over_price_numeric is not None and under_price_numeric is not None:
+                feature_values = {
+                    "total_close": total_line_numeric,
+                    "spread_close": float(spread_home) if spread_home is not None and not pd.isna(spread_home) else 0.0,
+                    "home_moneyline_close": float(home_ml) if home_ml is not None and not pd.isna(home_ml) else 0.0,
+                    "away_moneyline_close": float(away_ml) if away_ml is not None and not pd.isna(away_ml) else 0.0,
+                }
+                totals_features = pd.DataFrame([feature_values], columns=totals_model_bundle["feature_names"])
+                try:
+                    predicted_total = float(totals_model_bundle["regressor"].predict(totals_features)[0])
+                    residual_std = float(totals_model_bundle.get("residual_std") or 12.0)
+                    diff = predicted_total - total_line_numeric
+                    over_prob_pred = 0.5 * (1.0 + math.erf(diff / (residual_std * math.sqrt(2.0))))
+                    over_prob_pred = min(max(over_prob_pred, 0.0), 1.0)
+                    under_prob_pred = 1.0 - over_prob_pred
+                    over_edge_pred = (
+                        over_prob_pred - _moneyline_to_prob(over_price_numeric) if over_price_numeric is not None else None
+                    )
+                    under_edge_pred = (
+                        under_prob_pred - _moneyline_to_prob(under_price_numeric) if under_price_numeric is not None else None
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.debug("Totals model failed for %s: %s", game_id, exc)
+                    predicted_total = None
+                    over_prob_pred = None
+                    under_prob_pred = None
+                    over_edge_pred = None
+                    under_edge_pred = None
+            else:
+                (
+                    over_prob_pred,
+                    under_prob_pred,
+                    over_edge_pred,
+                    under_edge_pred,
+                ) = _estimate_totals_probabilities(
+                    loader=feature_loader,
+                    league=league_upper,
+                    home_team=home_team,
+                    away_team=away_team,
+                    season=season_year,
+                    total_line=total_line_numeric,
+                    over_price=over_price_numeric,
+                    under_price=under_price_numeric,
+                )
             
             home_edge = None
             away_edge = None
@@ -805,15 +1116,25 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 "home_moneyline": home_ml,
                 "away_moneyline": away_ml,
                 "draw_moneyline": draw_ml if is_soccer else None,
+                "total_line": total_line_numeric,
+                "over_moneyline": over_price_numeric,
+                "under_moneyline": under_price_numeric,
+                "predicted_total_points": predicted_total,
                 "home_predicted_prob": home_prob,
                 "away_predicted_prob": away_prob,
                 "draw_predicted_prob": draw_prob if is_soccer else None,
                 "home_implied_prob": home_implied,
                 "away_implied_prob": away_implied,
                 "draw_implied_prob": draw_implied if is_soccer else None,
+                "over_implied_prob": float(over_implied) if over_implied is not None and not pd.isna(over_implied) else None,
+                "under_implied_prob": float(under_implied) if under_implied is not None and not pd.isna(under_implied) else None,
                 "home_edge": home_edge,
                 "away_edge": away_edge,
                 "draw_edge": draw_edge if is_soccer else None,
+                "over_predicted_prob": over_prob_pred,
+                "under_predicted_prob": under_prob_pred,
+                "over_edge": over_edge_pred,
+                "under_edge": under_edge_pred,
                 "predicted_at": datetime.now(timezone.utc).isoformat(),
                 "result": None,  # Will be filled when game completes
                 "home_score": None,
@@ -1685,6 +2006,9 @@ def main() -> None:
                 print(f"  Net Profit: ${report['net_profit']:,.0f}")
                 print(f"  ROI: {report['roi']:.1%}")
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
