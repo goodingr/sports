@@ -362,15 +362,22 @@ def recent_predictions_table(predictions: pd.DataFrame, *, page_size: int = 20) 
 def recommended_bets_table(recommended: pd.DataFrame) -> dash_table.DataTable:
     df = recommended.copy()
     if df.empty:
-        df = pd.DataFrame(columns=["commence_time", "team", "opponent", "moneyline", "predicted_prob", "implied_prob", "edge"])
+        df = pd.DataFrame(
+            columns=["commence_time", "league", "team", "opponent", "moneyline", "predicted_prob", "implied_prob", "edge"]
+        )
 
     df["commence_time"] = df["commence_time"].apply(_format_datetime)
+    if "league" not in df.columns:
+        df["league"] = ""
+    else:
+        df["league"] = df["league"].fillna("").astype(str)
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["implied_prob"] = df["implied_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
+        {"name": "League", "id": "league"},
         {"name": "Team", "id": "team"},
         {"name": "Opponent", "id": "opponent"},
         {"name": "Moneyline", "id": "moneyline"},
@@ -441,6 +448,11 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
         df["start_time"] = df["commence_time"].apply(_format_datetime)
     else:
         df["start_time"] = ""
+
+    if "league" not in df.columns:
+        df["league"] = ""
+    else:
+        df["league"] = df["league"].fillna("").astype(str)
     
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["won"] = df["won"].apply(lambda x: "Win" if x is True else "Loss" if x is False else "")
@@ -471,6 +483,7 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
 
     columns = [
         {"name": "Start Time", "id": "start_time"},
+        {"name": "League", "id": "league"},
         {"name": "Team Bet", "id": "team"},
         {"name": "Opponent", "id": "opponent"},
         {"name": "Moneyline", "id": "moneyline"},
@@ -538,6 +551,9 @@ def overunder_recommended_table(totals_df: pd.DataFrame) -> dash_table.DataTable
         )
 
     if "commence_time" in df.columns:
+        if not pd.api.types.is_datetime64_any_dtype(df["commence_time"]):
+            df["commence_time"] = pd.to_datetime(df["commence_time"], errors="coerce")
+        df = df.sort_values("commence_time", ascending=True, na_position="last")
         df["commence_time"] = df["commence_time"].apply(_format_datetime)
     for col in ("home_team", "away_team"):
         if col in df.columns:
@@ -594,6 +610,9 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
         )
 
     if "commence_time" in df.columns:
+        if not pd.api.types.is_datetime64_any_dtype(df["commence_time"]):
+            df["commence_time"] = pd.to_datetime(df["commence_time"], errors="coerce")
+        df = df.sort_values("commence_time", ascending=False, na_position="last")
         df["commence_time"] = df["commence_time"].apply(_format_datetime)
     for col in ("home_team", "away_team"):
         if col in df.columns:

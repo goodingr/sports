@@ -99,6 +99,10 @@ Get-ChildItem logs\hourly_pipeline_*.log | Sort-Object LastWriteTime -Descending
 ### Step 1: Ingest Hourly Data (~5-10 minutes)
 - Fetches ESPN odds for all leagues (NFL, NBA, CFB, EPL, La Liga, Bundesliga, Serie A, Ligue 1)
 - Ingests schedules and results for current season (NBA, NFL, CFB, Soccer)
+- After syncing soccer archives it backfills historical totals/scores via\
+  `poetry run python scripts/run_external_loader.py --source football-data --leagues premier-league la-liga bundesliga serie-a ligue-1`
+- Updates TeamRankings over/under picks in `game_results` via\
+  `poetry run python scripts/run_external_loader.py --source teamrankings --leagues NFL NBA CFB`
 
 ### Step 2: Ingest Advanced Stats (~2-5 minutes)
 - NBA rolling metrics (game-by-game data from nba_api)

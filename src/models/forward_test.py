@@ -41,6 +41,7 @@ SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "CFB", "EPL", "LALIGA", "BUNDESLIG
 # Soccer leagues use three-way markets (home/draw/away)
 SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
 
+
 LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "NBA": "basketball_nba",
     "NFL": "americanfootball_nfl",
@@ -52,208 +53,6 @@ LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "LIGUE1": "soccer_france_ligue_one",
 }
 
-TOTAL_STD_BY_LEAGUE = {
-    "NBA": 12.0,
-    "NFL": 10.0,
-    "CFB": 14.0,
-    "EPL": 2.8,
-    "LALIGA": 2.8,
-    "BUNDESLIGA": 3.0,
-    "SERIEA": 2.7,
-    "LIGUE1": 2.6,
-}
-
-LEAGUE_DEFAULT_TOTAL = {
-    "NBA": 228.0,
-    "NFL": 44.0,
-    "CFB": 56.0,
-    "EPL": 2.8,
-    "LALIGA": 2.7,
-    "BUNDESLIGA": 3.0,
-    "SERIEA": 2.6,
-    "LIGUE1": 2.5,
-}
-
-_SCORING_CACHE_VERSION: Optional[float] = None
-_TEAM_SCORING_CACHE: Dict[str, Dict[str, Dict[str, float]]] = {}
-_LEAGUE_TOTAL_AVG: Dict[str, float] = {}
-
-
-def _load_scoring_cache_for_league(league: str) -> Dict[str, Dict[str, float]]:
-    """Load per-team scoring averages from the forward test predictions file."""
-    global _SCORING_CACHE_VERSION
-    path = FORWARD_TEST_DIR / "predictions_master.parquet"
-    if not path.exists():
-        _TEAM_SCORING_CACHE.setdefault(league, {})
-        if league not in _LEAGUE_TOTAL_AVG:
-            _LEAGUE_TOTAL_AVG[league] = float("nan")
-        return _TEAM_SCORING_CACHE[league]
-
-    mtime = path.stat().st_mtime
-    if _SCORING_CACHE_VERSION != mtime:
-        _TEAM_SCORING_CACHE.clear()
-        _LEAGUE_TOTAL_AVG.clear()
-        _SCORING_CACHE_VERSION = mtime
-
-    if league in _TEAM_SCORING_CACHE:
-        return _TEAM_SCORING_CACHE[league]
-
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # pragma: no cover - defensive guard
-        _TEAM_SCORING_CACHE[league] = {}
-        _LEAGUE_TOTAL_AVG[league] = float("nan")
-        return _TEAM_SCORING_CACHE[league]
-
-    if df.empty or "league" not in df.columns:
-        _TEAM_SCORING_CACHE[league] = {}
-        _LEAGUE_TOTAL_AVG[league] = float("nan")
-        return _TEAM_SCORING_CACHE[league]
-
-    mask = df["league"].astype(str).str.upper() == league
-    df = df[mask].copy()
-    df = df.dropna(subset=["home_score", "away_score"])
-    if df.empty:
-        _TEAM_SCORING_CACHE[league] = {}
-        _LEAGUE_TOTAL_AVG[league] = float("nan")
-        return _TEAM_SCORING_CACHE[league]
-
-    stats: Dict[str, Dict[str, float]] = {}
-    totals: list[float] = []
-    for _, row in df.iterrows():
-        home_team = normalize_team_code(league, row.get("home_team"))
-        away_team = normalize_team_code(league, row.get("away_team"))
-        try:
-            home_score = float(row.get("home_score"))
-            away_score = float(row.get("away_score"))
-        except (TypeError, ValueError):
-            continue
-        totals.append(home_score + away_score)
-        for team_code, points_for, points_against in [
-            (home_team, home_score, away_score),
-            (away_team, away_score, home_score),
-        ]:
-            if not team_code:
-                continue
-            record = stats.setdefault(
-                team_code,
-                {"for_sum": 0.0, "against_sum": 0.0, "games": 0.0},
-            )
-            record["for_sum"] += points_for
-            record["against_sum"] += points_against
-            record["games"] += 1.0
-
-    for team_code, record in stats.items():
-        games = max(record["games"], 1.0)
-        record["for_avg"] = record["for_sum"] / games
-        record["against_avg"] = record["against_sum"] / games
-
-    _TEAM_SCORING_CACHE[league] = stats
-    _LEAGUE_TOTAL_AVG[league] = float(np.mean(totals)) if totals else float("nan")
-    return stats
-
-
-def _estimate_total_from_scoring_history(
-    league: str, home_team: str, away_team: str
-) -> Optional[float]:
-    stats = _load_scoring_cache_for_league(league)
-    league_avg = _LEAGUE_TOTAL_AVG.get(league)
-    if league_avg is None or np.isnan(league_avg):
-        league_avg = LEAGUE_DEFAULT_TOTAL.get(league)
-    if not stats and league_avg is None:
-        return None
-
-    def _expected_points(team: Optional[str], opponent: Optional[str]) -> Optional[float]:
-        team_code = normalize_team_code(league, team) if team else None
-        opp_code = normalize_team_code(league, opponent) if opponent else None
-        team_stats = stats.get(team_code) if team_code else None
-        opp_stats = stats.get(opp_code) if opp_code else None
-        values = []
-        if team_stats and "for_avg" in team_stats:
-            values.append(team_stats["for_avg"])
-        if opp_stats and "against_avg" in opp_stats:
-            values.append(opp_stats["against_avg"])
-        if values:
-            return float(np.mean(values))
-        return None
-
-    home_expected = _expected_points(home_team, away_team)
-    away_expected = _expected_points(away_team, home_team)
-
-    if home_expected is None and away_expected is None:
-        if league_avg is None or np.isnan(league_avg):
-            return None
-        return float(league_avg)
-
-    if home_expected is None:
-        if league_avg is not None and not np.isnan(league_avg):
-            home_expected = max(league_avg - (away_expected or 0.0), league_avg / 2.0)
-        else:
-            home_expected = away_expected or 0.0
-
-    if away_expected is None:
-        if league_avg is not None and not np.isnan(league_avg):
-            away_expected = max(league_avg - (home_expected or 0.0), league_avg / 2.0)
-        else:
-            away_expected = home_expected or 0.0
-
-    return float((home_expected or 0.0) + (away_expected or 0.0))
-
-
-def _estimate_totals_probabilities(
-    *,
-    loader: FeatureLoader,
-    league: str,
-    home_team: str,
-    away_team: str,
-    season: Optional[int],
-    total_line: Optional[float],
-    over_price: Optional[float],
-    under_price: Optional[float],
-) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
-    if (
-        total_line is None
-        or over_price is None
-        or under_price is None
-        or pd.isna(total_line)
-        or pd.isna(over_price)
-        or pd.isna(under_price)
-    ):
-        return None, None, None, None
-
-    league_upper = league.upper()
-    std = TOTAL_STD_BY_LEAGUE.get(league_upper, 12.0)
-    if std <= 0:
-        std = 12.0
-
-    home_off = loader.get_team_metric(home_team, "E_OFF_RATING", season=season, default=np.nan)
-    away_off = loader.get_team_metric(away_team, "E_OFF_RATING", season=season, default=np.nan)
-    home_pace = loader.get_team_metric(home_team, "E_PACE", season=season, default=np.nan)
-    away_pace = loader.get_team_metric(away_team, "E_PACE", season=season, default=np.nan)
-
-    expected_total: Optional[float] = None
-    metrics_missing = any(pd.isna(val) for val in (home_off, away_off, home_pace, away_pace))
-    if not metrics_missing:
-        combined_pace = float(np.nanmean([home_pace, away_pace]))
-        expected_total = combined_pace * (home_off + away_off) / 100.0
-    else:
-        expected_total = _estimate_total_from_scoring_history(league_upper, home_team, away_team)
-
-    if expected_total is None:
-        return None, None, None, None
-
-    diff = expected_total - float(total_line)
-    over_prob = 0.5 * (1.0 + math.erf(diff / (std * math.sqrt(2.0))))
-    over_prob = min(max(over_prob, 0.0), 1.0)
-    under_prob = 1.0 - over_prob
-
-    over_implied = _moneyline_to_prob(over_price)
-    under_implied = _moneyline_to_prob(under_price)
-
-    over_edge = over_prob - over_implied if over_implied is not None else None
-    under_edge = under_prob - under_implied if under_implied is not None else None
-
-    return over_prob, under_prob, over_edge, under_edge
 
 FORWARD_TEST_DIR = Path("data/forward_test")
 FORWARD_TEST_DIR.mkdir(parents=True, exist_ok=True)
@@ -1009,21 +808,10 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                     over_edge_pred = None
                     under_edge_pred = None
             else:
-                (
-                    over_prob_pred,
-                    under_prob_pred,
-                    over_edge_pred,
-                    under_edge_pred,
-                ) = _estimate_totals_probabilities(
-                    loader=feature_loader,
-                    league=league_upper,
-                    home_team=home_team,
-                    away_team=away_team,
-                    season=season_year,
-                    total_line=total_line_numeric,
-                    over_price=over_price_numeric,
-                    under_price=under_price_numeric,
-                )
+                over_prob_pred = None
+                under_prob_pred = None
+                over_edge_pred = None
+                under_edge_pred = None
             
             home_edge = None
             away_edge = None
@@ -1912,7 +1700,7 @@ def main() -> None:
         "--league",
         choices=SUPPORTED_LEAGUES + ["ALL"],
         default=None,
-        help="League to use (default varies by action: NBA for predict/report, ALL for update).",
+        help="League to use (default: ALL for predict/update, NBA for report).",
     )
     parser.add_argument(
         "--model",
@@ -1936,47 +1724,52 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level))
     
     if args.action == "predict":
-        league = args.league or SUPPORTED_LEAGUES[0]
-        model = load_model(args.model, league=league)
-        games = fetch_live_games(league=league, dotenv_path=args.dotenv)
-        
-        if not games:
-            LOGGER.warning("No live games found")
-            return
-        
-        predictions = make_predictions(games, model, league=league, model_path=args.model)
-        save_predictions(predictions)
-        
-        # Show recommendations
-        edge_threshold = 0.06
-        recs = predictions[
-            (predictions["home_edge"] >= edge_threshold) | (predictions["away_edge"] >= edge_threshold)
-        ]
-        
-        if len(recs) > 0:
-            LOGGER.info("\n=== RECOMMENDATIONS (Edge >= %.2f) ===", edge_threshold)
-            for _, row in recs.iterrows():
-                if row["home_edge"] >= edge_threshold:
-                    LOGGER.info(
-                        "  %s vs %s: Home edge=%.1f%%, Pred=%.1f%%, ML=%s",
-                        row["home_team"],
-                        row["away_team"],
-                        row["home_edge"] * 100,
-                        row["home_predicted_prob"] * 100,
-                        int(row["home_moneyline"]) if pd.notna(row["home_moneyline"]) else "N/A",
-                    )
-                if row["away_edge"] >= edge_threshold:
-                    LOGGER.info(
-                        "  %s vs %s: Away edge=%.1f%%, Pred=%.1f%%, ML=%s",
-                        row["away_team"],
-                        row["home_team"],
-                        row["away_edge"] * 100,
-                        row["away_predicted_prob"] * 100,
-                        int(row["away_moneyline"]) if pd.notna(row["away_moneyline"]) else "N/A",
-                    )
-        else:
-            LOGGER.info("No bets meet edge threshold of %.2f", edge_threshold)
-    
+        leagues = SUPPORTED_LEAGUES if args.league in (None, "ALL") else [args.league]
+        for league in leagues:
+            LOGGER.info("=== Running forward test for %s ===", league)
+            try:
+                model = load_model(args.model, league=league)
+            except FileNotFoundError as exc:
+                LOGGER.warning("Skipping %s: %s", league, exc)
+                continue
+
+            games = fetch_live_games(league=league, dotenv_path=args.dotenv)
+            if not games:
+                LOGGER.info("No live games found for %s", league)
+                continue
+
+            predictions = make_predictions(games, model, league=league, model_path=args.model)
+            save_predictions(predictions)
+
+            edge_threshold = 0.06
+            recs = predictions[
+                (predictions["home_edge"] >= edge_threshold) | (predictions["away_edge"] >= edge_threshold)
+            ]
+
+            if len(recs) > 0:
+                LOGGER.info("\n=== RECOMMENDATIONS (Edge >= %.2f) ===", edge_threshold)
+                for _, row in recs.iterrows():
+                    if row["home_edge"] >= edge_threshold:
+                        LOGGER.info(
+                            "  %s vs %s: Home edge=%.1f%%, Pred=%.1f%%, ML=%s",
+                            row["home_team"],
+                            row["away_team"],
+                            row["home_edge"] * 100,
+                            row["home_predicted_prob"] * 100,
+                            int(row["home_moneyline"]) if pd.notna(row["home_moneyline"]) else "N/A",
+                        )
+                    if row["away_edge"] >= edge_threshold:
+                        LOGGER.info(
+                            "  %s vs %s: Away edge=%.1f%%, Pred=%.1f%%, ML=%s",
+                            row["away_team"],
+                            row["home_team"],
+                            row["away_edge"] * 100,
+                            row["away_predicted_prob"] * 100,
+                            int(row["away_moneyline"]) if pd.notna(row["away_moneyline"]) else "N/A",
+                        )
+            else:
+                LOGGER.info("No bets meet edge threshold of %.2f for %s", edge_threshold, league)
+
     elif args.action == "update":
         target_league = None if args.league in (None, "ALL") else args.league
         update_results(league=target_league, dotenv_path=args.dotenv)

@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping, Optional
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 import pandas as pd
 
@@ -22,6 +24,38 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _ensure_odds_line_column(conn) -> None:
+    try:
+        conn.execute("ALTER TABLE odds ADD COLUMN line REAL")
+    except sqlite3.OperationalError as exc:
+        message = str(exc).lower()
+        if "duplicate column name" in message:
+            return
+        raise
+
+
+_TEAMRANKINGS_COLUMNS = {
+    "tr_pick": "TEXT",
+    "tr_total_line": "REAL",
+    "tr_confidence": "REAL",
+    "tr_odds": "REAL",
+    "tr_model_pick": "TEXT",
+    "tr_model_prob": "REAL",
+    "tr_retrieved_at": "TEXT",
+}
+
+
+def _ensure_game_results_tr_columns(conn) -> None:
+    """Make sure game_results has the optional TeamRankings columns."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(game_results)").fetchall()
+    }
+    for column, ddl in _TEAMRANKINGS_COLUMNS.items():
+        if column in existing:
+            continue
+        conn.execute(f"ALTER TABLE game_results ADD COLUMN {column} {ddl}")
 
 
 def _ensure_sport(conn, name: str, league: str, default_market: str) -> int:
@@ -455,6 +489,7 @@ def store_injury_reports(df: pd.DataFrame, *, league: str, source_key: str) -> i
     stored = 0
 
     with connect() as conn:
+        _ensure_odds_line_column(conn)
         sport_id = _ensure_sport(
             conn,
             name=config["sport_name"],
@@ -727,12 +762,13 @@ def load_odds_snapshot(
             
             # Track outcomes for later game_results update
             outcomes_by_key = {}
+            total_close_value = None
             
             for bookmaker in event.get("bookmakers", []):
                 book_title = bookmaker.get("title") or bookmaker.get("key")
                 book_id = _get_or_create_book(conn, book_title, region)
                 for market in bookmaker.get("markets", []):
-                    market_key = market.get("key")
+                    market_key = (market.get("key") or "").lower()
                     for outcome in market.get("outcomes", []):
                         price = outcome.get("price")
                         american = _safe_float(price)
@@ -750,12 +786,16 @@ def load_odds_snapshot(
                         if market_key == "h2h" and outcome_key in ("home", "away") and american is not None:
                             outcomes_by_key[outcome_key] = american
 
+                        line_value = _safe_float(outcome.get("point"))
+                        if market_key == "totals" and line_value is not None and total_close_value is None:
+                            total_close_value = line_value
+
                         conn.execute(
                             """
                             INSERT OR REPLACE INTO odds (
                                 snapshot_id, game_id, book_id, market, outcome,
-                                price_american, price_decimal, implied_prob
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                price_american, price_decimal, implied_prob, line
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 snapshot_id,
@@ -766,47 +806,754 @@ def load_odds_snapshot(
                                 american,
                                 _american_to_decimal(american) if american is not None else None,
                                 _implied_probability(american) if american is not None else None,
+                                line_value,
                             ),
                         )
             
             # Update game_results with moneylines from outcomes (after processing all bookmakers)
-            if outcomes_by_key:
+            if outcomes_by_key or total_close_value is not None:
                 home_ml = outcomes_by_key.get("home")
                 away_ml = outcomes_by_key.get("away")
+                total_close_norm = _safe_float(total_close_value)
                 LOGGER.debug(
-                    "Game %s: outcomes_by_key=%s, home_ml=%s, away_ml=%s",
-                    game_id, outcomes_by_key, home_ml, away_ml
+                    "Game %s: outcomes_by_key=%s, home_ml=%s, away_ml=%s, total_close=%s",
+                    game_id, outcomes_by_key, home_ml, away_ml, total_close_norm
                 )
-                if home_ml is not None or away_ml is not None:
+                if home_ml is None and away_ml is None and total_close_norm is None:
+                    LOGGER.debug("Game %s: no moneyline or totals data available to persist", game_id)
+                else:
                     existing = conn.execute(
                         "SELECT game_id FROM game_results WHERE game_id = ?",
                         (game_id,),
                     ).fetchone()
-                    
+
                     if existing:
-                        LOGGER.debug("Updating game_results for game_id %s with moneylines", game_id)
+                        LOGGER.debug("Updating game_results for game_id %s with odds data", game_id)
                         conn.execute(
                             """
                             UPDATE game_results
                             SET home_moneyline_close = COALESCE(?, home_moneyline_close),
-                                away_moneyline_close = COALESCE(?, away_moneyline_close)
+                                away_moneyline_close = COALESCE(?, away_moneyline_close),
+                        total_close = COALESCE(?, total_close)
                             WHERE game_id = ?
                             """,
-                            (_normalize_moneyline(home_ml), _normalize_moneyline(away_ml), game_id),
+                            (_normalize_moneyline(home_ml), _normalize_moneyline(away_ml), total_close_norm, game_id),
                         )
                     else:
-                        LOGGER.debug("Inserting game_results for game_id %s with moneylines", game_id)
+                        LOGGER.debug("Inserting game_results for game_id %s with odds data", game_id)
                         conn.execute(
                             """
                             INSERT INTO game_results (
-                                game_id, home_moneyline_close, away_moneyline_close, source_version
-                            ) VALUES (?, ?, ?, ?)
+                                game_id, home_moneyline_close, away_moneyline_close, total_close, source_version
+                            ) VALUES (?, ?, ?, ?, ?)
                             """,
-                            (game_id, _normalize_moneyline(home_ml), _normalize_moneyline(away_ml), "espn"),
+                            (
+                                game_id,
+                                _normalize_moneyline(home_ml),
+                                _normalize_moneyline(away_ml),
+                                total_close_norm,
+                                source,
+                            ),
                         )
-                else:
-                    LOGGER.debug("Game %s: outcomes_by_key present but no home/away moneylines", game_id)
             else:
-                LOGGER.debug("Game %s: outcomes_by_key is empty", game_id)
+                LOGGER.debug("Game %s: no outcome data captured for odds snapshot", game_id)
 
         LOGGER.info("Stored odds snapshot %s with %d events", snapshot_id, len(results))
+
+
+FOOTBALL_DATA_SOURCE = "football-data"
+TEAMRANKINGS_SOURCE = "teamrankings"
+
+FOOTBALL_DATA_LEAGUE_DIRS: Dict[str, str] = {
+    "premier-league": "EPL",
+    "la-liga": "LALIGA",
+    "bundesliga": "BUNDESLIGA",
+    "serie-a": "SERIEA",
+    "ligue-1": "LIGUE1",
+}
+
+TEAMRANKINGS_FILE_PREFIXES: Dict[str, str] = {
+    "nba": "NBA",
+    "nfl": "NFL",
+    "cfb": "CFB",
+}
+
+
+def _resolve_league_directories(
+    leagues: Optional[Sequence[str]],
+    mapping: Mapping[str, str],
+) -> Sequence[tuple[str, str]]:
+    """Return (directory_name, league_code) pairs for football-data inputs."""
+    if not leagues:
+        return list(mapping.items())
+
+    reverse = {league.upper(): directory for directory, league in mapping.items()}
+    resolved: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in leagues:
+        if not entry:
+            continue
+        entry_lower = entry.lower()
+        entry_upper = entry.upper()
+        if entry_lower in mapping:
+            league_code = mapping[entry_lower]
+            if league_code not in seen:
+                resolved.append((entry_lower, league_code))
+                seen.add(league_code)
+            continue
+        if entry_upper in reverse:
+            league_code = entry_upper
+            directory = reverse[entry_upper]
+            if league_code not in seen:
+                resolved.append((directory, league_code))
+                seen.add(league_code)
+            continue
+        raise ValueError(
+            f"Unknown league '{entry}'. Available: {sorted(set(mapping.values()))}"
+        )
+    return resolved
+
+
+def _coerce_to_utc_datetime(value: Any, *, dayfirst: bool = False) -> Optional[datetime]:
+    """Best-effort conversion to timezone-aware UTC datetime."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+
+    if isinstance(value, pd.Timestamp):
+        dt_value = value.to_pydatetime()
+    elif isinstance(value, datetime):
+        dt_value = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            dt_value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = pd.to_datetime(text, errors="coerce", dayfirst=dayfirst)
+            if pd.isna(parsed):
+                return None
+            dt_value = parsed.to_pydatetime()
+    else:
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        if isinstance(parsed, pd.Timestamp):
+            dt_value = parsed.to_pydatetime()
+        elif isinstance(parsed, datetime):
+            dt_value = parsed
+        else:
+            return None
+
+    if dt_value.tzinfo is None:
+        return dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone(timezone.utc)
+
+
+def _parse_football_data_datetime(row: Mapping[str, Any]) -> Optional[datetime]:
+    """Extract the kickoff datetime from a football-data row."""
+    direct_keys = ("start_time_utc", "start_time", "kickoff_utc", "match_datetime")
+    for key in direct_keys:
+        if key in row:
+            dt_value = _coerce_to_utc_datetime(row.get(key))
+            if dt_value:
+                return dt_value
+
+    date_value = row.get("match_date")
+    dt_value = _coerce_to_utc_datetime(date_value) if date_value is not None else None
+    if not dt_value:
+        date_value = row.get("Date") or row.get("date")
+        dt_value = _coerce_to_utc_datetime(date_value, dayfirst=True)
+    if not dt_value:
+        return None
+
+    time_value = row.get("Time") or row.get("kickoff_time")
+    hour = 0
+    minute = 0
+    if isinstance(time_value, str):
+        time_text = time_value.strip()
+        if time_text:
+            normalized = time_text.replace(".", ":")
+            parts = normalized.split(":")
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1]) if len(parts) > 1 else 0
+            except ValueError:
+                hour = minute = 0
+    elif isinstance(time_value, (int, float)) and not pd.isna(time_value):
+        # Handle times like 1900 meaning 19:00
+        value_str = str(int(time_value))
+        if len(value_str) in {3, 4}:
+            hour = int(value_str[:-2])
+            minute = int(value_str[-2:])
+
+    dt_value = dt_value.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if dt_value.tzinfo is None:
+        return dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone(timezone.utc)
+
+
+def _parse_total_line_from_column(column_name: str) -> Optional[float]:
+    for delimiter in (">", "<"):
+        if delimiter in column_name:
+            try:
+                return float(column_name.split(delimiter, 1)[1])
+            except ValueError:
+                continue
+    return None
+
+
+def _extract_football_total_line(row: Mapping[str, Any]) -> Optional[float]:
+    """Best-effort extraction of a totals line from football-data columns."""
+    explicit_keys = ("total_line", "TotalLine", "closing_total_line")
+    for key in explicit_keys:
+        if key in row:
+            total = _safe_float(row.get(key))
+            if total is not None:
+                return total
+
+    candidate_columns = (
+        "AvgC>2.5",
+        "Avg>2.5",
+        "B365C>2.5",
+        "B365>2.5",
+        "MaxC>2.5",
+        "Max>2.5",
+    )
+    for column in candidate_columns:
+        if column in row:
+            total = _parse_total_line_from_column(column)
+            if total is not None:
+                return total
+    return None
+
+
+def _find_game_by_codes(
+    conn,
+    *,
+    league: str,
+    home_code: str,
+    away_code: str,
+    target_ts: Optional[int],
+    tolerance_seconds: int,
+    target_date: Optional[str],
+) -> Optional[str]:
+    """Locate a game_id by team codes and approximate start time."""
+    league_upper = league.upper()
+    if target_ts is not None:
+        row = conn.execute(
+            """
+            SELECT g.game_id,
+                   ABS(strftime('%s', g.start_time_utc) - ?) AS delta
+            FROM games g
+            JOIN sports s ON g.sport_id = s.sport_id
+            JOIN teams th ON g.home_team_id = th.team_id
+            JOIN teams ta ON g.away_team_id = ta.team_id
+            WHERE s.league = ?
+              AND th.code = ?
+              AND ta.code = ?
+              AND g.start_time_utc IS NOT NULL
+              AND ABS(strftime('%s', g.start_time_utc) - ?) <= ?
+            ORDER BY delta
+            LIMIT 1
+            """,
+            (target_ts, league_upper, home_code, away_code, target_ts, tolerance_seconds),
+        ).fetchone()
+        if row:
+            return row[0]
+
+    if target_date:
+        row = conn.execute(
+            """
+            SELECT g.game_id
+            FROM games g
+            JOIN sports s ON g.sport_id = s.sport_id
+            JOIN teams th ON g.home_team_id = th.team_id
+            JOIN teams ta ON g.away_team_id = ta.team_id
+            WHERE s.league = ?
+              AND th.code = ?
+              AND ta.code = ?
+              AND date(g.start_time_utc) = ?
+            ORDER BY g.start_time_utc DESC
+            LIMIT 1
+            """,
+            (league_upper, home_code, away_code, target_date),
+        ).fetchone()
+        if row:
+            return row[0]
+
+    row = conn.execute(
+        """
+        SELECT g.game_id
+        FROM games g
+        JOIN sports s ON g.sport_id = s.sport_id
+        JOIN teams th ON g.home_team_id = th.team_id
+        JOIN teams ta ON g.away_team_id = ta.team_id
+        WHERE s.league = ?
+          AND th.code = ?
+          AND ta.code = ?
+        ORDER BY g.start_time_utc DESC
+        LIMIT 1
+        """,
+        (league_upper, home_code, away_code),
+    ).fetchone()
+    if row:
+        return row[0]
+
+    return None
+
+
+def import_football_data_totals(
+    leagues: Optional[Sequence[str]] = None,
+    *,
+    base_dir: str | Path | None = None,
+    tolerance_seconds: int = 6 * 3600,
+) -> Dict[str, Dict[str, int]]:
+    """
+    Load historical totals and scores from football-data.co.uk parquet exports.
+    """
+    base_path = Path(base_dir or Path("data/processed/external/football_data"))
+    summary: Dict[str, Dict[str, int]] = {}
+
+    try:
+        targets = _resolve_league_directories(leagues, FOOTBALL_DATA_LEAGUE_DIRS)
+    except ValueError as exc:  # pragma: no cover - defensive
+        LOGGER.error("%s", exc)
+        return summary
+
+    if not base_path.exists():
+        LOGGER.warning("Football-data directory missing: %s", base_path)
+        return summary
+
+    with connect() as conn:
+        for directory, league_code in targets:
+            league_path = base_path / directory
+            files = sorted(league_path.glob("*.parquet")) if league_path.exists() else []
+            league_stats = summary.setdefault(
+                league_code,
+                {"files": 0, "rows": 0, "matched": 0, "unmatched": 0},
+            )
+            if not files:
+                LOGGER.info(
+                    "football-data %s: no parquet files found under %s",
+                    league_code,
+                    league_path,
+                )
+                continue
+
+            league_stats["files"] += len(files)
+            for parquet_file in files:
+                try:
+                    df = pd.read_parquet(parquet_file)
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.exception(
+                        "football-data %s: failed to read %s (%s)",
+                        league_code,
+                        parquet_file,
+                        exc,
+                    )
+                    continue
+
+                total_rows = len(df)
+                matched = 0
+                unmatched = 0
+                if total_rows == 0:
+                    LOGGER.info(
+                        "football-data %s: %s is empty",
+                        league_code,
+                        parquet_file.name,
+                    )
+                else:
+                    for record in df.to_dict(orient="records"):
+                        home_name = record.get("home_team") or record.get("HomeTeam")
+                        away_name = record.get("away_team") or record.get("AwayTeam")
+                        if not home_name or not away_name:
+                            unmatched += 1
+                            continue
+
+                        home_code = normalize_team_code(league_code, home_name)
+                        away_code = normalize_team_code(league_code, away_name)
+                        if not home_code or not away_code:
+                            unmatched += 1
+                            continue
+
+                        game_dt = _parse_football_data_datetime(record)
+                        if not game_dt:
+                            unmatched += 1
+                            continue
+
+                        game_ts = int(game_dt.timestamp())
+                        game_id = _find_game_by_codes(
+                            conn,
+                            league=league_code,
+                            home_code=home_code,
+                            away_code=away_code,
+                            target_ts=game_ts,
+                            tolerance_seconds=tolerance_seconds,
+                            target_date=game_dt.date().isoformat(),
+                        )
+                        if not game_id:
+                            LOGGER.warning(
+                                "football-data %s: unmatched row %s vs %s on %s",
+                                league_code,
+                                home_name,
+                                away_name,
+                                game_dt.date().isoformat(),
+                            )
+                            unmatched += 1
+                            continue
+
+                        spread_close = _safe_float(record.get("AHCh")) or _safe_float(
+                            record.get("AHh")
+                        )
+                        total_close = _extract_football_total_line(record)
+                        home_score = _normalize_score(record.get("FTHG"))
+                        away_score = _normalize_score(record.get("FTAG"))
+
+                        conn.execute(
+                            """
+                            INSERT INTO game_results (
+                                game_id, home_score, away_score, total_close, spread_close, source_version
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(game_id) DO UPDATE SET
+                                home_score = COALESCE(excluded.home_score, game_results.home_score),
+                                away_score = COALESCE(excluded.away_score, game_results.away_score),
+                                total_close = COALESCE(excluded.total_close, game_results.total_close),
+                                spread_close = COALESCE(excluded.spread_close, game_results.spread_close),
+                                source_version = excluded.source_version
+                            """,
+                            (
+                                game_id,
+                                home_score,
+                                away_score,
+                                total_close,
+                                spread_close,
+                                FOOTBALL_DATA_SOURCE,
+                            ),
+                        )
+                        matched += 1
+
+                league_stats["rows"] += total_rows
+                league_stats["matched"] += matched
+                league_stats["unmatched"] += unmatched
+                LOGGER.info(
+                    "football-data %s: %s matched %d/%d rows",
+                    league_code,
+                    parquet_file.name,
+                    matched,
+                    total_rows,
+                )
+
+    return summary
+
+
+def _resolve_teamrankings_filters(leagues: Optional[Sequence[str]]) -> set[str]:
+    if not leagues:
+        return set()
+
+    resolved: set[str] = set()
+    for entry in leagues:
+        if not entry:
+            continue
+        entry_lower = entry.lower()
+        if entry_lower in TEAMRANKINGS_FILE_PREFIXES:
+            resolved.add(TEAMRANKINGS_FILE_PREFIXES[entry_lower])
+        else:
+            resolved.add(entry.upper())
+    return resolved
+
+
+def _teamrankings_league_from_name(name: str) -> Optional[str]:
+    lowered = name.lower()
+    for prefix, league in TEAMRANKINGS_FILE_PREFIXES.items():
+        if lowered.startswith(prefix):
+            return league
+    return None
+
+
+def import_teamrankings_picks(
+    *,
+    leagues: Optional[Sequence[str]] = None,
+    base_dir: str | Path | None = None,
+    tolerance_seconds: int = 6 * 3600,
+) -> Dict[str, Dict[str, int]]:
+    """
+    Attach TeamRankings over/under picks to existing games.
+    """
+    base_path = Path(base_dir or Path("data/processed/external/teamrankings"))
+    summary: Dict[str, Dict[str, int]] = {}
+    if not base_path.exists():
+        LOGGER.warning("teamrankings: directory missing %s", base_path)
+        return summary
+
+    files = sorted(base_path.glob("*.parquet"))
+    if not files:
+        LOGGER.info("teamrankings: no parquet files found in %s", base_path)
+        return summary
+
+    league_filters = _resolve_teamrankings_filters(leagues)
+
+    with connect() as conn:
+        _ensure_game_results_tr_columns(conn)
+
+        for parquet_file in files:
+            league_code = _teamrankings_league_from_name(parquet_file.stem)
+            if not league_code:
+                LOGGER.warning(
+                    "teamrankings: unable to determine league from %s",
+                    parquet_file.name,
+                )
+                continue
+
+            if league_filters and league_code not in league_filters:
+                continue
+
+            try:
+                df = pd.read_parquet(parquet_file)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception(
+                    "teamrankings %s: failed to read %s (%s)",
+                    league_code,
+                    parquet_file,
+                    exc,
+                )
+                continue
+
+            stats = summary.setdefault(
+                league_code,
+                {"files": 0, "rows": 0, "updates": 0, "unmatched": 0},
+            )
+            stats["files"] += 1
+            stats["rows"] += len(df)
+
+            if df.empty:
+                LOGGER.info(
+                    "teamrankings %s: %s is empty",
+                    league_code,
+                    parquet_file.name,
+                )
+                continue
+
+            matched = 0
+            unmatched = 0
+            for record in df.to_dict(orient="records"):
+                home_name = record.get("home_team")
+                away_name = record.get("away_team")
+                if not home_name or not away_name:
+                    unmatched += 1
+                    continue
+
+                home_code = normalize_team_code(league_code, home_name)
+                away_code = normalize_team_code(league_code, away_name)
+                if not home_code or not away_code:
+                    unmatched += 1
+                    continue
+
+                game_dt = _coerce_to_utc_datetime(record.get("game_date"))
+                if not game_dt:
+                    unmatched += 1
+                    continue
+
+                game_id = _find_game_by_codes(
+                    conn,
+                    league=league_code,
+                    home_code=home_code,
+                    away_code=away_code,
+                    target_ts=int(game_dt.timestamp()),
+                    tolerance_seconds=tolerance_seconds,
+                    target_date=game_dt.date().isoformat(),
+                )
+                if not game_id:
+                    LOGGER.warning(
+                        "teamrankings %s: unmatched pick %s at %s on %s",
+                        league_code,
+                        away_name,
+                        home_name,
+                        game_dt.date().isoformat(),
+                    )
+                    unmatched += 1
+                    continue
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO game_results (game_id, source_version) VALUES (?, ?)",
+                    (game_id, TEAMRANKINGS_SOURCE),
+                )
+
+                retrieved_at_raw = record.get("retrieved_at")
+                if isinstance(retrieved_at_raw, str):
+                    retrieved_at_value = retrieved_at_raw
+                elif retrieved_at_raw:
+                    retrieved_dt = _coerce_to_utc_datetime(retrieved_at_raw)
+                    retrieved_at_value = retrieved_dt.isoformat() if retrieved_dt else None
+                else:
+                    retrieved_at_value = None
+
+                conn.execute(
+                    """
+                    UPDATE game_results
+                    SET tr_pick = ?,
+                        tr_total_line = ?,
+                        tr_confidence = ?,
+                        tr_odds = ?,
+                        tr_model_pick = ?,
+                        tr_model_prob = ?,
+                        tr_retrieved_at = ?
+                    WHERE game_id = ?
+                    """,
+                    (
+                        record.get("pick"),
+                        _safe_float(record.get("total_line")),
+                        _safe_float(record.get("confidence_value")),
+                        _safe_float(record.get("odds_value")),
+                        record.get("model_pick") or record.get("similar_games_pick"),
+                        _safe_float(
+                            record.get("model_prob") or record.get("similar_games_prob")
+                        ),
+                        retrieved_at_value,
+                        game_id,
+                    ),
+                )
+                matched += 1
+
+            stats["updates"] += matched
+            stats["unmatched"] += unmatched
+            LOGGER.info(
+                "teamrankings %s: %s matched %d/%d rows",
+                league_code,
+                parquet_file.name,
+                matched,
+                len(df),
+            )
+
+    return summary
+
+
+def import_sbr_odds(
+    *,
+    league: str = "NBA",
+    seasons: Optional[Sequence[str]] = None,
+    base_dir: str | Path | None = None,
+    tolerance_seconds: int = 24 * 3600,
+) -> Dict[str, Dict[str, int]]:
+    """
+    Load historical odds from SportsbookReviewOnline into game_results.
+    """
+    base_path = Path(base_dir or Path("data/processed/external/sbr")) / league.lower()
+    if not base_path.exists():
+        LOGGER.warning("SBR directory missing: %s", base_path)
+        return {}
+
+    if seasons:
+        season_files = [(season, base_path / f"{season}.parquet") for season in seasons]
+    else:
+        season_files = sorted((path.stem, path) for path in base_path.glob("*.parquet"))
+
+    summary: Dict[str, Dict[str, int]] = {}
+    if not season_files:
+        LOGGER.info("No SBR parquet files found in %s", base_path)
+        return summary
+
+    with connect() as conn:
+        for season, parquet_file in season_files:
+            stats = summary.setdefault(season, {"rows": 0, "matched": 0, "unmatched": 0})
+            if not parquet_file.exists():
+                LOGGER.warning("SBR file missing: %s", parquet_file)
+                continue
+
+            try:
+                df = pd.read_parquet(parquet_file)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("Failed to read %s: %s", parquet_file, exc)
+                continue
+
+            if df.empty:
+                LOGGER.info("SBR %s %s is empty", league, season)
+                continue
+
+            if not pd.api.types.is_datetime64_any_dtype(df["game_date"]):
+                df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce", utc=True)
+
+            stats["rows"] += len(df)
+            for row in df.itertuples(index=False):
+                home_name = getattr(row, "home_team", "")
+                away_name = getattr(row, "visitor_team", "")
+                if not home_name or not away_name:
+                    stats["unmatched"] += 1
+                    continue
+
+                home_code = normalize_team_code(league, home_name)
+                away_code = normalize_team_code(league, away_name)
+                if not home_code or not away_code:
+                    LOGGER.warning("SBR %s %s: team normalization failed (%s vs %s)", league, season, away_name, home_name)
+                    stats["unmatched"] += 1
+                    continue
+
+                game_dt = getattr(row, "game_date", None)
+                if pd.isna(game_dt):
+                    stats["unmatched"] += 1
+                    continue
+                game_dt = pd.to_datetime(game_dt, utc=True)
+                target_date = game_dt.date().isoformat()
+
+                game_id = _find_game_by_codes(
+                    conn,
+                    league=league,
+                    home_code=home_code,
+                    away_code=away_code,
+                    target_ts=None,
+                    tolerance_seconds=tolerance_seconds,
+                    target_date=target_date,
+                )
+                if not game_id:
+                    LOGGER.warning(
+                        "SBR %s %s: unmatched game %s vs %s on %s",
+                        league,
+                        season,
+                        away_name,
+                        home_name,
+                        target_date,
+                    )
+                    stats["unmatched"] += 1
+                    continue
+
+                home_score = _normalize_score(getattr(row, "home_score", None))
+                away_score = _normalize_score(getattr(row, "visitor_score", None))
+                spread_close = _safe_float(getattr(row, "spread_close", None))
+                total_close = _safe_float(getattr(row, "total_close", None))
+                home_ml = _normalize_moneyline(getattr(row, "home_moneyline", None))
+                away_ml = _normalize_moneyline(getattr(row, "visitor_moneyline", None))
+
+                conn.execute(
+                    """
+                    INSERT INTO game_results (
+                        game_id,
+                        home_score,
+                        away_score,
+                        home_moneyline_close,
+                        away_moneyline_close,
+                        spread_close,
+                        total_close,
+                        source_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'sbr')
+                    ON CONFLICT(game_id) DO UPDATE SET
+                        home_score = COALESCE(excluded.home_score, game_results.home_score),
+                        away_score = COALESCE(excluded.away_score, game_results.away_score),
+                        home_moneyline_close = COALESCE(excluded.home_moneyline_close, game_results.home_moneyline_close),
+                        away_moneyline_close = COALESCE(excluded.away_moneyline_close, game_results.away_moneyline_close),
+                        spread_close = COALESCE(excluded.spread_close, game_results.spread_close),
+                        total_close = COALESCE(excluded.total_close, game_results.total_close),
+                        source_version = excluded.source_version
+                    """,
+                    (
+                        game_id,
+                        home_score,
+                        away_score,
+                        home_ml,
+                        away_ml,
+                        spread_close,
+                        total_close,
+                    ),
+                )
+                stats["matched"] += 1
+
+    return summary

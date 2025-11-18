@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS odds (
     price_american REAL,
     price_decimal REAL,
     implied_prob REAL,
+    line REAL,
     PRIMARY KEY (snapshot_id, book_id, game_id, market, outcome)
 );
 
@@ -78,7 +79,14 @@ CREATE TABLE IF NOT EXISTS game_results (
     away_moneyline_close REAL,
     spread_close REAL,
     total_close REAL,
-    source_version TEXT
+    source_version TEXT,
+    tr_pick TEXT,
+    tr_total_line REAL,
+    tr_confidence REAL,
+    tr_odds REAL,
+    tr_model_pick TEXT,
+    tr_model_prob REAL,
+    tr_retrieved_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_features (

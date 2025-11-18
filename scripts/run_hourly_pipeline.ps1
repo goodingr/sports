@@ -275,8 +275,8 @@ foreach ($league in $targetLeagues) {
         continue
     }
     try {
-        Write-Log "Requesting Odds API snapshot for $league..."
-        & poetry run python -m src.data.ingest_odds --league $league --force-refresh | Out-Null
+        Write-Log "Requesting Odds API snapshot for $league (moneyline + totals)..."
+        & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh | Out-Null
     } catch {
         Write-Log ("WARNING: Odds API snapshot failed for {0}: {1}" -f $league, $_)
     }
@@ -311,6 +311,37 @@ if ($targetSoccerLeagues.Count) {
         } catch {
             Write-Log "WARNING: Football-data ingestion failed: $_"
         }
+
+        Write-Log "Updating soccer totals from football-data for leagues: $leagueArg..."
+        try {
+            & poetry run python scripts/run_external_loader.py --source football-data --leagues $footballTargets | Out-Null
+        } catch {
+            Write-Log "WARNING: football-data loader failed: $_"
+        }
+    }
+}
+
+$teamRankingsEligible = @($targetLeagues | Where-Object { $_ -in @("NFL", "NBA", "CFB") })
+if ($teamRankingsEligible.Count) {
+    $leagueArg = ($teamRankingsEligible -join ',')
+    Write-Log "Fetching TeamRankings over/under picks for leagues: $leagueArg..."
+    foreach ($league in $teamRankingsEligible) {
+        try {
+            & poetry run python -m src.data.sources.teamrankings_over_under --league $league | Out-Null
+        } catch {
+            Write-Log ("WARNING: TeamRankings ingestion failed for {0}: {1}" -f $league, $_)
+        }
+    }
+}
+
+$teamRankingsEligible = @($targetLeagues | Where-Object { $_ -in @("NFL", "NBA", "CFB") })
+if ($teamRankingsEligible.Count) {
+    $leagueArg = ($teamRankingsEligible -join ',')
+    Write-Log "Updating TeamRankings picks for leagues: $leagueArg..."
+    try {
+        & poetry run python scripts/run_external_loader.py --source teamrankings --leagues $teamRankingsEligible | Out-Null
+    } catch {
+        Write-Log "WARNING: TeamRankings loader failed: $_"
     }
 }
 

@@ -45,23 +45,44 @@ def _convert_espn_csv_to_payload(csv_path: Path, league: str) -> dict:
             continue
         
         # Build odds data
-        bookmakers = [{
-            "key": "espn",
-            "title": "ESPN",
-            "markets": [{
-                "key": "h2h",
-                "outcomes": [
-                    {
-                        "name": home_row["team"],
-                        "price": home_row.get("moneyline_close") or home_row.get("moneyline_open")
-                    },
-                    {
-                        "name": away_row["team"],
-                        "price": away_row.get("moneyline_close") or away_row.get("moneyline_open")
-                    }
-                ]
-            }]
+        markets = [{
+            "key": "h2h",
+            "outcomes": [
+                {
+                    "name": home_row["team"],
+                    "price": home_row.get("moneyline_close") or home_row.get("moneyline_open"),
+                },
+                {
+                    "name": away_row["team"],
+                    "price": away_row.get("moneyline_close") or away_row.get("moneyline_open"),
+                },
+            ],
         }]
+
+        total_line = (
+            home_row.get("total_close")
+            or away_row.get("total_close")
+            or home_row.get("total_open")
+            or away_row.get("total_open")
+        )
+        if pd.notna(total_line):
+            markets.append(
+                {
+                    "key": "totals",
+                    "outcomes": [
+                        {"name": "over", "point": total_line},
+                        {"name": "under", "point": total_line},
+                    ],
+                }
+            )
+
+        bookmakers = [
+            {
+                "key": "espn",
+                "title": "ESPN",
+                "markets": markets,
+            }
+        ]
         
         results.append({
             "id": str(event_id),  # Use event_id as odds_api_id for matching

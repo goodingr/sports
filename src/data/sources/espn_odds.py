@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 import requests
 from requests import RequestException
+
+from src.db.loaders import load_odds_snapshot
 
 from .utils import DEFAULT_HEADERS, SourceDefinition, source_run
 
@@ -115,6 +117,8 @@ def _extract_rows(payload: dict, league: str) -> pd.DataFrame:
                     "spread_close_price": team_spread.get("close", {}).get("odds"),
                     "total_open": total.get("over", {}).get("open", {}).get("line"),
                     "total_close": total.get("over", {}).get("close", {}).get("line"),
+                    "home_team": event.get("home_team", ""),
+                    "away_team": event.get("away_team", ""),
                 }
             )
 
@@ -124,6 +128,72 @@ def _extract_rows(payload: dict, league: str) -> pd.DataFrame:
 
     df["retrieved_at"] = datetime.utcnow().isoformat()
     return df
+
+
+def _df_to_payload(df: pd.DataFrame, league: str) -> dict:
+    """Convert ESPN odds dataframe into a load_odds_snapshot payload."""
+    results: List[dict] = []
+    if df.empty:
+        return {"results": [], "fetched_at": datetime.now(timezone.utc).isoformat(), "source": "espn"}
+
+    for event_id, group in df.groupby("event_id"):
+        home_rows = group[group["is_home"] == 1]
+        away_rows = group[group["is_home"] == 0]
+        if home_rows.empty or away_rows.empty:
+            continue
+
+        home_row = home_rows.iloc[0]
+        away_row = away_rows.iloc[0]
+
+        markets = [
+            {
+                "key": "h2h",
+                "outcomes": [
+                    {"name": home_row["team"], "price": home_row.get("moneyline_close") or home_row.get("moneyline_open")},
+                    {"name": away_row["team"], "price": away_row.get("moneyline_close") or away_row.get("moneyline_open")},
+                ],
+            }
+        ]
+
+        total_line = (
+            home_row.get("total_close")
+            or away_row.get("total_close")
+            or home_row.get("total_open")
+            or away_row.get("total_open")
+        )
+        if pd.notna(total_line):
+            markets.append(
+                {
+                    "key": "totals",
+                    "outcomes": [
+                        {"name": "over", "point": total_line},
+                        {"name": "under", "point": total_line},
+                    ],
+                }
+            )
+
+        results.append(
+            {
+                "id": str(event_id),
+                "sport_key": "basketball_nba" if league.lower() == "nba" else "americanfootball_nfl",
+                "commence_time": home_row["start_time"],
+                "home_team": home_row["team"],
+                "away_team": away_row["team"],
+                "bookmakers": [
+                    {
+                        "key": "espn",
+                        "title": "ESPN",
+                        "markets": markets,
+                    }
+                ],
+            }
+        )
+
+    return {
+        "results": results,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": "espn",
+    }
 
 
 def _ingest(
@@ -157,6 +227,13 @@ def _ingest(
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(csv_path, index=False)
         run.record_file(csv_path, metadata={"rows": len(df)}, records=len(df))
+        try:
+            payload = _df_to_payload(df, league)
+            if payload["results"]:
+                sport_key = SPORT_MAP[league].replace("/", "_")
+                load_odds_snapshot(payload, raw_path=str(csv_path), sport_key=sport_key)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to load ESPN odds snapshot into DB: %s", exc)
 
         run.set_records(len(df))
         run.set_message(f"Captured {len(df)} ESPN odds rows")
