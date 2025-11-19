@@ -564,6 +564,12 @@ def overunder_recommended_table(totals_df: pd.DataFrame) -> dash_table.DataTable
     df["total_line"] = df["total_line"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "")
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    if "predicted_total_points" in df.columns:
+        df["predicted_total_points"] = df["predicted_total_points"].apply(
+            lambda x: f"{x:.1f}" if pd.notna(x) else ""
+        )
+    else:
+        df["predicted_total_points"] = ""
 
     columns = [
         {"name": "Commence", "id": "commence_time"},
@@ -572,7 +578,8 @@ def overunder_recommended_table(totals_df: pd.DataFrame) -> dash_table.DataTable
         {"name": "Away", "id": "away_team"},
         {"name": "Pick", "id": "description"},
         {"name": "Total Line", "id": "total_line"},
-        {"name": "Moneyline", "id": "moneyline"},
+        {"name": "Pred Total", "id": "predicted_total_points"},
+        {"name": "Odds", "id": "moneyline"},
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Edge", "id": "edge"},
     ]
@@ -617,9 +624,16 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
     for col in ("home_team", "away_team"):
         if col in df.columns:
             df[col] = df[col].fillna("").astype(str)
+    df["total_line"] = df["total_line"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "")
     df["moneyline"] = df["moneyline"].apply(lambda x: f"{x:+.0f}" if pd.notna(x) else "")
     df["predicted_prob"] = df["predicted_prob"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+    if "predicted_total_points" in df.columns:
+        df["predicted_total_points"] = df["predicted_total_points"].apply(
+            lambda x: f"{x:.1f}" if pd.notna(x) else ""
+        )
+    else:
+        df["predicted_total_points"] = ""
     df["won"] = df["won"].apply(lambda v: "Win" if v is True else "Loss" if v is False else "")
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "")
 
@@ -630,11 +644,12 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
         {"name": "Away", "id": "away_team"},
         {"name": "Pick", "id": "description"},
         {"name": "Total Line", "id": "total_line"},
-        {"name": "Moneyline", "id": "moneyline"},
+        {"name": "Pred Total", "id": "predicted_total_points"},
+        {"name": "Total Points", "id": "total_points"},
+        {"name": "Odds", "id": "moneyline"},
         {"name": "Pred Prob", "id": "predicted_prob"},
         {"name": "Edge", "id": "edge"},
         {"name": "Result", "id": "won"},
-        {"name": "Total Points", "id": "total_points"},
         {"name": "Profit/Loss", "id": "profit"},
     ]
 

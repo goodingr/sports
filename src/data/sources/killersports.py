@@ -1,174 +1,302 @@
-"""Scrape historical NBA odds from Killersports.com."""
+"""Scrape NBA/NHL odds (moneyline + totals) from Killersports.com."""
 
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime
-from typing import List, Optional
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlencode
 
 import pandas as pd
-from bs4 import BeautifulSoup
-from selenium.webdriver.common.by import By
+import requests
+from bs4 import BeautifulSoup, Tag
 
-from .selenium_utils import extract_page_source, get_selenium_driver, wait_for_element
-from .utils import SourceDefinition, source_run, write_dataframe, write_text
+from src.data.config import load_env
+from src.db import loaders
+
+from .utils import DEFAULT_HEADERS, SourceDefinition, source_run, write_dataframe, write_text
 
 LOGGER = logging.getLogger(__name__)
 
-BASE_URL = "https://killersports.com/nba/query"
-# Historical odds available via date parameter or game lookup
+BASE_HOST = "https://killersports.com"
+QUERY_ENDPOINT = f"{BASE_HOST}/query"
+
+DEFAULT_FIELDS = {"NBA": None, "NHL": None}
 
 
-def _parse_odds_table(html: str, date: Optional[str] = None) -> pd.DataFrame:
-    """Parse odds from Killersports HTML table."""
+@dataclass(slots=True)
+class KillersportsQuery:
+    league: str
+    sdql: str
+    query_type: str = "games"
+    show: int = 5000
+    future: int = 10
+    fields: Optional[str] = None
+    extra_params: Optional[Dict[str, str]] = None
+
+
+class KillersportsClient:
+    """Lightweight HTTP client that handles authentication + queries."""
+
+    def __init__(self, timeout: int = 30, username: Optional[str] = None, password: Optional[str] = None) -> None:
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update(DEFAULT_HEADERS)
+        self.logged_in = False
+        if username and password:
+            self.login(username, password)
+
+    def login(self, username: str, password: str) -> None:
+        payload = {"username": username, "password": password}
+        resp = self.session.post(f"{BASE_HOST}/login", data=payload, timeout=self.timeout)
+        resp.raise_for_status()
+        url_lower = resp.url.lower()
+        if "login_message=validation%20failed" in url_lower:
+            raise RuntimeError("Killersports login failed (invalid credentials)")
+        self.logged_in = True
+        LOGGER.debug("Authenticated with Killersports as %s", username)
+
+    def fetch_query(self, query: KillersportsQuery) -> str:
+        params: Dict[str, str] = {
+            "filter": query.league.upper(),
+            "sdql": query.sdql,
+            "_qt": query.query_type,
+            "show": str(query.show),
+            "future": str(query.future),
+            "init": "1",
+        }
+        if query.fields:
+            params["fields"] = query.fields
+        if query.extra_params:
+            params.update({key: str(value) for key, value in query.extra_params.items()})
+
+        fields_payload = params.pop("fields", None)
+        query_string = urlencode(params)
+        if fields_payload:
+            query_string = f"{query_string}&fields={fields_payload}"
+        url = f"{QUERY_ENDPOINT}?{query_string}"
+        resp = self.session.get(url, timeout=self.timeout)
+        resp.raise_for_status()
+        LOGGER.debug("Killersports query url: %s (status %s)", resp.url, resp.status_code)
+        return resp.text
+
+
+def _default_season_for_league(league: str, today: Optional[date] = None) -> int:
+    current = today or datetime.utcnow().date()
+    league_upper = league.upper()
+    if league_upper in {"NBA", "NHL"}:
+        return current.year if current.month >= 7 else current.year - 1
+    return current.year
+
+
+def _resolve_sdql(
+    league: str,
+    *,
+    sdql: Optional[str],
+    season: Optional[int],
+    date_filter: Optional[str],
+) -> str:
+    if sdql:
+        return sdql
+    if date_filter:
+        return f"date={date_filter}"
+    if season is None:
+        season = _default_season_for_league(league)
+    return f"season={season}"
+
+
+def _parse_date(value: str) -> Optional[str]:
+    text = (value or "").strip()
+    if not text or text == "-":
+        return None
+    for fmt in ("%b %d, %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    LOGGER.debug("Unable to parse Killersports date: %s", value)
+    return None
+
+
+def _parse_int(value: str) -> Optional[int]:
+    text = (value or "").replace(",", "").strip()
+    if not text or text in {"-", "–"}:
+        return None
+    if text.upper() == "PK":
+        return 0
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _parse_float(value: str) -> Optional[float]:
+    text = (value or "").strip()
+    if not text or text in {"-", ""}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _parse_score(value: str) -> Tuple[Optional[int], Optional[int]]:
+    text = (value or "").strip()
+    if not text or text in {"-", ""} or "-" not in text:
+        return None, None
+    parts = text.split("-")
+    if len(parts) != 2:
+        return None, None
+    return _parse_int(parts[0]), _parse_int(parts[1])
+
+
+def _parse_rest(value: str) -> Tuple[Optional[int], Optional[int]]:
+    text = (value or "").strip()
+    if not text or "&" not in text:
+        return None, None
+    parts = text.split("&", maxsplit=1)
+    return _parse_int(parts[0]), _parse_int(parts[1])
+
+
+def _normalize_result(value: str) -> Optional[str]:
+    text = (value or "").strip()
+    return text if text and text != "-" else None
+
+
+def _parse_overtime(value: str) -> Optional[int]:
+    parsed = _parse_int(value)
+    return parsed if parsed is not None else None
+
+
+def _extract_rows(html: str, league: str) -> pd.DataFrame:
     soup = BeautifulSoup(html, "lxml")
-    rows: List[dict] = []
-    
-    # Killersports typically uses tables with game data
-    tables = soup.find_all("table")
-    
-    for table in tables:
-        tbody = table.find("tbody") or table
-        for tr in tbody.find_all("tr", recursive=False):
-            cells = tr.find_all(["td", "th"])
-            if len(cells) < 3:
-                continue
-            
-            try:
-                # Extract team names and scores
-                team_names = []
-                scores = []
-                moneylines = []
-                
-                for cell in cells:
-                    text = cell.get_text(strip=True)
-                    # Look for team names (usually links or in specific cells)
-                    if cell.find("a"):
-                        team_names.append(text)
-                    # Look for scores (numbers)
-                    if text.isdigit() and len(text) <= 3:
-                        scores.append(int(text))
-                    # Look for moneyline odds (+ or - followed by numbers)
-                    if text and ("+" in text or "-" in text):
-                        import re
-                        match = re.search(r'([+-]?\d+)', text)
-                        if match:
-                            try:
-                                moneylines.append(int(match.group(1)))
-                            except ValueError:
-                                continue
-                
-                # If we found two teams and two moneylines, create records
-                if len(team_names) >= 2 and len(moneylines) >= 2:
-                    team1, team2 = team_names[0], team_names[1]
-                    ml1, ml2 = moneylines[0], moneylines[1]
-                    
-                    rows.append({
-                        "date": date or datetime.now().strftime("%Y-%m-%d"),
-                        "team": team1,
-                        "opponent": team2,
-                        "moneyline": ml1,
-                        "retrieved_at": datetime.utcnow().isoformat(),
-                    })
-                    rows.append({
-                        "date": date or datetime.now().strftime("%Y-%m-%d"),
-                        "team": team2,
-                        "opponent": team1,
-                        "moneyline": ml2,
-                        "retrieved_at": datetime.utcnow().isoformat(),
-                    })
-                    
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.debug("Error parsing row: %s", exc)
-                continue
-    
-    return pd.DataFrame(rows)
+    table = soup.find("table", id="DT_Table")
+    if not isinstance(table, Tag):
+        LOGGER.warning("Killersports %s response did not include DT_Table", league)
+        return pd.DataFrame()
+
+    body = table.find("tbody") or table
+    records: List[Dict[str, object]] = []
+    for row in body.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 10:
+            continue
+        values = [cell.get_text(strip=True) for cell in cells]
+        rest_team, rest_opp = _parse_rest(values[7] if len(values) > 7 else "")
+        team_score, opp_score = _parse_score(values[6] if len(values) > 6 else "")
+        record = {
+            "league": league.upper(),
+            "game_date": _parse_date(values[0]) if len(values) > 0 else None,
+            "day": values[1].strip() if len(values) > 1 else None,
+            "season": _parse_int(values[2]) if len(values) > 2 else None,
+            "team": values[3].strip() if len(values) > 3 else None,
+            "opponent": values[4].strip() if len(values) > 4 else None,
+            "site": values[5].strip() if len(values) > 5 else None,
+            "final_score": values[6].strip() if len(values) > 6 else None,
+            "team_score": team_score,
+            "opponent_score": opp_score,
+            "rest": values[7].strip() if len(values) > 7 else None,
+            "team_rest": rest_team,
+            "opponent_rest": rest_opp,
+            "moneyline": _parse_int(values[8]) if len(values) > 8 else None,
+            "total": _parse_float(values[9]) if len(values) > 9 else None,
+            "side_result": _normalize_result(values[10]) if len(values) > 10 else None,
+            "total_result": _normalize_result(values[11]) if len(values) > 11 else None,
+            "overtime": _parse_overtime(values[12]) if len(values) > 12 else None,
+            "row_class": " ".join(row.get("class", [])),
+            "is_future": "future-game" in row.get("class", []),
+        }
+        records.append(record)
+
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+    df["retrieved_at"] = datetime.utcnow().isoformat()
+    return df
 
 
-def _query_games_by_date(date: str, timeout: int = 30) -> pd.DataFrame:
-    """Query Killersports for games on a specific date."""
-    # Killersports query format: https://killersports.com/nba/query?sd=2024-01-15
-    url = f"{BASE_URL}?sd={date}"
-    
-    with get_selenium_driver(headless=True, timeout=timeout) as driver:
-        driver.get(url)
-        
-        # Wait for page to load
-        time.sleep(3)
-        
-        # Try to find results table
-        wait_for_element(driver, By.TAG_NAME, "table", timeout=20)
-        
-        html = extract_page_source(driver, wait_seconds=2.0)
-        
-        return _parse_odds_table(html, date=date)
+def _load_credentials() -> Tuple[Optional[str], Optional[str]]:
+    config = load_env()
+    return config.get("KILLERSPORTS_USERNAME"), config.get("KILLERSPORTS_PASSWORD")
 
 
-def ingest(*, date: Optional[str] = None, timeout: int = 30) -> str:
-    """Ingest Killersports NBA odds for a specific date or current odds."""
+def ingest(
+    *,
+    league: str = "NBA",
+    sdql: Optional[str] = None,
+    season: Optional[int] = None,
+    future: int = 10,
+    show: int = 500,
+    query_type: str = "games",
+    timeout: int = 30,
+    date: Optional[str] = None,
+    params: Optional[Dict[str, str]] = None,
+) -> str:
+    """Ingest Killersports odds for the requested league/situation."""
+    league_upper = league.upper()
+    league_lower = league_upper.lower()
+    sdql_statement = _resolve_sdql(league_upper, sdql=sdql, season=season, date_filter=date)
+    fields = DEFAULT_FIELDS.get(league_upper)
     definition = SourceDefinition(
-        key="killersports_nba",
-        name="Killersports NBA odds",
-        league="NBA",
+        key=f"killersports_{league_lower}",
+        name=f"Killersports {league_upper} odds",
+        league=league_upper,
         category="odds",
-        url=BASE_URL,
+        url=f"{QUERY_ENDPOINT}?filter={league_upper}",
         default_frequency="hourly",
-        storage_subdir="nba/killersports",
+        storage_subdir=f"{league_lower}/killersports",
     )
-    
-    output_dir = ""
+
+    username, password = _load_credentials()
+    client = KillersportsClient(timeout=timeout, username=username, password=password)
+    query = KillersportsQuery(
+        league=league_upper,
+        sdql=sdql_statement,
+        query_type=query_type,
+        show=show,
+        future=future,
+        fields=fields,
+        extra_params=params,
+    )
+    if date:
+        query.future = 0
+
     with source_run(definition) as run:
-        output_dir = str(run.storage_dir)
-        
-        if date:
-            LOGGER.info("Fetching Killersports NBA odds for %s", date)
-            df = _query_games_by_date(date, timeout=timeout)
-            
-            if df.empty:
-                run.set_message("No Killersports odds rows parsed")
-                run.set_raw_path(run.storage_dir)
-                return output_dir
-            
-            csv_path = run.make_path(f"odds_{date}.csv")
-            df.to_csv(csv_path, index=False)
-            run.record_file(csv_path, metadata={"rows": len(df), "date": date}, records=len(df))
-            
-            run.set_records(len(df))
-            run.set_message(f"Captured {len(df)} Killersports odds rows")
-        else:
-            # For current odds, try the main query page
-            url = BASE_URL
-            LOGGER.info("Fetching Killersports NBA odds from %s", url)
-            
-            with get_selenium_driver(headless=True, timeout=timeout) as driver:
-                driver.get(url)
-                time.sleep(3)
-                wait_for_element(driver, By.TAG_NAME, "table", timeout=20)
-                html = extract_page_source(driver, wait_seconds=2.0)
-                
-                html_path = run.make_path("page_current.html")
-                write_text(html, html_path)
-                run.record_file(html_path, metadata={"url": url})
-                
-                df = _parse_odds_table(html)
-                
-                if df.empty:
-                    run.set_message("No Killersports odds rows parsed")
-                    run.set_raw_path(run.storage_dir)
-                    return output_dir
-                
-                csv_path = run.make_path("odds.csv")
-                df.to_csv(csv_path, index=False)
-                run.record_file(csv_path, metadata={"rows": len(df)}, records=len(df))
-                
-                run.set_records(len(df))
-                run.set_message(f"Captured {len(df)} Killersports odds rows")
-        
+        LOGGER.info("Fetching Killersports %s odds with SDQL: %s", league_upper, sdql_statement)
+        html = client.fetch_query(query)
+        html_path = run.make_path("query.html")
+        write_text(html, html_path)
+        run.record_file(html_path, metadata={"league": league_upper, "sdql": sdql_statement})
+
+        df = _extract_rows(html, league_upper)
+        if df.empty:
+            run.set_message("No odds rows parsed")
+            run.set_records(0)
+            run.set_raw_path(run.storage_dir)
+            return str(run.storage_dir)
+
+        csv_path = run.make_path("odds.csv")
+        write_dataframe(df, csv_path)
+        run.record_file(
+            csv_path,
+            metadata={
+                "league": league_upper,
+                "rows": len(df),
+                "sdql": sdql_statement,
+            },
+            records=len(df),
+        )
+        load_message = ""
+        if league_upper == "NHL":
+            stats = loaders.import_killersports_odds(csv_path, league=league_upper)
+            load_message = f" | Loaded {stats['matched']}/{stats['games']} games"
+        run.set_records(len(df))
+        run.set_message(f"Captured {len(df)} Killersports {league_upper} rows{load_message}")
         run.set_raw_path(run.storage_dir)
-    
-    return output_dir
+
+    return str(run.storage_dir)
 
 
 __all__ = ["ingest"]
-

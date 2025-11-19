@@ -138,6 +138,103 @@ def _normalize_moneyline(value: Any) -> Optional[float]:
         return None
 
 
+def _build_killersports_game_id(
+    league: str,
+    season: int,
+    game_date: pd.Timestamp,
+    away_code: str,
+    home_code: str,
+) -> str:
+    date_str = pd.Timestamp(game_date).strftime("%Y%m%d")
+    return f"{league.upper()}_{int(season)}_{date_str}_{away_code}_{home_code}"
+
+
+def _ensure_team_cached(
+    conn,
+    sport_id: int,
+    code: str,
+    name: Optional[str],
+    cache: Dict[str, int],
+) -> int:
+    if code in cache:
+        return cache[code]
+    team_id = _ensure_team(conn, sport_id, code, name)
+    cache[code] = team_id
+    return team_id
+
+
+def _create_killersports_game(
+    conn,
+    *,
+    sport_id: int,
+    league: str,
+    home_code: str,
+    away_code: str,
+    home_name: Optional[str],
+    away_name: Optional[str],
+    season: Optional[int],
+    game_date: pd.Timestamp,
+    home_score: Optional[int],
+    away_score: Optional[int],
+    team_cache: Dict[str, int],
+) -> Optional[str]:
+    if pd.isna(game_date):
+        return None
+
+    timestamp = pd.Timestamp(game_date)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+
+    season_value = season
+    if season_value is None or pd.isna(season_value):
+        season_value = int(timestamp.year)
+    else:
+        season_value = int(season_value)
+
+    start_time = timestamp.isoformat()
+
+    home_team_id = _ensure_team_cached(conn, sport_id, home_code, home_name, team_cache)
+    away_team_id = _ensure_team_cached(conn, sport_id, away_code, away_name, team_cache)
+
+    game_id = _build_killersports_game_id(league, season_value, timestamp, away_code, home_code)
+    status = "final" if home_score is not None and away_score is not None else "scheduled"
+
+    conn.execute(
+        """
+        INSERT INTO games (
+            game_id, sport_id, season, game_type, week, start_time_utc,
+            home_team_id, away_team_id, venue, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(game_id) DO UPDATE SET
+            sport_id = excluded.sport_id,
+            season = excluded.season,
+            game_type = excluded.game_type,
+            week = excluded.week,
+            start_time_utc = excluded.start_time_utc,
+            home_team_id = excluded.home_team_id,
+            away_team_id = excluded.away_team_id,
+            venue = excluded.venue,
+            status = excluded.status
+        """,
+        (
+            game_id,
+            sport_id,
+            season_value,
+            "regular",
+            None,
+            start_time,
+            home_team_id,
+            away_team_id,
+            None,
+            status,
+        ),
+    )
+
+    return game_id
+
+
 def load_schedules(
     df: pd.DataFrame,
     source_version: str = "nfl_data_py",
@@ -1555,5 +1652,181 @@ def import_sbr_odds(
                     ),
                 )
                 stats["matched"] += 1
+
+    return summary
+
+
+def import_killersports_odds(
+    csv_path: str | Path,
+    *,
+    league: str = "NHL",
+    tolerance_seconds: int = 24 * 3600,
+) -> Dict[str, int]:
+    """
+    Load Killersports odds snapshots (moneyline + total) into game_results.
+    """
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception("Failed to read %s: %s", path, exc)
+        return {"rows": 0, "games": 0, "matched": 0, "unmatched": 0}
+
+    total_rows = len(df)
+    if total_rows == 0:
+        LOGGER.info("Killersports %s: %s is empty", league, path)
+        return {"rows": 0, "games": 0, "matched": 0, "unmatched": 0}
+
+    df = df.copy()
+    df["site"] = df["site"].astype(str).str.lower()
+    df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce")
+    df = df[df["game_date"].notna()]
+
+    home_df = df[df["site"] == "home"].copy()
+    if home_df.empty:
+        LOGGER.warning("Killersports %s: no home rows detected in %s", league, path)
+        return {"rows": total_rows, "games": 0, "matched": 0, "unmatched": total_rows}
+
+    away_df = df[df["site"] == "away"].copy()
+    home_df["game_key"] = (
+        home_df["game_date"].dt.strftime("%Y-%m-%d")
+        + "|"
+        + home_df["team"].fillna("")
+        + "|"
+        + home_df["opponent"].fillna("")
+    )
+    away_df["game_key"] = (
+        away_df["game_date"].dt.strftime("%Y-%m-%d")
+        + "|"
+        + away_df["opponent"].fillna("")
+        + "|"
+        + away_df["team"].fillna("")
+    )
+    away_df["away_moneyline"] = pd.to_numeric(away_df["moneyline"], errors="coerce")
+    away_lookup = away_df[["game_key", "away_moneyline"]]
+
+    merged = home_df.merge(away_lookup, on="game_key", how="left")
+    merged["home_moneyline"] = pd.to_numeric(merged["moneyline"], errors="coerce")
+    merged["total_line"] = pd.to_numeric(merged["total"], errors="coerce")
+    merged["home_score"] = pd.to_numeric(merged["team_score"], errors="coerce")
+    merged["away_score"] = pd.to_numeric(merged["opponent_score"], errors="coerce")
+
+    summary = {
+        "rows": total_rows,
+        "games": len(merged),
+        "matched": 0,
+        "unmatched": 0,
+        "created_games": 0,
+    }
+
+    league_upper = league.upper()
+    with connect() as conn:
+        sport_row = conn.execute(
+            "SELECT sport_id FROM sports WHERE league = ?",
+            (league_upper,),
+        ).fetchone()
+        if sport_row:
+            sport_id = sport_row[0]
+        else:
+            sport_id = _ensure_sport(conn, name=f"{league_upper} League", league=league_upper, default_market="moneyline")
+
+        team_cache: Dict[str, int] = {}
+
+        for row in merged.itertuples():
+            home_name = row.team
+            away_name = row.opponent
+            if not home_name or not away_name:
+                summary["unmatched"] += 1
+                continue
+
+            home_code = normalize_team_code(league_upper, home_name)
+            away_code = normalize_team_code(league_upper, away_name)
+            if not home_code or not away_code:
+                LOGGER.warning(
+                    "Killersports %s: team normalization failed (%s vs %s)",
+                    league_upper,
+                    away_name,
+                    home_name,
+                )
+                summary["unmatched"] += 1
+                continue
+
+            target_date = row.game_date.date().isoformat()
+            game_id = _find_game_by_codes(
+                conn,
+                league=league_upper,
+                home_code=home_code,
+                away_code=away_code,
+                target_ts=None,
+                tolerance_seconds=tolerance_seconds,
+                target_date=target_date,
+            )
+            if not game_id:
+                game_id = _create_killersports_game(
+                    conn,
+                    sport_id=sport_id,
+                    league=league_upper,
+                    home_code=home_code,
+                    away_code=away_code,
+                    home_name=home_name,
+                    away_name=away_name,
+                    season=row.season if hasattr(row, "season") else None,
+                    game_date=row.game_date,
+                    home_score=_normalize_score(row.home_score),
+                    away_score=_normalize_score(row.away_score),
+                    team_cache=team_cache,
+                )
+                if game_id:
+                    summary["created_games"] += 1
+
+            if not game_id:
+                LOGGER.warning(
+                    "Killersports %s: unmatched game %s vs %s on %s",
+                    league_upper,
+                    away_name,
+                    home_name,
+                    target_date,
+                )
+                summary["unmatched"] += 1
+                continue
+
+            home_ml = row.home_moneyline
+            away_ml = row.away_moneyline
+            total_line = row.total_line
+            home_score = _normalize_score(row.home_score)
+            away_score = _normalize_score(row.away_score)
+
+            conn.execute(
+                """
+                INSERT INTO game_results (
+                    game_id,
+                    home_score,
+                    away_score,
+                    home_moneyline_close,
+                    away_moneyline_close,
+                    total_close,
+                    source_version
+                ) VALUES (?, ?, ?, ?, ?, ?, 'killersports')
+                ON CONFLICT(game_id) DO UPDATE SET
+                    home_score = COALESCE(excluded.home_score, game_results.home_score),
+                    away_score = COALESCE(excluded.away_score, game_results.away_score),
+                    home_moneyline_close = COALESCE(excluded.home_moneyline_close, game_results.home_moneyline_close),
+                    away_moneyline_close = COALESCE(excluded.away_moneyline_close, game_results.away_moneyline_close),
+                    total_close = COALESCE(excluded.total_close, game_results.total_close),
+                    source_version = excluded.source_version
+                """,
+                (
+                    game_id,
+                    home_score,
+                    away_score,
+                    home_ml,
+                    away_ml,
+                    total_line,
+                ),
+            )
+            summary["matched"] += 1
 
     return summary

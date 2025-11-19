@@ -168,6 +168,8 @@ LEAGUE_FILTER_OPTIONS = [
     {"label": "CFB", "value": "CFB"},
     {"label": "-- Basketball --", "value": "divider_basketball", "disabled": True},
     {"label": "NBA", "value": "NBA"},
+    {"label": "-- Hockey --", "value": "divider_hockey", "disabled": True},
+    {"label": "NHL", "value": "NHL"},
     {"label": "-- Soccer --", "value": "divider_soccer", "disabled": True},
     {"label": "EPL", "value": "EPL"},
     {"label": "La Liga", "value": "LALIGA"},

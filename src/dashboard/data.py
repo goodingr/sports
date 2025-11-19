@@ -183,6 +183,8 @@ def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
         upper = game_id.upper()
         if upper.startswith("NFL_"):
             return "NFL"
+        if upper.startswith("NHL_"):
+            return "NHL"
         if upper.startswith("CFB_"):
             return "CFB"
         if upper.startswith("NBA_"):
@@ -507,6 +509,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
                     "predicted_at": row.get("predicted_at"),
                     "settled_at": row.get("predicted_at"),
                     "total_points": actual_total,
+                    "predicted_total_points": row.get("predicted_total_points"),
                 }
             )
 

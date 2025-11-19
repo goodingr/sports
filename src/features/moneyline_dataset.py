@@ -1520,7 +1520,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--league",
         default="NFL",
-        choices=["NFL", "NBA", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"],
+        choices=["NFL", "NBA", "NHL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"],
         help="League to build the dataset for",
     )
     return parser.parse_args()

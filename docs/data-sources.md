@@ -49,6 +49,14 @@ poetry run python -m src.data.ingest_sources --source covers_nfl --season-start 
   - Captures moneyline odds and line movement data.
   - Outputs `moneyline.csv` under `data/raw/sources/<league>/action_network/<timestamp>/`.
 
+- **Provider**: Killersports (`https://killersports.com/query?filter=NHL`)
+  - Scraped via `src.data.sources.killersports:ingest` for `killersports_nhl`.
+  - Killersports ignores `date=` filters for NHL; request historical data with `season=<year>` plus `show=5000` and `future=0`.
+    - Example: `poetry run python -c "from src.data.sources.killersports import ingest; print(ingest(league='NHL', season=2022, show=5000, future=0))"`
+  - Raw HTML and `odds.csv` are stored under `data/raw/sources/nhl/killersports/<timestamp>/`.
+  - Retention: keep one snapshot per season (latest successful pull) and archive older raw folders after loading the data into SQLite.
+  - Notes: Because each request is capped at 5,000 rows, fetch one season at a time to avoid truncation.
+
 - **Provider**: Covers (`https://www.covers.com/sport/basketball/nba/matchups`)
   - Scraped via `src.data.sources.covers` for both NFL and NBA (`covers_nfl`, `covers_nba`).
   - Extracts `__NEXT_DATA__` JSON payload from Next.js pages.

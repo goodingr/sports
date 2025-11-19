@@ -36,7 +36,7 @@ def _safe_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
-SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
+SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "NHL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
 
 # Soccer leagues use three-way markets (home/draw/away)
 SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
@@ -45,6 +45,7 @@ SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
 LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "NBA": "basketball_nba",
     "NFL": "americanfootball_nfl",
+    "NHL": "icehockey_nhl",
     "CFB": "americanfootball_ncaaf",
     "EPL": "soccer_epl",
     "LALIGA": "soccer_spain_la_liga",

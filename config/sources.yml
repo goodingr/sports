@@ -216,6 +216,21 @@ nba:
     storage_subdir: "nba/injuries"
     notes: "League-published injury statuses"
 
+nhl:
+  - key: killersports_nhl
+    name: "Killersports NHL odds"
+    category: odds
+    url: "https://killersports.com/query?filter=NHL"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nhl/killersports"
+    notes: "Killersports NHL SDQL query capturing moneyline and totals."
+    params:
+      league: "NHL"
+      show: 5000
+      future: 20
+
 cfb:
   - key: espn_odds_cfb
     name: "ESPN College Football odds"

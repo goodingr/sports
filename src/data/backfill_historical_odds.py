@@ -6,6 +6,7 @@ import argparse
 import logging
 import time
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Callable, Iterable
 
 LOGGER = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def backfill_historical_odds(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill historical NBA odds from multiple sources")
+    parser = argparse.ArgumentParser(description="Backfill historical odds from multiple sources")
     parser.add_argument(
         "--source",
         choices=["oddsshark", "vegasinsider", "covers", "killersports", "teamrankings_trends", "espn", "all"],
@@ -69,7 +70,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--league",
-        choices=["nba", "nfl", "cfb"],
+        choices=["nba", "nfl", "cfb", "nhl"],
         default="nba",
         help="League to backfill",
     )
@@ -142,15 +143,19 @@ def main() -> None:
 
             sources.append(("Covers", covers_ingest))
 
-        if args.source == "all" or args.source == "killersports":
-            from src.data.sources.killersports import ingest as killersports_ingest
-
-            sources.append(("Killersports", killersports_ingest))
-
         if args.source == "all" or args.source == "teamrankings_trends":
             from src.data.sources.teamrankings_trends import ingest as trends_ingest
 
             sources.append(("TeamRankings Trends", trends_ingest))
+
+    if league in {"nba", "nhl"} and (args.source == "all" or args.source == "killersports"):
+        from src.data.sources.killersports import ingest as killersports_ingest
+
+        ks_kwargs = {"league": league.upper()}
+        if league == "nba":
+            ks_kwargs.pop("league")
+        ks_handler: Callable = partial(killersports_ingest, **ks_kwargs) if ks_kwargs else killersports_ingest
+        sources.append(("Killersports", ks_handler))
 
     if not sources:
         LOGGER.warning("No sources available for league=%s and source=%s", league, args.source)
