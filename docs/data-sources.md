@@ -56,6 +56,23 @@ poetry run python -m src.data.ingest_sources --source covers_nfl --season-start 
   - Raw HTML and `odds.csv` are stored under `data/raw/sources/nhl/killersports/<timestamp>/`.
   - Retention: keep one snapshot per season (latest successful pull) and archive older raw folders after loading the data into SQLite.
   - Notes: Because each request is capped at 5,000 rows, fetch one season at a time to avoid truncation.
+- **Provider**: Killersports (`https://killersports.com/query?filter=NCAABB`)
+  - Scraped via `src.data.sources.killersports:ingest` for `killersports_ncaabb`.
+  - Same season-based workflow as NHL: call `ingest(league='NCAABB', season=<year>, show=5000, future=0)` for each season you need.
+  - Files land in `data/raw/sources/ncaabb/killersports/<timestamp>/` and the loader immediately writes moneyline/total data into the DB.
+  - Keep one snapshot per season to minimize storage; the ingestion script deduplicates overlapping exports automatically.
+- **Provider**: Killersports (`https://killersports.com/query?filter=MLB`)
+  - Scraped via `src.data.sources.killersports:ingest` for `killersports_mlb`.
+  - Use the same `season=<year>` pattern with `show=5000`/`future=0`; outputs live under `data/raw/sources/mlb/killersports/<timestamp>/`.
+  - Loader auto-creates MLB games/teams and stores moneyline + totals in `game_results`.
+- **Provider**: Killersports (`https://killersports.com/query?filter=ATP`)
+  - Scraped via `src.data.sources.killersports:ingest` for `killersports_atp`.
+  - Fetch one season at a time (`season=2024`, etc.); store raw dumps under `data/raw/sources/atp/killersports/`.
+  - Loader ingests match moneylines/totals when available; expect smaller datasets due to tournament schedules.
+- **Provider**: Killersports (`https://killersports.com/query?filter=WTA`)
+  - Scraped via `src.data.sources.killersports:ingest` for `killersports_wta`.
+  - Same pattern as ATP (season loops, `show=5000`, `future=0`); raw data lands in `data/raw/sources/wta/killersports/`.
+  - Loader behavior mirrors ATP—matches without totals will just populate moneyline fields.
 
 - **Provider**: Covers (`https://www.covers.com/sport/basketball/nba/matchups`)
   - Scraped via `src.data.sources.covers` for both NFL and NBA (`covers_nfl`, `covers_nba`).

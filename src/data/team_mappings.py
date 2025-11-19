@@ -2,7 +2,105 @@
 
 from __future__ import annotations
 
+import csv
+import logging
+from pathlib import Path
 from typing import Dict
+
+LOGGER = logging.getLogger(__name__)
+
+_ALIAS_TRANSLATION_TABLE = str.maketrans(
+    {
+        "&": " and ",
+        "@": " ",
+        "/": " ",
+        ".": " ",
+        "-": " ",
+        "'": "",
+        ",": " ",
+        "(": " ",
+        ")": " ",
+    }
+)
+
+
+def _canonicalize_alias(value: str) -> str:
+    cleaned = value.lower().translate(_ALIAS_TRANSLATION_TABLE)
+    return " ".join(cleaned.split())
+
+
+def _add_alias(aliases: Dict[str, str], alias: str, code: str) -> None:
+    if not alias:
+        return
+    raw = alias.strip().lower()
+    if not raw:
+        return
+    existing = aliases.get(raw)
+    if existing in (None, code):
+        aliases[raw] = code
+
+    simplified = _canonicalize_alias(raw)
+    if simplified and simplified != raw:
+        existing_simplified = aliases.get(simplified)
+        if existing_simplified in (None, code):
+            aliases[simplified] = code
+
+
+def _load_ncaab_team_mappings() -> tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    base_dir = Path(__file__).resolve().parents[2] / "data" / "external" / "mm2025"
+    teams_path = base_dir / "MTeams.csv"
+    spellings_path = base_dir / "MTeamSpellings.csv"
+    if not teams_path.exists() or not spellings_path.exists():
+        LOGGER.debug("NCAAB mapping files not found at %s", base_dir)
+        return {}, {}, {}
+
+    team_codes: Dict[str, str] = {}
+    alias_map: Dict[str, str] = {}
+    team_names: Dict[str, str] = {}
+
+    with open(teams_path, newline="", encoding="utf-8-sig") as teams_file:
+        reader = csv.DictReader(teams_file)
+        for row in reader:
+            team_id_raw = (row.get("TeamID") or "").strip()
+            if not team_id_raw:
+                continue
+            try:
+                team_id = int(team_id_raw)
+            except ValueError:
+                continue
+            code = f"NCAAB{team_id:04d}"
+            key = str(team_id)
+            team_codes[key] = code
+
+            team_name = (row.get("TeamName") or "").strip()
+            if team_name:
+                team_names[key] = team_name
+                _add_alias(alias_map, team_name, code)
+
+    with open(spellings_path, newline="", encoding="utf-8-sig") as spellings_file:
+        reader = csv.DictReader(spellings_file)
+        for row in reader:
+            alias = (row.get("TeamNameSpelling") or "").strip()
+            team_id_value = (row.get("TeamID") or "").strip()
+            if not alias or not team_id_value:
+                continue
+            code = team_codes.get(team_id_value)
+            if not code and team_id_value.isdigit():
+                code = team_codes.get(str(int(team_id_value)))
+            if not code:
+                continue
+            _add_alias(alias_map, alias, code)
+
+    LOGGER.debug(
+        "Loaded %d NCAAB teams with %d aliases from %s",
+        len(team_codes),
+        len(alias_map),
+        base_dir,
+    )
+    return team_codes, alias_map, team_names
+
+
+NCAAB_TEAM_CODES, NCAAB_ALIASES, NCAAB_TEAM_NAMES = _load_ncaab_team_mappings()
 
 
 NFL_ALIASES: Dict[str, str] = {
@@ -899,6 +997,8 @@ ALIAS_MAP = {
     "NBA": NBA_ALIASES,
     "NHL": NHL_ALIASES,
     "CFB": CFB_ALIASES,
+    "NCAAB": NCAAB_ALIASES,
+    "NCAABB": NCAAB_ALIASES,
     "MLB": MLB_ALIASES,
     "EPL": EPL_ALIASES,
     "LALIGA": LALIGA_ALIASES,
@@ -928,6 +1028,10 @@ def normalize_team_code(league: str, name: str | None) -> str:
     if simplified in aliases:
         return aliases[simplified]
 
+    canonical = _canonicalize_alias(key)
+    if canonical in aliases:
+        return aliases[canonical]
+
     # try splitting words and taking first three letters
     words = simplified.split()
     if len(words) == 2 and words[1] in {"fc", "sc"}:
@@ -938,3 +1042,23 @@ def normalize_team_code(league: str, name: str | None) -> str:
             return candidate
 
     return cleaned.upper()
+
+
+def get_ncaab_team_code(team_id: int | str | None) -> str:
+    if team_id is None:
+        return ""
+    if isinstance(team_id, str):
+        key = team_id.strip()
+    else:
+        key = str(int(team_id))
+    if not key:
+        return ""
+    if key in NCAAB_TEAM_CODES:
+        return NCAAB_TEAM_CODES[key]
+    if key.isdigit():
+        normalized_key = str(int(key))
+        code = NCAAB_TEAM_CODES.get(normalized_key)
+        if code:
+            return code
+        return f"NCAAB{int(normalized_key):04d}"
+    return normalize_team_code("NCAAB", key)

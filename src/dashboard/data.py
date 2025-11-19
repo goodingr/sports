@@ -185,6 +185,8 @@ def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
             return "NFL"
         if upper.startswith("NHL_"):
             return "NHL"
+        if upper.startswith("NCAAB_"):
+            return "NCAAB"
         if upper.startswith("CFB_"):
             return "CFB"
         if upper.startswith("NBA_"):

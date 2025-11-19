@@ -1,4 +1,4 @@
-"""Forward testing system for live NBA, NFL, CFB, and European soccer games."""
+"""Forward testing system for live NBA, NCAAB, NFL, NHL, CFB, and European soccer games."""
 import argparse
 import json
 import logging
@@ -36,7 +36,18 @@ def _safe_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
-SUPPORTED_LEAGUES: List[str] = ["NBA", "NFL", "NHL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
+SUPPORTED_LEAGUES: List[str] = [
+    "NBA",
+    "NCAAB",
+    "NFL",
+    "NHL",
+    "CFB",
+    "EPL",
+    "LALIGA",
+    "BUNDESLIGA",
+    "SERIEA",
+    "LIGUE1",
+]
 
 # Soccer leagues use three-way markets (home/draw/away)
 SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
@@ -44,6 +55,7 @@ SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
 
 LEAGUE_SPORT_KEYS: Dict[str, str] = {
     "NBA": "basketball_nba",
+    "NCAAB": "basketball_ncaab",
     "NFL": "americanfootball_nfl",
     "NHL": "icehockey_nhl",
     "CFB": "americanfootball_ncaaf",
@@ -206,6 +218,8 @@ def load_model(model_path: Optional[Path] = None, league: str = "NBA") -> object
     if model_path is None:
         if league_upper == "NBA":
             model_path = Path("models/nba_gradient_boosting_calibrated_moneyline.pkl")
+        elif league_upper == "NCAAB":
+            model_path = Path("models/ncaab_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "NFL":
             model_path = Path("models/nfl_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "CFB":
@@ -222,7 +236,7 @@ def load_model(model_path: Optional[Path] = None, league: str = "NBA") -> object
             model_path = Path("models/ligue1_gradient_boosting_calibrated_moneyline.pkl")
         else:
             raise ValueError(
-                f"Unknown league: {league}. Must be NBA, NFL, CFB, EPL, LALIGA, BUNDESLIGA, SERIEA, or LIGUE1."
+                f"Unknown league: {league}. Must be one of {', '.join(SUPPORTED_LEAGUES)}."
             )
     
     if not model_path.exists():
@@ -317,7 +331,7 @@ def prepare_features(
     current_season = datetime.now().year
     if game_date:
         # For sports that start in one year and end in the next, adjust season
-        if league_upper in {"NBA", "NFL"}:
+        if league_upper in {"NBA", "NCAAB", "NFL"}:
             # NBA/NFL seasons span two years
             if game_date.month >= 10:  # October onwards
                 current_season = game_date.year
@@ -575,8 +589,8 @@ def prepare_features(
                     home_row[context_feature] = 0.0  # Default to regular season
                     away_row[context_feature] = 0.0
         
-        # NBA features
-        elif league_upper == "NBA":
+        # Basketball-specific features (NBA / NCAAB)
+        elif league_upper in {"NBA", "NCAAB"}:
             # Season-level team metrics
             team_metrics = loader.load_team_metrics(season=current_season)
             if not team_metrics.empty:
@@ -668,6 +682,8 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
         league_upper = league.upper()
         if league_upper == "NBA":
             model_path = Path("models/nba_gradient_boosting_calibrated_moneyline.pkl")
+        elif league_upper == "NCAAB":
+            model_path = Path("models/ncaab_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "NFL":
             model_path = Path("models/nfl_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "CFB":
@@ -704,7 +720,7 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 except Exception:
                     commence_dt = None
             if commence_dt:
-                if league_upper in {"NBA", "NFL"}:
+                if league_upper in {"NBA", "NCAAB", "NFL"}:
                     if commence_dt.month >= 8:
                         season_year = commence_dt.year
                     else:
@@ -1382,6 +1398,10 @@ def update_results(
             if isinstance(game_id, str):
                 if game_id.startswith("NFL_"):
                     league = "NFL"
+                elif game_id.startswith("NHL_"):
+                    league = "NHL"
+                elif game_id.startswith("NCAAB_"):
+                    league = "NCAAB"
                 elif game_id.startswith("CFB_"):
                     league = "CFB"
                 elif game_id.startswith("EPL_"):
@@ -1691,7 +1711,7 @@ def generate_report(league: Optional[str] = None) -> Dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Forward test NBA/NFL/CFB/European soccer betting model on live games")
+    parser = argparse.ArgumentParser(description="Forward test NBA/NCAAB/NFL/NHL/CFB/European soccer betting model on live games")
     parser.add_argument(
         "action",
         choices=["predict", "update", "report"],

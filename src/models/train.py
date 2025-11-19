@@ -744,7 +744,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--league",
         default="NFL",
-        choices=["NFL", "NBA", "NHL", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"],
+        choices=[
+            "NFL",
+            "NBA",
+            "NHL",
+            "NCAAB",
+            "CFB",
+            "EPL",
+            "LALIGA",
+            "BUNDESLIGA",
+            "SERIEA",
+            "LIGUE1",
+        ],
         help="League to train on",
     )
     parser.add_argument(

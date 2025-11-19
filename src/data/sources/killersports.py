@@ -22,7 +22,13 @@ LOGGER = logging.getLogger(__name__)
 BASE_HOST = "https://killersports.com"
 QUERY_ENDPOINT = f"{BASE_HOST}/query"
 
-DEFAULT_FIELDS = {"NBA": None, "NHL": None}
+DEFAULT_FIELDS = {"NBA": None, "NHL": None, "NCAABB": None}
+DB_LEAGUE_ALIASES = {"NCAABB": "NCAAB"}
+AUTO_LOAD_LEAGUES = {"NHL", "NCAAB"}
+
+
+def _canonical_league(league: str) -> str:
+    return DB_LEAGUE_ALIASES.get(league.upper(), league.upper())
 
 
 @dataclass(slots=True)
@@ -237,6 +243,7 @@ def ingest(
     """Ingest Killersports odds for the requested league/situation."""
     league_upper = league.upper()
     league_lower = league_upper.lower()
+    db_league = _canonical_league(league_upper)
     sdql_statement = _resolve_sdql(league_upper, sdql=sdql, season=season, date_filter=date)
     fields = DEFAULT_FIELDS.get(league_upper)
     definition = SourceDefinition(
@@ -289,9 +296,9 @@ def ingest(
             records=len(df),
         )
         load_message = ""
-        if league_upper == "NHL":
-            stats = loaders.import_killersports_odds(csv_path, league=league_upper)
-            load_message = f" | Loaded {stats['matched']}/{stats['games']} games"
+        if db_league in AUTO_LOAD_LEAGUES:
+            stats = loaders.import_killersports_odds(csv_path, league=db_league)
+            load_message = f" | Loaded {stats['matched']}/{stats['games']} {db_league} games"
         run.set_records(len(df))
         run.set_message(f"Captured {len(df)} Killersports {league_upper} rows{load_message}")
         run.set_raw_path(run.storage_dir)

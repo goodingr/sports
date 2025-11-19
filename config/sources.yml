@@ -231,6 +231,66 @@ nhl:
       show: 5000
       future: 20
 
+ncaab:
+  - key: killersports_ncaabb
+    name: "Killersports NCAA basketball odds"
+    category: odds
+    url: "https://killersports.com/query?filter=NCAABB"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "ncaabb/killersports"
+    notes: "Killersports NCAAB SDQL query capturing moneyline and totals."
+    params:
+      league: "NCAABB"
+      show: 5000
+      future: 20
+
+mlb:
+  - key: killersports_mlb
+    name: "Killersports MLB odds"
+    category: odds
+    url: "https://killersports.com/query?filter=MLB"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "mlb/killersports"
+    notes: "Killersports MLB SDQL query capturing moneyline and totals."
+    params:
+      league: "MLB"
+      show: 5000
+      future: 20
+
+atp:
+  - key: killersports_atp
+    name: "Killersports ATP odds"
+    category: odds
+    url: "https://killersports.com/query?filter=ATP"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "atp/killersports"
+    notes: "Killersports ATP SDQL query capturing match moneyline/totals (when available)."
+    params:
+      league: "ATP"
+      show: 5000
+      future: 20
+
+wta:
+  - key: killersports_wta
+    name: "Killersports WTA odds"
+    category: odds
+    url: "https://killersports.com/query?filter=WTA"
+    handler: "src.data.sources.killersports:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "wta/killersports"
+    notes: "Killersports WTA SDQL query capturing match moneyline/totals (when available)."
+    params:
+      league: "WTA"
+      show: 5000
+      future: 20
+
 cfb:
   - key: espn_odds_cfb
     name: "ESPN College Football odds"
