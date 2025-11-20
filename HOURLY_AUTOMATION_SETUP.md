@@ -98,6 +98,7 @@ Get-ChildItem logs\hourly_pipeline_*.log | Sort-Object LastWriteTime -Descending
 
 ### Step 1: Ingest Hourly Data (~5-10 minutes)
 - Fetches ESPN odds for all leagues (NFL, NBA, CFB, EPL, La Liga, Bundesliga, Serie A, Ligue 1)
+- Pulls NCAA and NHL moneyline snapshots from The Odds API so future games always have fresh prices
 - Ingests schedules and results for current season (NBA, NFL, CFB, Soccer)
 - After syncing soccer archives it backfills historical totals/scores via\
   `poetry run python scripts/run_external_loader.py --source football-data --leagues premier-league la-liga bundesliga serie-a ligue-1`

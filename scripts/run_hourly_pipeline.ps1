@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 
 $coreLeagues = @("NFL", "NBA", "CFB")
 $soccerLeagues = @("EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
+$supplementalPredictionLeagues = @("NCAAB", "NHL")
 $allLeagues = $coreLeagues + $soccerLeagues
 $targetCoreLeagues = if ($SoccerOnly) { @() } else { $coreLeagues }
 $targetSoccerLeagues = $soccerLeagues
@@ -269,8 +270,10 @@ if soccer_leagues:
 }
 
 Write-Log "Step 1b: Fetching The Odds API snapshots..."
-$theOddsLeagues = @("NFL", "NBA", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
-foreach ($league in $targetLeagues) {
+$theOddsLeagues = @("NFL", "NBA", "CFB", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1", "NCAAB", "NHL")
+$oddsTargets = $targetLeagues + $supplementalPredictionLeagues
+$oddsTargets = $oddsTargets | Sort-Object -Unique
+foreach ($league in $oddsTargets) {
     if ($theOddsLeagues -notcontains $league) {
         continue
     }
@@ -484,7 +487,7 @@ try {
 Write-Log "Step 5: Generating predictions..."
 try {
     if (-not $trainedLeagues -or -not $trainedLeagues.Count) {
-        Write-Log "WARNING: Skipping prediction step because no trained leagues are available"
+        Write-Log "WARNING: Skipping trained-league prediction step because no datasets were ready"
     } else {
         foreach ($league in $trainedLeagues) {
             Write-Log "Forward testing $league..."
@@ -500,6 +503,29 @@ try {
             }
         }
     }
+
+    $supplementalTargets = @()
+    foreach ($league in $supplementalPredictionLeagues) {
+        if ($trainedLeagues -and $trainedLeagues -contains $league) {
+            continue
+        }
+        $supplementalTargets += $league
+    }
+
+    foreach ($league in $supplementalTargets) {
+        Write-Log "Forward testing $league (prediction-only)..."
+        & poetry run python -m src.models.forward_test predict --league $league --dotenv .env --log-level INFO
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "WARNING: Forward test failed for $league"
+            continue
+        }
+        Write-Log "Updating completed results for $league..."
+        & poetry run python -m src.models.forward_test update --league $league --dotenv .env --log-level INFO
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "WARNING: Result update failed for $league"
+        }
+    }
+
     Write-Log "Prediction generation complete"
 } catch {
     Write-Log "ERROR: Prediction generation step failed: $_"
