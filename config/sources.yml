@@ -230,6 +230,19 @@ nhl:
       league: "NHL"
       show: 5000
       future: 20
+  - key: oddsapi_nhl
+    name: "The Odds API NHL odds"
+    category: odds
+    url: "https://the-odds-api.com/"
+    handler: "src.data.sources.odds_api:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "nhl/odds_api"
+    notes: "Live NHL moneyline snapshots from The Odds API."
+    params:
+      league: "NHL"
+      market: "h2h"
+      region: "us"
 
 ncaab:
   - key: killersports_ncaabb
@@ -245,6 +258,19 @@ ncaab:
       league: "NCAABB"
       show: 5000
       future: 20
+  - key: oddsapi_ncaab
+    name: "The Odds API NCAAB odds"
+    category: odds
+    url: "https://the-odds-api.com/"
+    handler: "src.data.sources.odds_api:ingest"
+    frequency: hourly
+    enabled: true
+    storage_subdir: "ncaabb/odds_api"
+    notes: "Live NCAA basketball moneyline snapshots from The Odds API."
+    params:
+      league: "NCAAB"
+      market: "h2h"
+      region: "us"
 
 mlb:
   - key: killersports_mlb

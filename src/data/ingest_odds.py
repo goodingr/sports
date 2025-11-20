@@ -24,6 +24,7 @@ LEAGUE_TO_SPORT_KEY = {
     "CFB": "americanfootball_ncaaf",
     "NBA": "basketball_nba",
     "NCAAB": "basketball_ncaab",
+    "NHL": "icehockey_nhl",
     "EPL": "soccer_epl",
     "LALIGA": "soccer_spain_la_liga",
     "BUNDESLIGA": "soccer_germany_bundesliga",
