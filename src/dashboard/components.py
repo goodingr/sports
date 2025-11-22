@@ -189,6 +189,174 @@ def cumulative_profit_chart(performance_df: pd.DataFrame) -> dcc.Graph:
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
 
+def multi_model_cumulative_profit_chart(
+    model_performance: dict[str, pd.DataFrame]
+) -> dcc.Graph:
+    """
+    Create cumulative profit chart with separate lines for each model.
+    
+    Args:
+        model_performance: Dict mapping model names to their performance DataFrames
+                          Each DataFrame should have 'date' and 'cumulative_profit' columns
+    """
+    fig = go.Figure()
+    
+    # Define colors for each model
+    model_colors = {
+        "ensemble": "#1f77b4",  # Blue
+        "random_forest": "#2ca02c",  # Green
+        "gradient_boosting": "#ff7f0e",  # Orange
+    }
+    
+    model_labels = {
+        "ensemble": "Ensemble",
+        "random_forest": "Random Forest",
+        "gradient_boosting": "Gradient Boosting",
+    }
+    
+    # Add a line for each model
+    for model_type, perf_df in model_performance.items():
+        if perf_df is not None and not perf_df.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=perf_df["date"],
+                    y=perf_df["cumulative_profit"],
+                    mode="lines+markers",
+                    name=model_labels.get(model_type, model_type),
+                    line=dict(
+                        color=model_colors.get(model_type, "#636EFA"),
+                        width=2.5
+                    ),
+                    marker=dict(size=6),
+                )
+            )
+    
+    fig.update_layout(
+        title="Cumulative Profit by Model",
+        xaxis_title="Date",
+        yaxis_title="Profit ($)",
+        template="plotly_white",
+        height=400,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def cumulative_profit_by_league_chart(
+    performance_by_league: dict[str, pd.DataFrame]
+) -> dcc.Graph:
+    """
+    Create cumulative profit chart with separate lines for each league.
+    
+    Args:
+        performance_by_league: Dict mapping league names to their performance DataFrames
+                              Each DataFrame should have 'date' and 'cumulative_profit' columns
+    """
+    fig = go.Figure()
+    
+    # Add a line for each league
+    for league, perf_df in performance_by_league.items():
+        if perf_df is not None and not perf_df.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=perf_df["date"],
+                    y=perf_df["cumulative_profit"],
+                    mode="lines+markers",
+                    name=league,
+                    line=dict(width=2.5),
+                    marker=dict(size=6),
+                )
+            )
+    
+    fig.update_layout(
+        title="Cumulative Profit by League",
+        xaxis_title="Date",
+        yaxis_title="Profit ($)",
+        template="plotly_white",
+        height=400,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def edge_distribution_chart(predictions_df: pd.DataFrame) -> dcc.Graph:
+    """
+    Create a histogram showing the distribution of prediction edges.
+    
+    Args:
+        predictions_df: DataFrame with prediction data including edge values
+    """
+    fig = go.Figure()
+    
+    if not predictions_df.empty:
+        # Check if this is game-level data (has home_edge/away_edge) or bet-level data (has edge)
+        edges = []
+        
+        if "edge" in predictions_df.columns:
+            # Bet-level data - use edge column directly
+            edges = predictions_df["edge"].dropna().tolist()
+        elif "home_edge" in predictions_df.columns and "away_edge" in predictions_df.columns:
+            # Game-level data - extract both home and away edges
+            home_edges = predictions_df["home_edge"].dropna().tolist()
+            away_edges = predictions_df["away_edge"].dropna().tolist()
+            edges = home_edges + away_edges
+            
+            # Also check for draw_edge if it exists (soccer)
+            if "draw_edge" in predictions_df.columns:
+                draw_edges = predictions_df["draw_edge"].dropna().tolist()
+                edges.extend(draw_edges)
+        
+        if edges:
+            fig.add_trace(
+                go.Histogram(
+                    x=edges,
+                    nbinsx=30,
+                    marker=dict(
+                        color="#636EFA",
+                        line=dict(color="#ffffff", width=1)
+                    ),
+                    name="Edge Distribution",
+                )
+            )
+            
+            # Add a vertical line at 0 to show positive vs negative edge
+            fig.add_vline(
+                x=0, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text="No Edge",
+                annotation_position="top"
+            )
+    
+    fig.update_layout(
+        title="Prediction Edge Distribution",
+        xaxis_title="Edge",
+        yaxis_title="Count",
+        template="plotly_white",
+        height=350,
+        showlegend=False,
+        xaxis=dict(tickformat=".1%"),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
 def roi_over_time_chart(performance_df: pd.DataFrame) -> dcc.Graph:
     fig = go.Figure()
 
@@ -914,11 +1082,92 @@ def totals_detail_table(
     )
 
 
+def model_comparison_table(comparison_df: pd.DataFrame) -> dash_table.DataTable:
+    """Table showing side-by-side comparison of model predictions."""
+    if comparison_df.empty:
+        return empty_state("No comparison data available.")
+
+    df = comparison_df.copy()
+    
+    # Format common columns
+    if "commence_time" in df.columns:
+        df["commence_display"] = df["commence_time"].apply(_format_datetime)
+    else:
+        df["commence_display"] = ""
+        
+    df["matchup"] = df.apply(
+        lambda row: f"{row.get('away_team') or '?'} @ {row.get('home_team') or '?'}", axis=1
+    )
+    
+    # Helper to format model prediction
+    def _format_pred(row, model_prefix):
+        home_prob = row.get(f"{model_prefix}_home_prob")
+        away_prob = row.get(f"{model_prefix}_away_prob")
+        
+        if pd.isna(home_prob) or pd.isna(away_prob):
+            return "—"
+            
+        if home_prob > away_prob:
+            winner = row.get("home_team")
+            prob = home_prob
+        else:
+            winner = row.get("away_team")
+            prob = away_prob
+            
+        return f"{winner} ({prob:.1%})"
+
+    # Format predictions for each model
+    models = ["ensemble", "random_forest", "gradient_boosting"]
+    for model in models:
+        df[f"{model}_display"] = df.apply(lambda row: _format_pred(row, model), axis=1)
+
+    # Format result
+    def _format_result(row):
+        res = row.get("result")
+        if pd.isna(res):
+            return "Pending"
+        if res == "home":
+            return f"{row.get('home_team')} Win"
+        elif res == "away":
+            return f"{row.get('away_team')} Win"
+        return str(res)
+
+    df["result_display"] = df.apply(_format_result, axis=1)
+
+    columns = [
+        {"name": "Time", "id": "commence_display"},
+        {"name": "Matchup", "id": "matchup"},
+        {"name": "Ensemble", "id": "ensemble_display"},
+        {"name": "Random Forest", "id": "random_forest_display"},
+        {"name": "Gradient Boosting", "id": "gradient_boosting_display"},
+        {"name": "Result", "id": "result_display"},
+    ]
+
+    return dash_table.DataTable(
+        columns=columns,
+        data=df.to_dict("records"),
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"padding": "0.5rem", "textAlign": "center"},
+        style_header={"fontWeight": "bold"},
+        style_data_conditional=[
+            {
+                "if": {"filter_query": "{result_display} != Pending"},
+                "backgroundColor": "#f8f9fa",
+            },
+        ],
+    )
+
+
 __all__ = [
     "metric_card",
     "summary_cards",
     "bankroll_cards",
     "cumulative_profit_chart",
+    "multi_model_cumulative_profit_chart",
+    "cumulative_profit_by_league_chart",
+    "edge_distribution_chart",
     "roi_over_time_chart",
     "win_rate_over_time_chart",
     "performance_by_period_chart",
@@ -935,5 +1184,5 @@ __all__ = [
     "prediction_comparison_table",
     "moneyline_detail_table",
     "totals_detail_table",
+    "model_comparison_table",
 ]
-

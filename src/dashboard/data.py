@@ -241,6 +241,8 @@ def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
 
+
+
     for column in ("commence_time", "predicted_at", "result_updated_at"):
         if column in df.columns:
             df[column] = _convert_to_display_timezone(df[column])
@@ -248,9 +250,19 @@ def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
     return df
 
 
-def load_forward_test_data(*, force_refresh: bool = False, path: Path = MASTER_PREDICTIONS_PATH, league: Optional[str] = None) -> pd.DataFrame:
-    """Load forward test predictions with optional cache busting and league filtering."""
-
+def load_forward_test_data(
+    *, 
+    force_refresh: bool = False, 
+    path: Path = MASTER_PREDICTIONS_PATH, 
+    league: Optional[str] = None,
+    model_type: str = "ensemble",
+) -> pd.DataFrame:
+    """Load forward test predictions with optional cache busting, league filtering, and model type selection."""
+    
+    # If using default path, update it to include model_type subdirectory
+    if path == MASTER_PREDICTIONS_PATH:
+        path = FORWARD_TEST_DIR / model_type / "predictions_master.parquet"
+    
     path_str = str(path.resolve())
     if force_refresh:
         _read_predictions_cached.cache_clear()
@@ -265,6 +277,73 @@ def load_forward_test_data(*, force_refresh: bool = False, path: Path = MASTER_P
         df = df[df["league"].str.upper() == league.upper()].copy()
     df = _assign_versions(df)
     return df.copy() if not df.empty else df
+
+
+def compare_model_predictions(
+    league: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    model_types: list[str] = ["gradient_boosting", "random_forest", "ensemble"],
+) -> pd.DataFrame:
+    """Load and merge predictions from multiple models for comparison."""
+    dfs = {}
+    for model_type in model_types:
+        df = load_forward_test_data(league=league, model_type=model_type)
+        if df.empty:
+            continue
+        
+        # Filter by date if specified
+        if start_date:
+            df = df[df["commence_time"] >= pd.to_datetime(start_date, utc=True)]
+        if end_date:
+            df = df[df["commence_time"] <= pd.to_datetime(end_date, utc=True)]
+            
+        dfs[model_type] = df
+    
+    if not dfs:
+        return pd.DataFrame()
+        
+    # Create a base dataframe with unique game_ids from all models
+    all_games = []
+    for model_type, df in dfs.items():
+        # Keep metadata columns
+        meta_cols = ["game_id", "home_team", "away_team", "commence_time", "result", "home_score", "away_score", "league"]
+        subset = df[[c for c in meta_cols if c in df.columns]].copy()
+        all_games.append(subset)
+        
+    if not all_games:
+        return pd.DataFrame()
+        
+    # Concatenate and drop duplicates to get master list of games
+    master_df = pd.concat(all_games, ignore_index=True)
+    if "game_id" in master_df.columns:
+        # Sort by commence_time to keep the most recent metadata if duplicates exist (though they should be identical)
+        if "commence_time" in master_df.columns:
+            master_df = master_df.sort_values("commence_time")
+        master_df = master_df.drop_duplicates(subset=["game_id"], keep="last")
+    else:
+        # Fallback if no game_id (shouldn't happen with new data)
+        master_df = master_df.drop_duplicates()
+        
+    # Merge each model's predictions onto the master dataframe
+    for model_type, df in dfs.items():
+        # Select prediction columns
+        pred_cols = ["game_id", "home_predicted_prob", "away_predicted_prob", "home_edge", "away_edge"]
+        subset = df[[c for c in pred_cols if c in df.columns]].copy()
+        
+        # Rename columns
+        rename_map = {
+            "home_predicted_prob": f"{model_type}_home_prob",
+            "away_predicted_prob": f"{model_type}_away_prob",
+            "home_edge": f"{model_type}_home_edge",
+            "away_edge": f"{model_type}_away_edge",
+        }
+        subset = subset.rename(columns=rename_map)
+        
+        if "game_id" in subset.columns:
+            master_df = pd.merge(master_df, subset, on="game_id", how="left")
+            
+    return master_df
 
 
 def _american_to_decimal(ml: float) -> float:
@@ -1289,6 +1368,111 @@ def _match_games_to_db(recommended: pd.DataFrame) -> pd.DataFrame:
     mapping_df = pd.DataFrame(mapping).dropna()
     mapping_df = mapping_df.drop_duplicates(subset=["prediction_game_id"])
     return mapping_df
+
+
+
+def get_performance_by_league(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    stake: float = DEFAULT_STAKE,
+) -> dict[str, pd.DataFrame]:
+    """
+    Calculate cumulative profit over time for each league.
+    """
+    if df.empty:
+        return {}
+        
+    bets = _expand_predictions(df, stake=stake)
+    if bets.empty or "won" not in bets.columns:
+        return {}
+        
+    # Filter for completed bets only
+    completed = bets[bets["won"].notna()].copy()
+    if completed.empty:
+        return {}
+        
+    # Filter for recommended bets
+    mask = completed["edge"].notna() & (completed["edge"] >= edge_threshold)
+    recommended = completed.loc[mask].copy()
+    
+    if recommended.empty:
+        return {}
+        
+    # Group by league
+    leagues = recommended["league"].unique()
+    results = {}
+    
+    for league in leagues:
+        league_bets = recommended[recommended["league"] == league].copy()
+        if league_bets.empty:
+            continue
+            
+        league_bets = league_bets.sort_values("settled_at")
+        league_bets["cumulative_profit"] = league_bets["profit"].fillna(0.0).cumsum()
+        
+        # Create daily summary for the chart
+        league_bets["date"] = league_bets["settled_at"].dt.date
+        daily = (
+            league_bets.groupby("date")
+            .agg(cumulative_profit=("cumulative_profit", "last"))
+            .reset_index()
+        )
+        results[league] = daily
+        
+    return results
+
+
+def get_totals_performance_by_league(
+    df: pd.DataFrame,
+    *,
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    stake: float = DEFAULT_STAKE,
+) -> dict[str, pd.DataFrame]:
+    """
+    Calculate cumulative profit over time for each league for totals (over/under) bets.
+    """
+    if df.empty:
+        return {}
+        
+    totals = _expand_totals(df, stake=stake)
+    if totals.empty or "won" not in totals.columns:
+        return {}
+        
+    # Filter for completed bets only
+    completed = totals[totals["won"].notna()].copy()
+    if completed.empty:
+        return {}
+        
+    # Filter for recommended bets
+    mask = completed["edge"].notna() & (completed["edge"] >= edge_threshold)
+    recommended = completed.loc[mask].copy()
+    
+    if recommended.empty:
+        return {}
+        
+    # Group by league
+    leagues = recommended["league"].unique()
+    results = {}
+    
+    for league in leagues:
+        league_bets = recommended[recommended["league"] == league].copy()
+        if league_bets.empty:
+            continue
+            
+        league_bets = league_bets.sort_values("settled_at")
+        league_bets["cumulative_profit"] = league_bets["profit"].fillna(0.0).cumsum()
+        
+        # Create daily summary for the chart
+        league_bets["date"] = league_bets["settled_at"].dt.date
+        daily = (
+            league_bets.groupby("date")
+            .agg(cumulative_profit=("cumulative_profit", "last"))
+            .reset_index()
+        )
+        results[league] = daily
+        
+    return results
 
 
 def _select_best_option(options: Dict[str, Tuple[Optional[float], Optional[str]]]) -> Tuple[Optional[str], Optional[str], Optional[float]]:

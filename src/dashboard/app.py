@@ -28,6 +28,8 @@ from .data import (
     get_totals_odds_for_recommended,
     get_performance_by_threshold,
     get_performance_over_time,
+    get_performance_by_league,
+    get_totals_performance_by_league,
     get_recommended_bets,
     get_totals_performance_by_threshold,
     get_totals_performance_over_time,
@@ -36,6 +38,31 @@ from .data import (
     filter_by_version,
     load_forward_test_data,
     summarize_prediction_comparison,
+    compare_model_predictions,
+)
+from .components import (
+    bankroll_cards,
+    completed_bets_table,
+    cumulative_profit_chart,
+    multi_model_cumulative_profit_chart,
+    cumulative_profit_by_league_chart,
+    edge_distribution_chart,
+    empty_state,
+    metric_card,
+    moneyline_detail_table,
+    overunder_completed_table,
+    overunder_recommended_table,
+    performance_by_period_chart,
+    performance_by_threshold_chart,
+    performance_by_threshold_table,
+    prediction_comparison_table,
+    prediction_summary,
+    recommended_bets_table,
+    roi_over_time_chart,
+    summary_cards,
+    totals_detail_table,
+    win_rate_over_time_chart,
+    model_comparison_table,
 )
 
 EXTERNAL_STYLESHEETS = [dbc.themes.FLATLY]
@@ -251,6 +278,24 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                     dbc.Col(
                         html.Div(
                             [
+                                html.Label("Model", htmlFor="model-type-dropdown"),
+                                dcc.Dropdown(
+                                    id="model-type-dropdown",
+                                    options=[
+                                        {"label": "Ensemble", "value": "ensemble"},
+                                        {"label": "Random Forest", "value": "random_forest"},
+                                        {"label": "Gradient Boosting", "value": "gradient_boosting"},
+                                    ],
+                                    value="ensemble",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
                                 html.Label("Version", htmlFor="version-select"),
                                 dcc.Dropdown(
                                     id="version-select",
@@ -335,6 +380,10 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                             dcc.Loading(html.Div(id="bankroll-cards"), type="circle"),
                             html.Br(),
                             dcc.Loading(html.Div(id="cumulative-profit-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="multi-model-profit-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="league-profit-chart"), type="circle"),
                         ],
                     ),
                     dcc.Tab(
@@ -456,6 +505,59 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
     )
 
 
+
+def _comparison_layout(pathname: Optional[str]) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            html.H2("Model Comparison"),
+            html.P(
+                "Compare performance and predictions across different model types.",
+                className="text-muted",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("League", htmlFor="comparison-league-select"),
+                                dcc.Dropdown(
+                                    id="comparison-league-select",
+                                    options=LEAGUE_FILTER_OPTIONS,
+                                    value="all",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=3,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Date Range", htmlFor="comparison-date-range"),
+                                dcc.DatePickerRange(
+                                    id="comparison-date-range",
+                                    min_date_allowed=min_date,
+                                    max_date_allowed=max_date,
+                                    start_date=min_date,
+                                    end_date=max_date,
+                                    display_format="YYYY-MM-DD",
+                                ),
+                            ]
+                        ),
+                        md=4,
+                    ),
+                ],
+                className="g-3 mb-4",
+            ),
+            dcc.Loading(html.Div(id="comparison-profit-chart"), type="circle"),
+            html.Br(),
+            dcc.Loading(html.Div(id="comparison-table"), type="circle"),
+        ],
+        fluid=True,
+    )
+
+
 def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
     return dbc.Container(
         [
@@ -488,6 +590,24 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                                     id="ou-league-select",
                                     options=LEAGUE_FILTER_OPTIONS,
                                     value="all",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        md=2,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Label("Model", htmlFor="ou-model-type-dropdown"),
+                                dcc.Dropdown(
+                                    id="ou-model-type-dropdown",
+                                    options=[
+                                        {"label": "Ensemble", "value": "ensemble"},
+                                        {"label": "Random Forest", "value": "random_forest"},
+                                        {"label": "Gradient Boosting", "value": "gradient_boosting"},
+                                    ],
+                                    value="ensemble",
                                     clearable=False,
                                 ),
                             ]
@@ -555,6 +675,12 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                             dcc.Loading(html.Div(id="overunder-summary"), type="circle"),
                             html.Br(),
                             dcc.Loading(html.Div(id="overunder-bankroll"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="overunder-cumulative-profit"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="overunder-multi-model-profit"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="overunder-league-profit"), type="circle"),
                         ],
                     ),
                     dcc.Tab(
@@ -628,12 +754,20 @@ def render_page(pathname: Optional[str]):
     Output("forward-data-store", "data"),
     Output("last-updated-text", "children"),
     Input("refresh-button", "n_clicks"),
+    Input("model-type-dropdown", "value"),
     prevent_initial_call=False,
 )
-def refresh_data(n_clicks: Optional[int]) -> tuple[str, str]:
-    """Refresh the cached predictions when the manual refresh button is clicked."""
+def refresh_data(n_clicks: Optional[int], model_type: str) -> tuple[str, str]:
+    """Refresh the cached predictions when the manual refresh button is clicked or model type changes."""
     force_refresh = bool(n_clicks)
-    df = load_forward_test_data(force_refresh=force_refresh, league=None)
+    # If triggered by dropdown (n_clicks is None or unchanged), we might not need force_refresh, 
+    # but load_forward_test_data handles caching.
+    # However, if we switch model type, we definitely want to load that model's data.
+    
+    # Use a default if model_type is None (initial load)
+    model_type = model_type or "ensemble"
+    
+    df = load_forward_test_data(force_refresh=force_refresh, league=None, model_type=model_type)
     metrics = calculate_summary_metrics(df)
     return _df_to_json(df), _format_timestamp(metrics.last_updated)
 
@@ -693,6 +827,8 @@ def sync_date_range_controls(data_json: Optional[str]):
     Output("summary-cards", "children"),
     Output("bankroll-cards", "children"),
     Output("cumulative-profit-chart", "children"),
+    Output("multi-model-profit-chart", "children"),
+    Output("league-profit-chart", "children"),
     Output("roi-chart", "children"),
     Output("win-rate-chart", "children"),
     Output("period-chart", "children"),
@@ -788,6 +924,29 @@ def update_dashboard(
     threshold_df = get_performance_by_threshold(df, stake=DEFAULT_STAKE)
     recommended_df = get_recommended_bets(df, edge_threshold=edge_threshold)
     completed_bets_df = get_completed_bets(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    
+    # Load performance data for all models for the multi-model cumulative profit chart
+    model_performance = {}
+    for model_type in ["ensemble", "random_forest", "gradient_boosting"]:
+        try:
+            model_df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type)
+            model_df = filter_by_version(model_df, version)
+            
+            # Apply same filters as main data
+            if league != "all" and not model_df.empty and "league" in model_df.columns:
+                model_df = model_df[model_df["league"].notna() & (model_df["league"].astype(str).str.upper() == league.upper())].copy()
+            
+            model_df = _filter_by_date(model_df, start_date, end_date)
+            
+            # Get performance over time for this model
+            model_perf = get_performance_over_time(model_df, edge_threshold=edge_threshold)
+            model_performance[model_type] = model_perf
+        except Exception:
+            # If model data doesn't exist or fails to load, skip it
+            model_performance[model_type] = pd.DataFrame()
+
+    # Calculate performance by league for the current model
+    league_performance = get_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
 
     book_odds_json = ""
     recommended_display_df = recommended_df
@@ -814,6 +973,8 @@ def update_dashboard(
         components.summary_cards(metrics),
         components.bankroll_cards(metrics),
         components.cumulative_profit_chart(performance_df),
+        components.multi_model_cumulative_profit_chart(model_performance),
+        components.cumulative_profit_by_league_chart(league_performance),
         components.roi_over_time_chart(performance_df),
         components.win_rate_over_time_chart(performance_df),
         period_chart_component,
@@ -865,6 +1026,9 @@ def update_predictions_page(
 @app.callback(
     Output("overunder-summary", "children"),
     Output("overunder-bankroll", "children"),
+    Output("overunder-cumulative-profit", "children"),
+    Output("overunder-multi-model-profit", "children"),
+    Output("overunder-league-profit", "children"),
     Output("overunder-performance", "children"),
     Output("overunder-recommended-table", "children"),
     Output("overunder-completed-table", "children"),
@@ -872,13 +1036,23 @@ def update_predictions_page(
     Output("ou-book-odds-store", "data"),
     Input("forward-data-store", "data"),
     Input("ou-league-select", "value"),
+    Input("ou-model-type-dropdown", "value"),
     Input("ou-date-range", "start_date"),
     Input("ou-date-range", "end_date"),
     Input("ou-version-select", "value"),
     Input("ou-edge-slider", "value"),
 )
-def update_overunder_page(data_json: Optional[str], league: str, start_date: Optional[str], end_date: Optional[str], version: str, edge_threshold: float):
-    df = _df_from_json(data_json)
+def update_overunder_page(
+    data_json: Optional[str], 
+    league: str, 
+    model_type: str,
+    start_date: Optional[str], 
+    end_date: Optional[str], 
+    version: str, 
+    edge_threshold: float
+):
+    # Load data for the selected model type
+    df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type or "ensemble")
     df = filter_by_version(df, version)
     if not df.empty and league != "all" and "league" in df.columns:
         df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
@@ -886,12 +1060,35 @@ def update_overunder_page(data_json: Optional[str], league: str, start_date: Opt
 
     if df.empty:
         empty = components.empty_state("No totals data available yet.")
-        return empty, empty, empty, empty, empty, empty
+        return empty, empty, empty, empty, empty, empty, empty, empty, ""
     metrics = calculate_totals_metrics(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
     performance_df = get_totals_performance_over_time(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
     threshold_df = get_totals_performance_by_threshold(df, stake=DEFAULT_STAKE)
     recommended = get_overunder_recommendations(df, edge_threshold=edge_threshold)
     completed = get_overunder_completed(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    
+    # Load performance data for all models for the multi-model cumulative profit chart
+    model_performance = {}
+    for model_type_iter in ["ensemble", "random_forest", "gradient_boosting"]:
+        try:
+            model_df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type_iter)
+            model_df = filter_by_version(model_df, version)
+            
+            # Apply same filters as main data
+            if league != "all" and not model_df.empty and "league" in model_df.columns:
+                model_df = model_df[model_df["league"].notna() & (model_df["league"].astype(str).str.upper() == league.upper())].copy()
+            
+            model_df = _filter_by_date(model_df, start_date, end_date)
+            
+            # Get performance over time for this model
+            model_perf = get_totals_performance_over_time(model_df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+            model_performance[model_type_iter] = model_perf
+        except Exception:
+            # If model data doesn't exist or fails to load, skip it
+            model_performance[model_type_iter] = pd.DataFrame()
+
+    # Calculate performance by league for the current model (using totals-specific function)
+    league_performance = get_totals_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
 
     recommended_table = components.overunder_recommended_table(recommended)
     completed_table = components.overunder_completed_table(completed)
@@ -938,6 +1135,9 @@ def update_overunder_page(data_json: Optional[str], league: str, start_date: Opt
     return (
         summary_section,
         bankroll_section,
+        components.cumulative_profit_chart(performance_df),
+        components.multi_model_cumulative_profit_chart(model_performance),
+        components.cumulative_profit_by_league_chart(league_performance),
         performance_section,
         recommended_table,
         completed_table,
@@ -1128,7 +1328,7 @@ def toggle_overunder_modal(active_cell, close_clicks, table_data, book_odds_json
 
 
 def run(debug: bool = False, port: int = 8050, host: str = "0.0.0.0") -> None:
-    app.run_server(debug=debug, port=port, host=host)
+    app.run(debug=debug, port=port, host=host)
 
 
 if __name__ == "__main__":
