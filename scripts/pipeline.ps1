@@ -515,6 +515,19 @@ try {
     Write-Log "ERROR: Prediction generation step failed: $_"
 }
 
+# Step 6: sync results across all model types
+Write-Log "Step 6: Syncing results across model types..."
+try {
+    & poetry run python scripts/copy_results.py
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "Results synced successfully across all model types"
+    } else {
+        Write-Log "WARNING: Result sync failed"
+    }
+} catch {
+    Write-Log "ERROR: Result sync step failed: $_"
+}
+
 Write-Log "========================================="
 Write-Log "Hourly pipeline completed"
 Write-Log "========================================="
