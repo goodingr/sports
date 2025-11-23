@@ -113,36 +113,75 @@ Outputs:
 
 ```
 poetry run python -m src.models.bet_selector --league NFL --edge-threshold 0.06
-```
-
 Adjust the edge threshold per league to trade off volume vs. confidence.
 
 ---
 
 ## Automation
 
-### Hourly Pipeline
+### Pipeline Script
 
-`scripts/run_hourly_pipeline.ps1` orchestrates:
-1. Recent odds / injuries / ESPN schedules.
-2. Football-Data odds + Understat archives + Understat match payloads (only new seasons/matches).
-3. Feature rebuilds for each league.
-4. Model training.
-5. Forward-test predictions and dashboard refresh.
+`scripts/pipeline.ps1` orchestrates the complete workflow:
 
-Flags:
-- `.\scripts\run_hourly_pipeline.ps1 -SoccerOnly`
-- Configure via Windows Task Scheduler using the helper scripts in `scripts/`.
+1. **Step 1**: Ingest odds, injuries, and ESPN schedules
+2. **Step 2**: Refresh advanced stats (Football-Data, Understat)
+3. **Step 3**: Rebuild datasets for all leagues
+4. **Step 4**: Train models (ensemble, random_forest, gradient_boosting)
+5. **Step 5**: Generate predictions and update results for all models
+6. **Step 6**: Sync results across model types
+
+**Usage:**
+```powershell
+# Full pipeline
+.\scripts\pipeline.ps1
+
+# Skip odds API calls (saves credits, still updates results)
+.\scripts\pipeline.ps1 -SkipOdds
+```
+
+**Multi-Model Support:**
+- The pipeline now trains and generates predictions for three model types:
+  - **Ensemble**: Voting classifier (Random Forest + Gradient Boosting + Logistic Regression)
+  - **Random Forest**: Standalone random forest classifier
+  - **Gradient Boosting**: Standalone XGBoost classifier
+- Results are automatically synced across all models via `scripts/copy_results.py`
 
 ### Forward Testing & Dashboard
 
-- UNIX environments: `./run_dashboard --port 8050` (wraps `poetry run python -m src.dashboard`).
-- PowerShell: `.\run_dashboard.ps1 --port 8050 -DashDebug` (same helper with PS-friendly args/`--` passthrough, use `-DashDebug` to enable Dash debug mode).
-- Forward-test driver: `poetry run python -m src.models.forward_test`.
-- PowerShell wrappers under `scripts/run_forward_test_*.ps1` simplify scheduling per league.
-- The dashboard exposes a `/predictions` route that compares our model's projected winners vs. sportsbook consensus, including league/date filters and accuracy summaries.
+**Starting the Dashboard:**
+- UNIX: `./run_dashboard --port 8050`
+- PowerShell: `.\run_dashboard.ps1 --port 8050 -DashDebug`
+- Direct: `poetry run python -m src.dashboard`
 
-The dashboard reads `data/forward_test/predictions_master.parquet` and surfaces ROI, win rate, cumulative profit, and upcoming recommendations with an adjustable edge slider.
+**Dashboard Features:**
+- **Multi-Model Selection**: Switch between Ensemble, Random Forest, and Gradient Boosting
+- **Moneyline Dashboard**: 
+  - Summary metrics (ROI, win rate, profit)
+  - Cumulative profit charts (overall, by model, by league)
+  - **ROI by League**: Track return on investment for each league
+  - Performance analysis and edge distribution
+  - Recommended and completed bets tables
+- **Over/Under Dashboard**:
+  - Totals-specific metrics and charts
+  - **ROI by League**: Separate tracking for over/under bets
+  - Multi-model comparison
+  - Edge analysis for totals
+- **Model Comparison**: Side-by-side performance comparison at `/compare`
+
+**Updating Results Without API Calls:**
+```powershell
+# Update results only (no odds API calls)
+poetry run python -m src.models.forward_test update --league NBA --model-type ensemble
+
+# Or use the pipeline with skip flag
+.\scripts\pipeline.ps1 -SkipOdds
+```
+
+The dashboard reads from `data/forward_test/{model_type}/predictions_master.parquet` and displays:
+- Real-time profit/loss tracking
+- ROI analysis by league and model
+- Adjustable edge threshold slider
+- Completed bet history with win/loss records
 
 ---
 
