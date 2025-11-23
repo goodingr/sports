@@ -10,6 +10,8 @@ End-to-end platform for multi-league moneyline modeling, evaluation, and recomme
 | --- | --- | --- |
 | **NFL** | Production | Wave‑1 data full history (1999–present), rolling EPA features, injuries, weather |
 | **NBA** | Production | ESPN odds, Kaggle historical closes, rolling metrics, injury summaries ([See Enhancements](docs/nba_enhancements.md)) |
+| **NCAAB** | Production | Kaggle March Madness data, ESPN odds, team mappings |
+| **NHL** | Production | Killersports odds, ESPN schedules, team mappings |
 | **CFB (FBS)** | Production | CollegeFootballData API for schedules, advanced stats, lines |
 | **Soccer (EPL, La Liga, Bundesliga, Serie A, Ligue 1)** | Production | Football-Data odds, ESPN schedules, Understat team/player aggregates + starting XI form |
 | MLB / Others | Paused | Data ingestion templates exist but pipelines disabled until parity with above |
