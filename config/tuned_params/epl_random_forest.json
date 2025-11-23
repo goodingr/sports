@@ -1,0 +1,21 @@
+{
+  "league": "EPL",
+  "model_type": "random_forest",
+  "best_params": {
+    "n_estimators": 150,
+    "max_depth": 5,
+    "min_samples_split": 9,
+    "min_samples_leaf": 9,
+    "max_features": "log2"
+  },
+  "best_log_loss": 0.5566287116613432,
+  "n_trials": 50,
+  "tuned_at": "2025-11-22T00:48:24.257826Z",
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}

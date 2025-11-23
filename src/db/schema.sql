@@ -242,3 +242,46 @@ CREATE INDEX IF NOT EXISTS idx_injury_reports_league_date
 CREATE INDEX IF NOT EXISTS idx_injury_reports_team
     ON injury_reports (league, team_code, report_date DESC);
 
+CREATE TABLE IF NOT EXISTS player_stats (
+    stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL REFERENCES games(game_id),
+    team_id INTEGER NOT NULL REFERENCES teams(team_id),
+    player_id INTEGER NOT NULL,
+    player_name TEXT,
+    min REAL,
+    pts INTEGER,
+    reb INTEGER,
+    ast INTEGER,
+    stl INTEGER,
+    blk INTEGER,
+    tov INTEGER,
+    pf INTEGER,
+    plus_minus INTEGER,
+    UNIQUE (game_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_stats_game ON player_stats (game_id);
+CREATE INDEX IF NOT EXISTS idx_player_stats_player ON player_stats (player_id);
+
+
+CREATE VIEW IF NOT EXISTS odds_movement_view AS
+SELECT 
+    o.game_id,
+    s.fetched_at_utc as timestamp,
+    b.name as bookmaker,
+    -- Moneyline
+    MAX(CASE WHEN o.market = 'h2h' AND o.outcome = 'home' THEN o.price_american END) as home_moneyline,
+    MAX(CASE WHEN o.market = 'h2h' AND o.outcome = 'away' THEN o.price_american END) as away_moneyline,
+    -- Spread
+    MAX(CASE WHEN o.market = 'spreads' AND o.outcome = 'home' THEN o.line END) as home_spread,
+    MAX(CASE WHEN o.market = 'spreads' AND o.outcome = 'home' THEN o.price_american END) as home_spread_odds,
+    MAX(CASE WHEN o.market = 'spreads' AND o.outcome = 'away' THEN o.line END) as away_spread,
+    MAX(CASE WHEN o.market = 'spreads' AND o.outcome = 'away' THEN o.price_american END) as away_spread_odds,
+    -- Total
+    MAX(CASE WHEN o.market = 'totals' AND o.outcome = 'Over' THEN o.line END) as total_line,
+    MAX(CASE WHEN o.market = 'totals' AND o.outcome = 'Over' THEN o.price_american END) as over_odds,
+    MAX(CASE WHEN o.market = 'totals' AND o.outcome = 'Under' THEN o.price_american END) as under_odds
+FROM odds o
+JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+JOIN books b ON o.book_id = b.book_id
+GROUP BY o.game_id, s.snapshot_id, b.book_id;

@@ -28,8 +28,8 @@ coverage.xml
 htmlcov/
 
 ## Logs
-*.log
-logs/
+# *.log
+# logs/
 
 ## IDE / Editor
 .vscode/
@@ -45,7 +45,7 @@ data/tmp/
 !data/.gitkeep
 
 ## Model artifacts
-models/
+/models/
 
 ## Reports
 reports/

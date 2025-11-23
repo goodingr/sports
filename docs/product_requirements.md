@@ -8,7 +8,7 @@ The Sports Betting Analytics Platform delivers data-driven betting recommendatio
 - Surfacing actionable insights via a forward-testing dashboard with bankroll tracking and bet recommendations.
 
 **Business Objectives**
-1. Maintain automated hourly coverage for all supported leagues, including future NCAA basketball and NHL games.
+1. Maintain automated coverage for all supported leagues.
 2. Improve model accuracy and consistency through continual dataset refreshes.
 3. Provide actionable recommendations with configurable edge thresholds and transparent tracking.
 
@@ -20,7 +20,7 @@ The Sports Betting Analytics Platform delivers data-driven betting recommendatio
 
 **Key Use Cases**
 1. **Hourly Automation** – Task scheduler runs ingestion, dataset updates, model retraining, and predictions.
-2. **Live Odds Snapshot** – Fetch latest NCAA & NHL prices from The Odds API (and other leagues via ESPN/other sources).
+2. **Live Odds Snapshot** – Fetch latest prices from The Odds API.
 3. **Historical Backfills** – Pull season-by-season odds/results for modelling (Killersports, Kaggle, etc.).
 4. **Dataset/Data Science Workflow** – Build league-specific feature sets, train models, evaluate metrics.
 5. **Forward Testing & Dashboard** – Generate recommendations, update results, display in Dash app with filters, ROI, edge analysis.
@@ -50,9 +50,9 @@ The Sports Betting Analytics Platform delivers data-driven betting recommendatio
 ### 3.5 Automation Enhancements
 - Hourly pipeline now includes:
   - ESPN odds ingestion for core leagues.
-  - Killersports and The Odds API snapshots (including NCAA & NHL).
+  - Killersports and The Odds API snapshots.
   - Dataset rebuilds and model training for leagues with new data.
-  - Forward test predictions + result updates for trained leagues and NCAA/NHL (prediction-only mode).
+  - Forward test predictions + result updates for trained leagues.
 
 ## 4. Design & Technical Requirements
 ### 4.1 Architecture
@@ -66,7 +66,6 @@ The Sports Betting Analytics Platform delivers data-driven betting recommendatio
 - Maintains JSON lists of leagues for ingestion/training/prediction.
 - Executes ingestion steps (ESPN, Killersports, Odds API, Understat, football-data).
 - Retrains models only when datasets updated to avoid redundant compute.
-- Always runs predictions for NCAA & NHL even if not retrained that cycle.
 - Handles errors gracefully, logging warnings but allowing pipeline to continue.
 
 ### 4.3 Data Quality
@@ -75,7 +74,6 @@ The Sports Betting Analytics Platform delivers data-driven betting recommendatio
 - For NCAA, ensure Kaggle schedule results map to team codes via `team_mappings` with canonical alias coverage.
 
 ### 4.4 Dashboard Requirements
-- League filter must include NCAA and NHL.
 - Master predictions file `data/forward_test/predictions_master.parquet` is the single source of truth for dashboard data.
 - Display recommended bets with edges ≥ 6% (configurable threshold).
 - Bankroll charts showing cumulative profit, ROI, wins/losses per league.

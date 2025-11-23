@@ -12,6 +12,7 @@ from requests import RequestException
 
 from src.db.loaders import store_injury_reports
 
+from .nba_injuries_espn_scraper import scrape_injuries
 from .utils import DEFAULT_HEADERS, SourceDefinition, source_run, write_json
 
 LOGGER = logging.getLogger(__name__)
@@ -207,7 +208,44 @@ def ingest(*, timeout: int = 60) -> str:
             rows.extend(_fetch_team_injuries(team, timeout=timeout, athlete_cache=athlete_cache))
 
         if not rows:
-            run.set_message("No NBA injuries found via ESPN")
+            LOGGER.warning("No NBA injuries found via API, attempting scraper fallback")
+            scraped_data = scrape_injuries()
+            if scraped_data:
+                current_year = datetime.utcnow().year
+                # Estimate season: if month >= 7, season is year+1, else year
+                current_month = datetime.utcnow().month
+                season = current_year + 1 if current_month >= 7 else current_year
+                
+                for item in scraped_data:
+                    # Parse date "Nov 19" to ISO
+                    report_date = None
+                    try:
+                        # Assume current year or previous year depending on month
+                        date_str = f"{item['date']} {current_year}"
+                        # This is rough, but better than nothing. 
+                        # Ideally we'd check if date is in future vs now to decide year.
+                        dt = datetime.strptime(date_str, "%b %d %Y")
+                        report_date = dt.isoformat() + "Z"
+                    except ValueError:
+                        pass
+
+                    rows.append({
+                        "team_code": item["team"], # Use full name as code for now, normalization happens later
+                        "team_name": item["team"],
+                        "player_name": item["player_name"],
+                        "position": item["position"],
+                        "status": item["status"],
+                        "practice_status": None,
+                        "report_date": report_date,
+                        "game_date": None,
+                        "detail": item["comment"],
+                        "notes": None,
+                        "injury_type": None,
+                        "season": season,
+                    })
+            
+        if not rows:
+            run.set_message("No NBA injuries found via ESPN (API or Scraper)")
             run.set_raw_path(run.storage_dir)
             return output_dir
 

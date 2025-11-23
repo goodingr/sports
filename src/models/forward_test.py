@@ -212,36 +212,17 @@ def get_model_features(model_path: Path) -> List[str]:
     ]
 
 
-def load_model(model_path: Optional[Path] = None, league: str = "NBA") -> object:
-    """Load the trained model for the specified league."""
+def load_model(model_path: Optional[Path] = None, league: str = "NBA", model_type: str = "ensemble") -> object:
+    """Load the trained model for the specified league and model type."""
     league_upper = league.upper()
     if model_path is None:
-        if league_upper == "NBA":
-            model_path = Path("models/nba_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "NCAAB":
-            model_path = Path("models/ncaab_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "NFL":
-            model_path = Path("models/nfl_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "CFB":
-            model_path = Path("models/cfb_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "EPL":
-            model_path = Path("models/epl_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "LALIGA":
-            model_path = Path("models/laliga_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "BUNDESLIGA":
-            model_path = Path("models/bundesliga_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "SERIEA":
-            model_path = Path("models/seriea_gradient_boosting_calibrated_moneyline.pkl")
-        elif league_upper == "LIGUE1":
-            model_path = Path("models/ligue1_gradient_boosting_calibrated_moneyline.pkl")
-        else:
-            raise ValueError(
-                f"Unknown league: {league}. Must be one of {', '.join(SUPPORTED_LEAGUES)}."
-            )
+        # Construct model path based on league and model_type
+        model_filename = f"{league.lower()}_{model_type}_calibrated_moneyline.pkl"
+        model_path = Path("models") / model_filename
     
     if not model_path.exists():
         raise FileNotFoundError(
-            f"Model not found for {league_upper}: expected at {model_path}. "
+            f"Model not found for {league_upper} ({model_type}): expected at {model_path}. "
             "Train the league-specific model before running forward_test."
         )
  
@@ -684,6 +665,8 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
             model_path = Path("models/nba_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "NCAAB":
             model_path = Path("models/ncaab_gradient_boosting_calibrated_moneyline.pkl")
+        elif league_upper == "NHL":
+            model_path = Path("models/nhl_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "NFL":
             model_path = Path("models/nfl_gradient_boosting_calibrated_moneyline.pkl")
         elif league_upper == "CFB":
@@ -980,11 +963,15 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
     return pd.DataFrame(predictions)
 
 
-def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None) -> Path:
+def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None, model_type: str = "ensemble") -> Path:
     """Save predictions to forward test directory."""
     if predictions.empty:
         LOGGER.warning("No predictions to save")
         return FORWARD_TEST_DIR / "predictions_empty.parquet"
+    
+    # Create model-specific directory
+    model_dir = FORWARD_TEST_DIR / model_type
+    model_dir.mkdir(parents=True, exist_ok=True)
     
     # Normalize datetime columns for consistency (avoids dtype issues when merging)
     datetime_cols = ["commence_time", "predicted_at", "result_updated_at"]
@@ -995,12 +982,12 @@ def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None)
     if timestamp is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     
-    predictions_path = FORWARD_TEST_DIR / f"predictions_{timestamp}.parquet"
+    predictions_path = model_dir / f"predictions_{timestamp}.parquet"
     predictions.to_parquet(predictions_path, index=False)
     LOGGER.info("Saved %d predictions to %s", len(predictions), predictions_path)
     
     # Also save to master predictions file
-    master_path = FORWARD_TEST_DIR / "predictions_master.parquet"
+    master_path = model_dir / "predictions_master.parquet"
     if master_path.exists():
         try:
             existing = pd.read_parquet(master_path)
@@ -1011,7 +998,8 @@ def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None)
             if "game_id" in existing.columns and "game_id" in predictions.columns:
                 # Merge with existing (update if game_id exists, add if new)
                 existing = existing[~existing["game_id"].isin(predictions["game_id"])]
-                combined = pd.concat([existing, predictions], ignore_index=True)
+                to_concat = [df for df in [existing, predictions] if not df.empty]
+                combined = pd.concat(to_concat, ignore_index=True) if to_concat else pd.DataFrame()
                 # Keep the latest prediction per league/game combination
                 if "predicted_at" in combined.columns:
                     combined = combined.sort_values("predicted_at").drop_duplicates(
@@ -1027,7 +1015,8 @@ def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None)
                 LOGGER.info("Updated master predictions file with %d total predictions", len(combined))
             else:
                 # Append if structure is different
-                combined = pd.concat([existing, predictions], ignore_index=True)
+                to_concat = [df for df in [existing, predictions] if not df.empty]
+                combined = pd.concat(to_concat, ignore_index=True) if to_concat else pd.DataFrame()
                 if "predicted_at" in combined.columns:
                     combined = combined.sort_values("predicted_at").drop_duplicates(
                         subset=[col for col in ["league", "game_id"] if col in combined.columns],
@@ -1232,11 +1221,14 @@ def update_results(
     *,
     league: Optional[str] = None,
     dotenv_path: Optional[Path] = None,
+    model_type: str = "ensemble",
 ) -> None:
     """Update forward test predictions with actual game results."""
-    master_path = FORWARD_TEST_DIR / "predictions_master.parquet"
+    model_dir = FORWARD_TEST_DIR / model_type
+    master_path = model_dir / "predictions_master.parquet"
+    
     if not master_path.exists():
-        LOGGER.warning("No predictions file found")
+        LOGGER.warning("No predictions file found at %s", master_path)
         return
     
     predictions = pd.read_parquet(master_path)
@@ -1540,6 +1532,14 @@ def update_results(
             if recent_mask.any():
                 for idx, row in target_predictions.loc[recent_mask].iterrows():
                     if not _find_final_score(row, conn):
+                        # Check if result is available in recent API fetches before clearing
+                        game_id = str(row.get("game_id"))
+                        if game_id in score_lookup:
+                            continue
+                            
+                        if _lookup_soccer_score(row):
+                            continue
+
                         LOGGER.info("Clearing result for %s (not confirmed in DB)", row.get("game_id"))
                         _clear_result(idx)
 
@@ -1613,11 +1613,13 @@ def update_results(
     LOGGER.info("Updated predictions saved")
 
 
-def generate_report(league: Optional[str] = None) -> Dict:
+def generate_report(league: Optional[str] = None, model_type: str = "ensemble") -> Dict:
     """Generate forward testing performance report."""
-    master_path = FORWARD_TEST_DIR / "predictions_master.parquet"
+    model_dir = FORWARD_TEST_DIR / model_type
+    master_path = model_dir / "predictions_master.parquet"
+    
     if not master_path.exists():
-        return {"error": "No predictions file found"}
+        return {"error": f"No predictions file found for model {model_type}"}
     
     predictions = pd.read_parquet(master_path)
     
@@ -1730,6 +1732,17 @@ def main() -> None:
         help="Path to model file (defaults to league-specific model)",
     )
     parser.add_argument(
+        "--model-type",
+        choices=["gradient_boosting", "random_forest", "ensemble"],
+        default="ensemble",
+        help="Model type to use for predictions (affects which model is loaded and where predictions are saved)",
+    )
+    parser.add_argument(
+        "--timestamp",
+        default=None,
+        help="Timestamp to use for predictions (YYYY-MM-DD format). If not provided, uses current date.",
+    )
+    parser.add_argument(
         "--dotenv",
         type=Path,
         default=None,
@@ -1749,7 +1762,7 @@ def main() -> None:
         for league in leagues:
             LOGGER.info("=== Running forward test for %s ===", league)
             try:
-                model = load_model(args.model, league=league)
+                model = load_model(args.model, league=league, model_type=args.model_type)
             except FileNotFoundError as exc:
                 LOGGER.warning("Skipping %s: %s", league, exc)
                 continue
@@ -1760,7 +1773,7 @@ def main() -> None:
                 continue
 
             predictions = make_predictions(games, model, league=league, model_path=args.model)
-            save_predictions(predictions)
+            save_predictions(predictions, timestamp=args.timestamp, model_type=args.model_type)
 
             edge_threshold = 0.06
             recs = predictions[
@@ -1793,11 +1806,11 @@ def main() -> None:
 
     elif args.action == "update":
         target_league = None if args.league in (None, "ALL") else args.league
-        update_results(league=target_league, dotenv_path=args.dotenv)
+        update_results(league=target_league, dotenv_path=args.dotenv, model_type=args.model_type)
     
     elif args.action == "report":
         league = args.league or SUPPORTED_LEAGUES[0]
-        report = generate_report(league=league)
+        report = generate_report(league=league, model_type=args.model_type)
         
         if "error" in report:
             print(f"Error: {report['error']}")
@@ -1805,6 +1818,7 @@ def main() -> None:
             print(report["message"])
         else:
             print(f"\n=== FORWARD TESTING REPORT ({league}) ===")
+            print(f"Model Type: {args.model_type}")
             print(f"Total Predictions: {report['total_predictions']}")
             print(f"Completed Games: {report['completed_games']}")
             print(f"Recommended Bets: {report['recommended_bets']}")

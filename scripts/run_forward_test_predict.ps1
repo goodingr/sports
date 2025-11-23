@@ -77,6 +77,13 @@ try {
     $OverallExitCode = 0
 
     foreach ($League in $Leagues) {
+        Write-Log "Ingesting odds for league: $League"
+        try {
+            & poetry run python -m src.data.ingest_odds --league $League --market h2h,totals --force-refresh | Out-Null
+        } catch {
+            Write-Log "WARNING: Odds ingestion failed for $League: $_"
+        }
+
         Write-Log "Running predictions for league: $League"
 
         $Output = & poetry run python -m src.models.forward_test predict --league $League --dotenv .env 2>&1

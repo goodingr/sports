@@ -1441,6 +1441,7 @@ def import_football_data_totals(
                         parquet_file.name,
                     )
                 else:
+                    unmatched_details = []
                     for record in df.to_dict(orient="records"):
                         home_name = record.get("home_team") or record.get("HomeTeam")
                         away_name = record.get("away_team") or record.get("AwayTeam")
@@ -1470,12 +1471,8 @@ def import_football_data_totals(
                             target_date=game_dt.date().isoformat(),
                         )
                         if not game_id:
-                            LOGGER.warning(
-                                "football-data %s: unmatched row %s vs %s on %s",
-                                league_code,
-                                home_name,
-                                away_name,
-                                game_dt.date().isoformat(),
+                            unmatched_details.append(
+                                f"{home_name} vs {away_name} on {game_dt.date().isoformat()}"
                             )
                             unmatched += 1
                             continue
@@ -2040,3 +2037,151 @@ def import_killersports_odds(
             summary["matched"] += 1
 
     return summary
+
+
+def load_player_stats(
+    file_path: Path,
+    league: str = "NBA",
+) -> int:
+    """Load player stats from a parquet file into the database."""
+    try:
+        df = pd.read_parquet(file_path)
+    except Exception as exc:
+        LOGGER.error("Failed to read %s: %s", file_path, exc)
+        return 0
+
+    if df.empty:
+        return 0
+
+    # Normalize columns to upper case just in case
+    df.columns = [c.upper() for c in df.columns]
+
+    required_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "GAME_DATE", "MATCHUP"]
+    if not all(col in df.columns for col in required_cols):
+        LOGGER.warning("Skipping %s: missing required columns", file_path)
+        return 0
+
+    # Pre-process dates
+    df["GAME_DT"] = pd.to_datetime(df["GAME_DATE"])
+    min_date = df["GAME_DT"].min().date()
+    max_date = df["GAME_DT"].max().date()
+
+    records_loaded = 0
+    with connect() as conn:
+        # Cache team IDs
+        team_map = {}
+        
+        # Cache Game IDs for the date range
+        # Map: (date_str, home_code, away_code) -> game_id
+        game_cache = {}
+        
+        cursor = conn.execute(
+            """
+            SELECT g.game_id, date(g.start_time_utc), th.code, ta.code
+            FROM games g
+            JOIN sports s ON g.sport_id = s.sport_id
+            JOIN teams th ON g.home_team_id = th.team_id
+            JOIN teams ta ON g.away_team_id = ta.team_id
+            WHERE s.league = ?
+              AND date(g.start_time_utc) BETWEEN ? AND ?
+            """,
+            (league, min_date.isoformat(), max_date.isoformat())
+        )
+        for row in cursor:
+            g_id, g_date, h_code, a_code = row
+            game_cache[(g_date, h_code, a_code)] = g_id
+
+        # Also cache teams
+        sport_id = _ensure_sport(conn, "Basketball", league, "h2h")
+        cursor = conn.execute("SELECT code, team_id FROM teams WHERE sport_id = ?", (sport_id,))
+        for row in cursor:
+            team_map[row[0]] = row[1]
+
+        batch_data = []
+        
+        for row in df.to_dict(orient="records"):
+            matchup = row.get("MATCHUP")
+            if not matchup:
+                continue
+
+            # Parse matchup to get home/away codes
+            if " @ " in matchup:
+                away_code_raw, home_code_raw = matchup.split(" @ ")
+            elif " vs. " in matchup:
+                home_code_raw, away_code_raw = matchup.split(" vs. ")
+            else:
+                continue
+
+            home_code = normalize_team_code(league, home_code_raw)
+            away_code = normalize_team_code(league, away_code_raw)
+            
+            if not home_code or not away_code:
+                continue
+
+            game_date_str = row["GAME_DT"].date().isoformat()
+            
+            game_id = game_cache.get((game_date_str, home_code, away_code))
+            if not game_id:
+                # Try finding with tolerance or fallback logic if needed, but for now skip
+                # Maybe the date is off by one day?
+                continue
+
+            # Get team_id for the player's team
+            player_team_code_raw = row.get("TEAM_ABBREVIATION")
+            player_team_code = normalize_team_code(league, player_team_code_raw)
+            
+            team_id = team_map.get(player_team_code)
+            if not team_id:
+                # Create if missing (unlikely if we pre-loaded, but possible for new teams)
+                team_id = _ensure_team(conn, sport_id, player_team_code)
+                team_map[player_team_code] = team_id
+
+            # Prepare stats
+            min_str = str(row.get("MIN", "0"))
+            try:
+                if ":" in min_str:
+                    mins, secs = min_str.split(":")
+                    minutes = float(mins) + float(secs) / 60.0
+                else:
+                    minutes = float(min_str)
+            except ValueError:
+                minutes = 0.0
+
+            batch_data.append((
+                game_id,
+                team_id,
+                row.get("PLAYER_ID"),
+                row.get("PLAYER_NAME"),
+                minutes,
+                row.get("PTS"),
+                row.get("REB"),
+                row.get("AST"),
+                row.get("STL"),
+                row.get("BLK"),
+                row.get("TOV"),
+                row.get("PF"),
+                row.get("PLUS_MINUS"),
+            ))
+
+        if batch_data:
+            conn.executemany(
+                """
+                INSERT INTO player_stats (
+                    game_id, team_id, player_id, player_name, min, pts, reb, ast, stl, blk, tov, pf, plus_minus
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id, player_id) DO UPDATE SET
+                    min=excluded.min,
+                    pts=excluded.pts,
+                    reb=excluded.reb,
+                    ast=excluded.ast,
+                    stl=excluded.stl,
+                    blk=excluded.blk,
+                    tov=excluded.tov,
+                    pf=excluded.pf,
+                    plus_minus=excluded.plus_minus
+                """,
+                batch_data
+            )
+            records_loaded = len(batch_data)
+
+    return records_loaded

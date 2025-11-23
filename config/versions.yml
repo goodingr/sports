@@ -1,6 +1,8 @@
-current: v0.2
+current: v0.3
 versions:
   - name: v0.1
     start: "1900-01-01"
   - name: v0.2
     start: "2025-11-14"
+  - name: v0.3
+    start: "2025-11-21"

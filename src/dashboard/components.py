@@ -175,6 +175,7 @@ def cumulative_profit_chart(performance_df: pd.DataFrame) -> dcc.Graph:
                 mode="lines+markers",
                 name="Cumulative Profit",
                 line=dict(color="#1f77b4", width=3),
+                hovertemplate="Date: %{x}<br>Profit: $%{y:.0f}<extra></extra>",
             )
         )
 
@@ -182,6 +183,7 @@ def cumulative_profit_chart(performance_df: pd.DataFrame) -> dcc.Graph:
         title="Cumulative Profit",
         xaxis_title="Date",
         yaxis_title="Profit ($)",
+        yaxis=dict(tickformat="$.0f"),
         template="plotly_white",
         height=360,
     )
@@ -228,6 +230,7 @@ def multi_model_cumulative_profit_chart(
                         width=2.5
                     ),
                     marker=dict(size=6),
+                    hovertemplate="Date: %{x}<br>Profit: $%{y:.0f}<extra></extra>",
                 )
             )
     
@@ -235,6 +238,7 @@ def multi_model_cumulative_profit_chart(
         title="Cumulative Profit by Model",
         xaxis_title="Date",
         yaxis_title="Profit ($)",
+        yaxis=dict(tickformat="$.0f"),
         template="plotly_white",
         height=400,
         hovermode="x unified",
@@ -273,6 +277,7 @@ def cumulative_profit_by_league_chart(
                     name=league,
                     line=dict(width=2.5),
                     marker=dict(size=6),
+                    hovertemplate="Date: %{x}<br>Profit: $%{y:.0f}<extra></extra>",
                 )
             )
     
@@ -280,6 +285,52 @@ def cumulative_profit_by_league_chart(
         title="Cumulative Profit by League",
         xaxis_title="Date",
         yaxis_title="Profit ($)",
+        yaxis=dict(tickformat="$.0f"),
+        template="plotly_white",
+        height=400,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def roi_by_league_chart(
+    performance_by_league: dict[str, pd.DataFrame]
+) -> dcc.Graph:
+    """
+    Create ROI chart with separate lines for each league.
+    
+    Args:
+        performance_by_league: Dict mapping league names to their performance DataFrames
+                              Each DataFrame should have 'date' and 'roi' columns
+    """
+    fig = go.Figure()
+    
+    # Add a line for each league
+    for league, perf_df in performance_by_league.items():
+        if perf_df is not None and not perf_df.empty and "roi" in perf_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=perf_df["date"],
+                    y=perf_df["roi"],
+                    mode="lines+markers",
+                    name=league,
+                    line=dict(width=2.5),
+                    marker=dict(size=6),
+                )
+            )
+    
+    fig.update_layout(
+        title="ROI by League",
+        xaxis_title="Date",
+        yaxis_title="ROI (%)",
         template="plotly_white",
         height=400,
         hovermode="x unified",

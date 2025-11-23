@@ -1,0 +1,21 @@
+{
+  "league": "NHL",
+  "model_type": "random_forest",
+  "best_params": {
+    "n_estimators": 350,
+    "max_depth": 22,
+    "min_samples_split": 18,
+    "min_samples_leaf": 10,
+    "max_features": "sqrt"
+  },
+  "best_log_loss": 0.707467038690592,
+  "n_trials": 50,
+  "tuned_at": "2025-11-22T00:47:25.114001Z",
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "league": "LALIGA",
+  "model_type": "random_forest",
+  "best_params": {
+    "n_estimators": 350,
+    "max_depth": 13,
+    "min_samples_split": 8,
+    "min_samples_leaf": 10,
+    "max_features": 0.7
+  },
+  "best_log_loss": 0.5465131960119862,
+  "n_trials": 50,
+  "tuned_at": "2025-11-22T00:49:12.592093Z",
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}

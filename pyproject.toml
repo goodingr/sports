@@ -29,6 +29,7 @@ selenium = "^4.15.0"
 webdriver-manager = "^4.0.0"
 kaggle = "^1.6.0"
 pybaseball = "^2.2.7"
+optuna = "^4.6.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0"

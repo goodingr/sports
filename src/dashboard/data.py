@@ -588,7 +588,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
                     "stake": stake if won is not None else np.nan,
                     "commence_time": row.get("commence_time"),
                     "predicted_at": row.get("predicted_at"),
-                    "settled_at": row.get("predicted_at"),
+                    "settled_at": row.get("result_updated_at") if "result_updated_at" in row.index else row.get("commence_time"),
                     "total_points": actual_total,
                     "predicted_total_points": row.get("predicted_total_points"),
                 }
@@ -598,6 +598,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
     if not totals_df.empty:
         totals_df["commence_time"] = _to_datetime(totals_df["commence_time"])
         totals_df["predicted_at"] = _to_datetime(totals_df["predicted_at"])
+        totals_df["settled_at"] = _to_datetime(totals_df["settled_at"])
     return totals_df
 
 
@@ -1411,11 +1412,19 @@ def get_performance_by_league(
         league_bets = league_bets.sort_values("settled_at")
         league_bets["cumulative_profit"] = league_bets["profit"].fillna(0.0).cumsum()
         
+        # Calculate ROI: (Cumulative Profit / Cumulative Stake) * 100
+        league_bets["bet_count"] = range(1, len(league_bets) + 1)
+        league_bets["cumulative_stake"] = league_bets["bet_count"] * stake
+        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"]) * 100.0
+        
         # Create daily summary for the chart
         league_bets["date"] = league_bets["settled_at"].dt.date
         daily = (
             league_bets.groupby("date")
-            .agg(cumulative_profit=("cumulative_profit", "last"))
+            .agg(
+                cumulative_profit=("cumulative_profit", "last"),
+                roi=("roi", "last")
+            )
             .reset_index()
         )
         results[league] = daily
@@ -1463,11 +1472,19 @@ def get_totals_performance_by_league(
         league_bets = league_bets.sort_values("settled_at")
         league_bets["cumulative_profit"] = league_bets["profit"].fillna(0.0).cumsum()
         
+        # Calculate ROI: (Cumulative Profit / Cumulative Stake) * 100
+        league_bets["bet_count"] = range(1, len(league_bets) + 1)
+        league_bets["cumulative_stake"] = league_bets["bet_count"] * stake
+        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"]) * 100.0
+        
         # Create daily summary for the chart
         league_bets["date"] = league_bets["settled_at"].dt.date
         daily = (
             league_bets.groupby("date")
-            .agg(cumulative_profit=("cumulative_profit", "last"))
+            .agg(
+                cumulative_profit=("cumulative_profit", "last"),
+                roi=("roi", "last")
+            )
             .reset_index()
         )
         results[league] = daily

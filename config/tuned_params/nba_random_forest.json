@@ -1,0 +1,21 @@
+{
+  "league": "NBA",
+  "model_type": "random_forest",
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 23,
+    "min_samples_split": 2,
+    "min_samples_leaf": 10,
+    "max_features": "log2"
+  },
+  "best_log_loss": 0.6874660450224601,
+  "n_trials": 10,
+  "tuned_at": "2025-11-22T00:34:57.654583Z",
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}

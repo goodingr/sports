@@ -31,7 +31,7 @@ def _calculate_rolling_metrics(games_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     
     # Ensure we have required columns
-    required_cols = ["SEASON_ID", "TEAM_ID", "TEAM_ABBREVIATION", "GAME_DATE", "WL", "PTS"]
+    required_cols = ["SEASON_ID", "TEAM_ID", "TEAM_ABBREVIATION", "GAME_DATE", "WL", "PTS", "FGA", "FTA", "OREB", "TOV", "MIN"]
     missing_cols = [col for col in required_cols if col not in games_df.columns]
     if missing_cols:
         LOGGER.warning("Missing required columns: %s", missing_cols)
@@ -40,7 +40,7 @@ def _calculate_rolling_metrics(games_df: pd.DataFrame) -> pd.DataFrame:
     # Sort by team and date
     games_df = games_df.sort_values(["TEAM_ABBREVIATION", "GAME_DATE"]).copy()
     
-    # Parse game date (can be in different formats)
+    # Parse game date
     games_df["game_date"] = pd.to_datetime(games_df["GAME_DATE"], errors="coerce")
     games_df = games_df[games_df["game_date"].notna()].copy()
     
@@ -50,28 +50,49 @@ def _calculate_rolling_metrics(games_df: pd.DataFrame) -> pd.DataFrame:
     
     # Extract season year
     games_df["season"] = games_df["game_date"].dt.year
-    # Adjust for seasons that start in one year and end in the next
     games_df.loc[games_df["game_date"].dt.month >= 10, "season"] = games_df.loc[games_df["game_date"].dt.month >= 10, "game_date"].dt.year
     games_df.loc[games_df["game_date"].dt.month < 10, "season"] = games_df.loc[games_df["game_date"].dt.month < 10, "game_date"].dt.year - 1
     
     # Calculate win (1) or loss (0)
     games_df["win"] = (games_df["WL"] == "W").astype(int)
     
-    # Calculate point differential by matching games with opponents
-    # Group by GAME_ID to get both teams' scores
-    games_df["point_diff"] = None
-    for game_id in games_df["GAME_ID"].unique():
-        game_rows = games_df[games_df["GAME_ID"] == game_id]
-        if len(game_rows) == 2:
-            # Two teams in the same game
-            team1_pts = game_rows.iloc[0]["PTS"]
-            team2_pts = game_rows.iloc[1]["PTS"]
-            games_df.loc[games_df["GAME_ID"] == game_id, "point_diff"] = games_df.loc[games_df["GAME_ID"] == game_id, "PTS"] - (team1_pts + team2_pts - games_df.loc[games_df["GAME_ID"] == game_id, "PTS"])
+    # Basic Possession Formula: FGA + 0.44 * FTA - OREB + TOV
+    games_df["possessions"] = games_df["FGA"] + 0.44 * games_df["FTA"] - games_df["OREB"] + games_df["TOV"]
+    
+    # Get Opponent Stats by joining on GAME_ID
+    # We need Opponent Points for Def Rating
+    # And Opponent Possessions for Pace
+    
+    game_stats = games_df[["GAME_ID", "TEAM_ID", "PTS", "possessions"]].copy()
+    games_with_opp = games_df.merge(
+        game_stats, 
+        on="GAME_ID", 
+        suffixes=("", "_opp")
+    )
+    # Filter out self-matches
+    games_with_opp = games_with_opp[games_with_opp["TEAM_ID"] != games_with_opp["TEAM_ID_opp"]]
+    
+    # If we have duplicates (shouldn't happen if 2 teams per game), drop them
+    games_with_opp = games_with_opp.drop_duplicates(subset=["GAME_ID", "TEAM_ID"])
+    
+    # Calculate Advanced Stats
+    # Off Rtg = 100 * PTS / Poss
+    # Def Rtg = 100 * Opp PTS / Poss (using Team Poss for denominator is common, or use Game Poss)
+    # Let's use Team Possessions for both to be consistent with team efficiency
+    games_with_opp["off_rating"] = 100 * games_with_opp["PTS"] / games_with_opp["possessions"]
+    games_with_opp["def_rating"] = 100 * games_with_opp["PTS_opp"] / games_with_opp["possessions"] # Using own possessions to normalize
+    games_with_opp["net_rating"] = games_with_opp["off_rating"] - games_with_opp["def_rating"]
+    
+    # Pace = 48 * ((Tm Poss + Opp Poss) / (2 * (Tm Min / 5)))
+    # MIN is usually total minutes (e.g. 240). 
+    games_with_opp["pace"] = 48 * ((games_with_opp["possessions"] + games_with_opp["possessions_opp"]) / (2 * (games_with_opp["MIN"] / 5)))
+    
+    games_with_opp["point_diff"] = games_with_opp["PTS"] - games_with_opp["PTS_opp"]
     
     results = []
     
-    for team in games_df["TEAM_ABBREVIATION"].unique():
-        team_games = games_df[games_df["TEAM_ABBREVIATION"] == team].copy()
+    for team in games_with_opp["TEAM_ABBREVIATION"].unique():
+        team_games = games_with_opp[games_with_opp["TEAM_ABBREVIATION"] == team].copy()
         team_games = team_games.sort_values("game_date")
         
         for idx, row in team_games.iterrows():
@@ -85,25 +106,19 @@ def _calculate_rolling_metrics(games_df: pd.DataFrame) -> pd.DataFrame:
                 "game_id": f"NBA_{row['GAME_ID']}" if "GAME_ID" in row else None,
             }
             
-            # Calculate rolling win percentage
-            for window in [3, 5, 10]:
+            # Calculate rolling metrics
+            for window in [3, 5, 10, 15, 20]:
                 window_games = prior_games.tail(window)
                 if len(window_games) > 0:
                     result_row[f"rolling_win_pct_{window}"] = window_games["win"].mean()
+                    result_row[f"rolling_point_diff_{window}"] = window_games["point_diff"].mean()
+                    result_row[f"rolling_off_rating_{window}"] = window_games["off_rating"].mean()
+                    result_row[f"rolling_def_rating_{window}"] = window_games["def_rating"].mean()
+                    result_row[f"rolling_net_rating_{window}"] = window_games["net_rating"].mean()
+                    result_row[f"rolling_pace_{window}"] = window_games["pace"].mean()
                 else:
-                    result_row[f"rolling_win_pct_{window}"] = None
-            
-            # Calculate rolling point differential
-            for window in [3, 5, 10]:
-                window_games = prior_games.tail(window)
-                if len(window_games) > 0 and "point_diff" in window_games.columns:
-                    point_diffs = window_games["point_diff"].dropna()
-                    if len(point_diffs) > 0:
-                        result_row[f"rolling_point_diff_{window}"] = point_diffs.mean()
-                    else:
-                        result_row[f"rolling_point_diff_{window}"] = None
-                else:
-                    result_row[f"rolling_point_diff_{window}"] = None
+                    for metric in ["win_pct", "point_diff", "off_rating", "def_rating", "net_rating", "pace"]:
+                        result_row[f"rolling_{metric}_{window}"] = None
             
             results.append(result_row)
     

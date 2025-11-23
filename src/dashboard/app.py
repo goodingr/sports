@@ -59,6 +59,7 @@ from .components import (
     prediction_summary,
     recommended_bets_table,
     roi_over_time_chart,
+    roi_by_league_chart,
     summary_cards,
     totals_detail_table,
     win_rate_over_time_chart,
@@ -228,7 +229,7 @@ def _navbar(pathname: Optional[str]) -> dbc.Nav:
     pathname = pathname or "/"
     return dbc.Nav(
         [
-            dbc.NavLink("Dashboard", href="/", active=pathname == "/" or pathname == ""),
+            dbc.NavLink("Moneyline", href="/", active=pathname == "/" or pathname == ""),
             dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
             dbc.NavLink("Over/Under", href="/overunder", active=pathname == "/overunder"),
         ],
@@ -243,7 +244,7 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
             _navbar(pathname),
             dbc.Row(
                 [
-                    dbc.Col(html.H2("Forward Testing Dashboard"), md=8),
+                    dbc.Col(html.H2("Moneyline Dashboard"), md=8),
                     dbc.Col(
                         dbc.Button(
                             "Manual Refresh",
@@ -384,6 +385,8 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                             dcc.Loading(html.Div(id="multi-model-profit-chart"), type="circle"),
                             html.Br(),
                             dcc.Loading(html.Div(id="league-profit-chart"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="roi-by-league-chart"), type="circle"),
                         ],
                     ),
                     dcc.Tab(
@@ -681,6 +684,8 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                             dcc.Loading(html.Div(id="overunder-multi-model-profit"), type="circle"),
                             html.Br(),
                             dcc.Loading(html.Div(id="overunder-league-profit"), type="circle"),
+                            html.Br(),
+                            dcc.Loading(html.Div(id="overunder-roi-by-league"), type="circle"),
                         ],
                     ),
                     dcc.Tab(
@@ -829,6 +834,7 @@ def sync_date_range_controls(data_json: Optional[str]):
     Output("cumulative-profit-chart", "children"),
     Output("multi-model-profit-chart", "children"),
     Output("league-profit-chart", "children"),
+    Output("roi-by-league-chart", "children"),
     Output("roi-chart", "children"),
     Output("win-rate-chart", "children"),
     Output("period-chart", "children"),
@@ -975,6 +981,7 @@ def update_dashboard(
         components.cumulative_profit_chart(performance_df),
         components.multi_model_cumulative_profit_chart(model_performance),
         components.cumulative_profit_by_league_chart(league_performance),
+        components.roi_by_league_chart(league_performance),
         components.roi_over_time_chart(performance_df),
         components.win_rate_over_time_chart(performance_df),
         period_chart_component,
@@ -1029,6 +1036,7 @@ def update_predictions_page(
     Output("overunder-cumulative-profit", "children"),
     Output("overunder-multi-model-profit", "children"),
     Output("overunder-league-profit", "children"),
+    Output("overunder-roi-by-league", "children"),
     Output("overunder-performance", "children"),
     Output("overunder-recommended-table", "children"),
     Output("overunder-completed-table", "children"),
@@ -1138,6 +1146,7 @@ def update_overunder_page(
         components.cumulative_profit_chart(performance_df),
         components.multi_model_cumulative_profit_chart(model_performance),
         components.cumulative_profit_by_league_chart(league_performance),
+        components.roi_by_league_chart(league_performance),
         performance_section,
         recommended_table,
         completed_table,

@@ -1,0 +1,21 @@
+{
+  "league": "BUNDESLIGA",
+  "model_type": "random_forest",
+  "best_params": {
+    "n_estimators": 350,
+    "max_depth": 14,
+    "min_samples_split": 19,
+    "min_samples_leaf": 1,
+    "max_features": "log2"
+  },
+  "best_log_loss": 0.5664686746475297,
+  "n_trials": 50,
+  "tuned_at": "2025-11-22T00:50:05.294125Z",
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
+}
