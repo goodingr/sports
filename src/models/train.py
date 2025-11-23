@@ -20,7 +20,7 @@ try:  # pragma: no cover - optional dependency for certain model types
 except ImportError:  # noqa: F401
     LGBMClassifier = None  # type: ignore[assignment]
 from sklearn.base import clone  # type: ignore[import]
-from sklearn.ensemble import HistGradientBoostingClassifier  # type: ignore[import]
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier  # type: ignore[import]
 from sklearn.impute import SimpleImputer  # type: ignore[import]
 from sklearn.isotonic import IsotonicRegression  # type: ignore[import]
 from sklearn.linear_model import LogisticRegression  # type: ignore[import]
@@ -39,6 +39,19 @@ from src.db.models import persist_model_predictions, register_model
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _load_tuned_params(league: str, model_type: str) -> Dict[str, Any]:
+    """Load tuned hyperparameters if available, otherwise return empty dict."""
+    params_path = Path(f"config/tuned_params/{league.lower()}_{model_type}.json")
+    if params_path.exists():
+        try:
+            data = json.loads(params_path.read_text(encoding="utf-8"))
+            LOGGER.info("Loaded tuned params for %s %s from %s", league, model_type, params_path)
+            return data.get("best_params", {})
+        except Exception as exc:
+            LOGGER.warning("Failed to load tuned params from %s: %s", params_path, exc)
+    return {}
 
 
 FEATURE_COLUMNS = [
@@ -169,12 +182,15 @@ FEATURE_COLUMNS = [
     "opponent_ust_xi_returning_starters_prev_match",
     "opponent_ust_xi_returning_starters_last3",
 ]
+
+
 MODEL_CHOICES = (
     "gradient_boosting",
     "logistic",
     "lightgbm",
     "xgboost",
     "mlp",
+    "random_forest",
     "ensemble",
 )
 CALIBRATION_CHOICES = ("none", "sigmoid", "isotonic")
@@ -288,7 +304,7 @@ def _time_series_split(df: pd.DataFrame, splits: int = 5) -> Tuple[pd.DataFrame,
     return train_df, test_df
 
 
-def _build_estimator(model_type: str) -> Pipeline:
+def _build_estimator(model_type: str, league: str = "NFL") -> Pipeline:
     if model_type == "logistic":
         return Pipeline(
             steps=[
@@ -373,7 +389,6 @@ def _build_estimator(model_type: str) -> Pipeline:
                         reg_alpha=0.0,
                         random_state=42,
                         n_jobs=1,
-                        use_label_encoder=False,
                     ),
                 ),
             ]
@@ -394,6 +409,34 @@ def _build_estimator(model_type: str) -> Pipeline:
                         max_iter=500,
                         random_state=42,
                     ),
+                ),
+            ]
+        )
+
+    if model_type == "random_forest":
+        # Load tuned parameters if available
+        tuned_params = _load_tuned_params(league, "random_forest")
+        
+        # Default parameters
+        rf_params = {
+            "n_estimators": 200,
+            "max_depth": 12,
+            "min_samples_split": 5,
+            "min_samples_leaf": 2,
+            "max_features": "sqrt",
+            "random_state": 42,
+            "n_jobs": -1,
+        }
+        
+        # Override with tuned parameters
+        rf_params.update(tuned_params)
+        
+        return Pipeline(
+            steps=[
+                ("imputer", SimpleImputer(strategy="median")),
+                (
+                    "clf",
+                    RandomForestClassifier(**rf_params),
                 ),
             ]
         )
@@ -433,8 +476,9 @@ def _train_calibrated_model(
     calibration: str,
     X_train: pd.DataFrame,
     y_train: np.ndarray,
+    league: str = "NFL",
 ) -> CalibratedModel:
-    estimator = _build_estimator(model_type)
+    estimator = _build_estimator(model_type, league=league)
     if calibration == "none":
         estimator.fit(X_train, y_train)
         return CalibratedModel(estimator, calibrator=None)
@@ -539,11 +583,11 @@ def train_and_evaluate(
     ensemble_members: List[Dict[str, Any]] = []
 
     if model_type == "ensemble":
-        base_models = ["gradient_boosting", "lightgbm", "xgboost", "logistic", "mlp"]
+        base_models = ["gradient_boosting", "lightgbm", "xgboost", "logistic", "mlp", "random_forest"]
         ensemble_candidates: List[Dict[str, Any]] = []
         for base in base_models:
             try:
-                model = _train_calibrated_model(base, calibration, X_train, y_train)
+                model = _train_calibrated_model(base, calibration, X_train, y_train, league=league)
                 train_probs = model.predict_proba(X_train)[:, 1]
                 test_probs = model.predict_proba(X_test)[:, 1]
                 candidate_metrics = {
@@ -605,7 +649,7 @@ def train_and_evaluate(
             for candidate, weight in zip(keep_candidates, weights)
         ]
     else:
-        estimator = _train_calibrated_model(model_type, calibration, X_train, y_train)
+        estimator = _train_calibrated_model(model_type, calibration, X_train, y_train, league=league)
         train_proba = estimator.predict_proba(X_train)[:, 1]
         test_proba = estimator.predict_proba(X_test)[:, 1]
 
