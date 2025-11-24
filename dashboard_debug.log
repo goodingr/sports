@@ -1,0 +1,210 @@
+2025-11-21 22:04:41,339 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:04:41,377 - INFO - Dash is running on http://0.0.0.0:8050/
+
+2025-11-21 22:04:41,441 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8050
+ * Running on http://10.2.0.2:8050
+2025-11-21 22:04:41,441 - INFO - [33mPress CTRL+C to quit[0m
+2025-11-21 22:04:41,579 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:04:41,639 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:04:41,640 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:04:41,646 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:04:41,646 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:04:41,646 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:04:41,827 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:04:41,837 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:41] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:04:53,183 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:04:53,244 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:04:53,250 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:04:53,250 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:04:53,251 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:04:53,267 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:04:53,267 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:04:53,267 - INFO - 127.0.0.1 - - [21/Nov/2025 22:04:53] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:14,183 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "GET /predictions HTTP/1.1" 200 -
+2025-11-21 22:05:14,243 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:05:14,246 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:05:14,246 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:05:14,250 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:05:14,264 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:14,265 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:14,265 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:14] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:16,351 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "GET / HTTP/1.1" 200 -
+2025-11-21 22:05:16,418 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:05:16,425 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:05:16,426 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:05:16,445 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:16,447 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:16,447 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:16] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:31,064 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:05:31,117 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:05:31,124 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:05:31,125 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:05:31,125 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:05:31,155 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:31,156 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:05:31,156 - INFO - 127.0.0.1 - - [21/Nov/2025 22:05:31] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:06:15,925 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:15] "GET / HTTP/1.1" 200 -
+2025-11-21 22:06:15,981 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:15] "GET /_dash-component-suites/dash/deps/polyfill@7.v2_18_2m1762218180.12.1.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,208 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/deps/react@16.v2_18_2m1762218180.14.0.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,256 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/deps/react-dom@16.v2_18_2m1762218180.14.0.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,256 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/deps/prop-types@15.v2_18_2m1762218180.8.1.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,292 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash_bootstrap_components/_components/dash_bootstrap_components.v1_7_1m1762218181.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,292 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/dash-renderer/build/dash_renderer.v2_18_2m1762218180.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,346 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/dcc/dash_core_components.v2_14_3m1762218180.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,546 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/dcc/dash_core_components-shared.v2_14_3m1762218180.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,595 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/dash_table/bundle.v5_2_13m1762218180.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,608 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-component-suites/dash/html/dash_html_components.v2_0_20m1762218180.min.js HTTP/1.1" 200 -
+2025-11-21 22:06:16,946 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:06:16,946 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:06:16,947 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:16] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:06:17,196 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:17] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:06:17,277 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:17] "GET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1" 200 -
+2025-11-21 22:06:17,277 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:17] "GET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1" 200 -
+2025-11-21 22:06:17,277 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:17] "GET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1" 200 -
+2025-11-21 22:06:51,771 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:51] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:06:52,077 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:06:52,155 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:06:52,155 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:06:52,475 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:06:52,475 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:06:52,475 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:06:52,733 - INFO - 127.0.0.1 - - [21/Nov/2025 22:06:52] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:07:26,156 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:07:26,462 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:07:26,524 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:07:26,525 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:07:26,833 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:07:26,833 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:07:26,833 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:26] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:07:27,090 - INFO - 127.0.0.1 - - [21/Nov/2025 22:07:27] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:09:28,799 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:09:28,836 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:11:42,361 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:11:42,392 - INFO - Dash is running on http://0.0.0.0:8050/
+
+2025-11-21 22:11:42,425 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8050
+ * Running on http://10.2.0.2:8050
+2025-11-21 22:11:42,425 - INFO - [33mPress CTRL+C to quit[0m
+2025-11-21 22:11:42,846 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:42] "GET /compare HTTP/1.1" 200 -
+2025-11-21 22:11:42,986 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:42] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:11:43,094 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:11:43,293 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:11:43,294 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:11:43,602 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:11:43,603 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:11:43,603 - INFO - 127.0.0.1 - - [21/Nov/2025 22:11:43] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:12:15,953 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:15] "GET /overunder HTTP/1.1" 200 -
+2025-11-21 22:12:16,263 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:12:16,311 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:12:16,312 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:12:16,625 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:12:16,625 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:12:16,625 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:12:16,880 - INFO - 127.0.0.1 - - [21/Nov/2025 22:12:16] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:14:08,302 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:14:08,331 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:14:41,518 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:15:07,179 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:16:22,976 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:16:53,764 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:16:53,793 - INFO - Dash is running on http://0.0.0.0:8050/
+
+2025-11-21 22:16:54,937 - INFO - Initial DF shape: (721, 33)
+2025-11-21 22:17:34,093 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET / HTTP/1.1" 200 -
+2025-11-21 22:17:34,094 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET / HTTP/1.1" 200 -
+2025-11-21 22:17:34,352 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:17:34,580 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:17:34,581 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:17:34,655 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:17:34,887 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:17:34,890 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:17:34,890 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:17:34,890 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:34] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:17:35,189 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:35] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:17:35,197 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:35] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:17:35,197 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:35] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:17:35,197 - INFO - 127.0.0.1 - - [21/Nov/2025 22:17:35] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:14,616 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:14] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:14,684 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:14] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:14,866 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:14] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:14,995 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:14] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:14,997 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:14] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:15,306 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:15] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:15,307 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:15] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:15,307 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:15] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:26,664 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:26] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:26,971 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:26] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:27,001 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:27,159 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:27,160 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:27,283 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:27,468 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:27,471 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:27,472 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:27,472 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:27,593 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:27,781 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:27,781 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:27,781 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:27,904 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:27] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:28,090 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:28,091 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:28,091 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:28,209 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:28,407 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:28,407 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:28] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:33,946 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:33] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:33,948 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:33] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:34,197 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET / HTTP/1.1" 200 -
+2025-11-21 22:19:34,432 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:34,435 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:34,436 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:34,746 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:34,750 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:34,750 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:34,762 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:19:34,766 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:19:34,767 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:34] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,063 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,063 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,063 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:19:35,082 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,367 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,367 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,385 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,681 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:19:35,681 - INFO - 127.0.0.1 - - [21/Nov/2025 22:19:35] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:20:09,452 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:09] "GET / HTTP/1.1" 200 -
+2025-11-21 22:20:09,510 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:09] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:20:09,704 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:09] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:20:09,817 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:09] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:20:09,824 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:09] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:20:10,131 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:10] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:20:10,131 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:10] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:20:10,131 - INFO - 127.0.0.1 - - [21/Nov/2025 22:20:10] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:38,342 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:38] "GET / HTTP/1.1" 200 -
+2025-11-21 22:21:38,505 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:38] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:21:38,593 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:38] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:21:38,810 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:38] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:21:39,125 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:39,125 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:39,125 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "GET / HTTP/1.1" 200 -
+2025-11-21 22:21:39,331 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:21:39,373 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:21:39,630 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:21:39,630 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:39,631 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:39,696 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:39,697 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:39] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:52,058 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "GET / HTTP/1.1" 200 -
+2025-11-21 22:21:52,363 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "GET /_dash-layout HTTP/1.1" 200 -
+2025-11-21 22:21:52,419 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "GET /_dash-dependencies HTTP/1.1" 200 -
+2025-11-21 22:21:52,420 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -
+2025-11-21 22:21:52,728 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "[36mGET /_dash-component-suites/dash/dcc/async-dropdown.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:52,728 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "[36mGET /_dash-component-suites/dash/dcc/async-datepicker.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:52,728 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "[36mGET /_dash-component-suites/dash/dcc/async-slider.js HTTP/1.1[0m" 304 -
+2025-11-21 22:21:52,979 - INFO - 127.0.0.1 - - [21/Nov/2025 22:21:52] "GET /_favicon.ico?v=2.18.2 HTTP/1.1" 200 -

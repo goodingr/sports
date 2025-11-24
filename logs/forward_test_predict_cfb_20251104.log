@@ -1,0 +1,28 @@
+[2025-11-04 03:26:45] Starting CFB forward test predictions...
+[2025-11-04 03:27:04] Command output:
+[2025-11-04 03:27:04] INFO:__main__:Loading model from models\cfb_gradient_boosting_calibrated_moneyline.pkl
+[2025-11-04 03:27:04] INFO:__main__:Fetching live CFB games with odds...
+[2025-11-04 03:27:04] INFO:__main__:Found 51 games
+[2025-11-04 03:27:04] INFO:__main__:51 games are upcoming or recent
+[2025-11-04 03:27:04] INFO:__main__:Saved 51 predictions to data\forward_test\predictions_20251104_082704.parquet
+[2025-11-04 03:27:04] INFO:__main__:Updated master predictions file with 51 total predictions
+[2025-11-04 03:27:04] INFO:__main__:
+[2025-11-04 03:27:04] === RECOMMENDATIONS (Edge >= 0.06) ===
+[2025-11-04 03:27:04] INFO:__main__:  KENT vs BALL: Away edge=8.1%, Pred=55.3%, ML=112
+[2025-11-04 03:27:04] INFO:__main__:  GASO vs APP: Away edge=6.8%, Pred=42.5%, ML=180
+[2025-11-04 03:27:04] INFO:__main__:  COL vs WVU: Away edge=6.8%, Pred=42.5%, ML=180
+[2025-11-04 03:27:04] INFO:__main__:  MRSH vs JMU: Home edge=11.0%, Pred=31.7%, ML=385
+[2025-11-04 03:27:04] INFO:__main__:  BGSU vs EMU: Away edge=19.9%, Pred=68.7%, ML=105
+[2025-11-04 03:27:04] INFO:__main__:  PUR vs OSU: Home edge=13.1%, Pred=16.3%, ML=3000
+[2025-11-04 03:27:04] INFO:__main__:  CHAR vs ECU: Away edge=11.5%, Pred=15.8%, ML=2200
+[2025-11-04 03:27:04] INFO:__main__:  DHE vs LT: Home edge=7.5%, Pred=43.2%, ML=180
+[2025-11-04 03:27:04] INFO:__main__:  IOWA vs ORE: Home edge=7.5%, Pred=43.2%, ML=180
+[2025-11-04 03:27:04] INFO:__main__:  SYR vs MIA: Away edge=12.6%, Pred=15.8%, ML=3000
+[2025-11-04 03:27:04] INFO:__main__:  STAN vs UNC: Away edge=6.0%, Pred=35.9%, ML=235
+[2025-11-04 03:27:04] INFO:__main__:  WISC vs UW: Home edge=20.2%, Pred=42.0%, ML=360
+[2025-11-04 03:27:04] INFO:__main__:  CAL vs LOU: Away edge=6.3%, Pred=16.7%, ML=860
+[2025-11-04 03:27:04] INFO:__main__:  FSU vs CLEM: Away edge=7.7%, Pred=55.3%, ML=110
+[2025-11-04 03:27:04] INFO:__main__:  NAVY vs ND: Away edge=9.3%, Pred=16.0%, ML=1400
+[2025-11-04 03:27:04] INFO:__main__:  NEB vs UCLA: Away edge=7.7%, Pred=55.3%, ML=110
+[2025-11-04 03:27:04] INFO:__main__:  SBE vs ORST: Away edge=6.2%, Pred=16.7%, ML=850
+[2025-11-04 03:27:04] CFB predictions completed successfully

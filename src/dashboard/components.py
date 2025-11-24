@@ -882,6 +882,11 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
         style_header={"fontWeight": "bold"},
         style_data_conditional=[
             {
+                "if": {"filter_query": "{profit} = $0.00"},
+                "backgroundColor": "#e0e0e0",
+                "color": "#666666",
+            },
+            {
                 "if": {"filter_query": "{won} = Win"},
                 "backgroundColor": "#d4edda",
                 "color": "black",

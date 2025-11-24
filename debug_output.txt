@@ -1,0 +1,11 @@
+totals_odds_df columns: ['forward_game_id', 'db_game_id', 'book', 'outcome', 'moneyline', 'line', 'fetched_at_utc']
+totals_odds_df shape: (724, 7)
+
+best_odds columns: ['forward_game_id', 'db_game_id', 'book', 'outcome', 'moneyline', 'line', 'fetched_at_utc']
+best_odds shape: (204, 7)
+
+best_odds sample:
+                      forward_game_id                            db_game_id       book outcome  moneyline   line                    fetched_at_utc
+472  0272777b517a43da3f38356679b0b4ec  NFL_0272777b517a43da3f38356679b0b4ec     Bovada    over     -102.0   2.75  2025-11-23T01:07:28.928341+00:00
+471  0272777b517a43da3f38356679b0b4ec  NFL_0272777b517a43da3f38356679b0b4ec  BetRivers   under      106.0   2.50  2025-11-23T01:07:28.928341+00:00
+254  031eaf298fe62f9cc1ee593ebf867ad2                         CFB_401752792    FanDuel    over     -110.0  51.50  2025-11-23T01:07:17.128684+00:00

@@ -1,0 +1,67 @@
+[2025-11-05 23:00:01] Starting forward test predictions...
+[2025-11-05 23:00:13] Running predictions for league: NBA
+[2025-11-05 23:00:18] Command output for NBA:
+[2025-11-05 23:00:18] INFO:__main__:Loading model from models\nba_gradient_boosting_calibrated_moneyline.pkl
+[2025-11-05 23:00:18] INFO:__main__:Fetching live NBA games with odds...
+[2025-11-05 23:00:18] INFO:__main__:Found 9 games
+[2025-11-05 23:00:18] INFO:__main__:7 games are upcoming or recent
+[2025-11-05 23:00:18] INFO:__main__:Saved 7 predictions to data\forward_test\predictions_20251106_040018.parquet
+[2025-11-05 23:00:18] C:\Users\Bobby\Desktop\sports\src\models\forward_test.py:403: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+[2025-11-05 23:00:18]   combined = pd.concat([existing, predictions], ignore_index=True)
+[2025-11-05 23:00:18] INFO:__main__:Updated master predictions file with 111 total predictions
+[2025-11-05 23:00:18] INFO:__main__:
+[2025-11-05 23:00:18] === RECOMMENDATIONS (Edge >= 0.06) ===
+[2025-11-05 23:00:18] INFO:__main__:  SAC vs GSW: Home edge=40.7%, Pred=70.2%, ML=240
+[2025-11-05 23:00:18] INFO:__main__:  POR vs OKC: Home edge=68.8%, Pred=85.5%, ML=500
+[2025-11-05 23:00:18] INFO:__main__:  LAL vs SAS: Home edge=15.0%, Pred=60.4%, ML=120
+[2025-11-05 23:00:18] INFO:__main__:  LAC vs PHX: Away edge=15.3%, Pred=60.0%, ML=124
+[2025-11-05 23:00:18] INFO:__main__:  CLE vs NYK: Away edge=24.9%, Pred=71.0%, ML=117
+[2025-11-05 23:00:18] INFO:__main__:  DAL vs GSW: Away edge=17.9%, Pred=57.9%, ML=150
+[2025-11-05 23:00:18] INFO:__main__:  MIN vs DEN: Away edge=28.6%, Pred=65.0%, ML=175
+[2025-11-05 23:00:18] Predictions completed successfully for NBA
+[2025-11-05 23:00:18] Running predictions for league: NFL
+[2025-11-05 23:00:22] Command output for NFL:
+[2025-11-05 23:00:22] INFO:__main__:Loading model from models\nfl_gradient_boosting_calibrated_moneyline.pkl
+[2025-11-05 23:00:22] INFO:__main__:Fetching live NFL games with odds...
+[2025-11-05 23:00:22] INFO:__main__:Found 29 games
+[2025-11-05 23:00:22] INFO:__main__:29 games are upcoming or recent
+[2025-11-05 23:00:22] INFO:__main__:Saved 29 predictions to data\forward_test\predictions_20251106_040022.parquet
+[2025-11-05 23:00:22] C:\Users\Bobby\Desktop\sports\src\models\forward_test.py:403: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+[2025-11-05 23:00:22]   combined = pd.concat([existing, predictions], ignore_index=True)
+[2025-11-05 23:00:22] INFO:__main__:Updated master predictions file with 111 total predictions
+[2025-11-05 23:00:22] INFO:__main__:
+[2025-11-05 23:00:22] === RECOMMENDATIONS (Edge >= 0.06) ===
+[2025-11-05 23:00:22] INFO:__main__:  NYG vs CHI: Away edge=9.4%, Pred=45.1%, ML=180
+[2025-11-05 23:00:22] INFO:__main__:  CAR vs ATL: Away edge=7.9%, Pred=47.9%, ML=150
+[2025-11-05 23:00:22] INFO:__main__:  TB vs BUF: Away edge=7.5%, Pred=39.7%, ML=210
+[2025-11-05 23:00:22] INFO:__main__:  CIN vs PIT: Away edge=9.0%, Pred=39.7%, ML=225
+[2025-11-05 23:00:22] INFO:__main__:  LV vs DAL: Home edge=6.1%, Pred=45.5%, ML=154
+[2025-11-05 23:00:22] Predictions completed successfully for NFL
+[2025-11-05 23:00:22] Running predictions for league: CFB
+[2025-11-05 23:00:27] Command output for CFB:
+[2025-11-05 23:00:27] INFO:__main__:Loading model from models\cfb_gradient_boosting_calibrated_moneyline.pkl
+[2025-11-05 23:00:27] INFO:__main__:Fetching live CFB games with odds...
+[2025-11-05 23:00:27] INFO:__main__:Found 60 games
+[2025-11-05 23:00:27] INFO:__main__:60 games are upcoming or recent
+[2025-11-05 23:00:27] INFO:__main__:Saved 60 predictions to data\forward_test\predictions_20251106_040027.parquet
+[2025-11-05 23:00:27] C:\Users\Bobby\Desktop\sports\src\models\forward_test.py:403: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+[2025-11-05 23:00:27]   combined = pd.concat([existing, predictions], ignore_index=True)
+[2025-11-05 23:00:27] INFO:__main__:Updated master predictions file with 123 total predictions
+[2025-11-05 23:00:27] INFO:__main__:
+[2025-11-05 23:00:27] === RECOMMENDATIONS (Edge >= 0.06) ===
+[2025-11-05 23:00:27] INFO:__main__:  GASO vs APP: Away edge=6.8%, Pred=42.5%, ML=180
+[2025-11-05 23:00:27] INFO:__main__:  MRSH vs JMU: Home edge=19.2%, Pred=39.2%, ML=400
+[2025-11-05 23:00:27] INFO:__main__:  BGSU vs EMU: Away edge=7.7%, Pred=55.3%, ML=110
+[2025-11-05 23:00:27] INFO:__main__:  PUR vs OSU: Home edge=13.1%, Pred=16.3%, ML=3000
+[2025-11-05 23:00:27] INFO:__main__:  CHAR vs ECU: Away edge=11.5%, Pred=15.8%, ML=2200
+[2025-11-05 23:00:27] INFO:__main__:  ARIZ vs KU: Home edge=6.6%, Pred=72.8%, ML=-196
+[2025-11-05 23:00:27] INFO:__main__:  SYR vs MIA: Away edge=12.4%, Pred=15.8%, ML=2800
+[2025-11-05 23:00:27] INFO:__main__:  GAST vs CCU: Away edge=6.4%, Pred=35.9%, ML=240
+[2025-11-05 23:00:27] INFO:__main__:  STAN vs UNC: Away edge=6.4%, Pred=35.9%, ML=240
+[2025-11-05 23:00:27] INFO:__main__:  WISC vs UW: Home edge=18.6%, Pred=40.8%, ML=350
+[2025-11-05 23:00:27] INFO:__main__:  FSU vs CLEM: Away edge=7.7%, Pred=55.3%, ML=110
+[2025-11-05 23:00:27] INFO:__main__:  NAVY vs ND: Away edge=8.7%, Pred=15.9%, ML=1300
+[2025-11-05 23:00:27] INFO:__main__:  NEB vs UCLA: Away edge=16.6%, Pred=66.6%, ML=100
+[2025-11-05 23:00:27] INFO:__main__:  UVA vs DUKE: Away edge=6.8%, Pred=42.5%, ML=180
+[2025-11-05 23:00:27] Predictions completed successfully for CFB
+[2025-11-05 23:00:27] All league predictions completed successfully

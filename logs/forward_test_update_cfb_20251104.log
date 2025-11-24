@@ -1,0 +1,11 @@
+[2025-11-04 07:10:00] Starting CFB forward test update...
+[2025-11-04 07:10:00] Loading recent CFB game results...
+[2025-11-04 07:10:02] usage: ingest_results_cfb.py [-h] [--season-type SEASON_TYPE]
+[2025-11-04 07:10:02]                              [--timeout TIMEOUT]
+[2025-11-04 07:10:02]                              [--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}]
+[2025-11-04 07:10:02]                              seasons [seasons ...]
+[2025-11-04 07:10:02] ingest_results_cfb.py: error: unrecognized arguments: --seasons
+[2025-11-04 07:10:02] Updating CFB predictions with results...
+[2025-11-04 07:10:04] Command output:
+[2025-11-04 07:10:04] INFO:__main__:All predictions already have results
+[2025-11-04 07:10:04] CFB update completed successfully

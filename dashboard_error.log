@@ -1,0 +1,22 @@
+﻿python : Traceback (most recent call last):
+At line:1 char:1
++ python run_dashboard.py 2>&1 | Out-File -FilePath 
+dashboard_error.log ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent c 
+   all last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\Bobby\Desktop\sports\run_dashboard.py", line 13, in 
+<module>
+    run(debug=True)
+  File "C:\Users\Bobby\Desktop\sports\src\dashboard\app.py", line 
+1447, in run
+    app.run_server(debug=debug, port=port, host=host)
+    ^^^^^^^^^^^^^^
+  File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation
+.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-pa
+ckages\dash\_obsolete.py", line 22, in __getattr__
+    raise err.exc(err.message)
+dash.exceptions.ObsoleteAttributeException: app.run_server has been 
+replaced by app.run

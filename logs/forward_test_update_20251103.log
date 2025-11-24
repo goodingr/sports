@@ -1,0 +1,20 @@
+[2025-11-03 19:35:51] Starting forward test update...
+[2025-11-03 19:35:51] Loading recent NBA game results...
+[2025-11-03 19:35:54] INFO:__main__:Downloading NBA Regular Season data for 2024-25
+[2025-11-03 19:35:54] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2024_2024.parquet
+[2025-11-03 19:35:54] INFO:src.db.loaders:Stored 1225 schedule rows into database
+[2025-11-03 19:35:54] Updating predictions with results...
+[2025-11-03 19:35:56] Command output:
+[2025-11-03 19:35:56] INFO:__main__:Updating 18 predictions with results
+[2025-11-03 19:35:56] INFO:__main__:Updated predictions saved
+[2025-11-03 19:35:56] Update completed successfully
+[2025-11-03 19:36:47] Starting forward test update...
+[2025-11-03 19:36:47] Loading recent NBA game results...
+[2025-11-03 19:36:50] INFO:__main__:Downloading NBA Regular Season data for 2024-25
+[2025-11-03 19:36:50] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2024_2024.parquet
+[2025-11-03 19:36:50] INFO:src.db.loaders:Stored 1225 schedule rows into database
+[2025-11-03 19:36:50] Updating predictions with results...
+[2025-11-03 19:36:52] Command output:
+[2025-11-03 19:36:52] INFO:__main__:Updating 18 predictions with results
+[2025-11-03 19:36:52] INFO:__main__:Updated predictions saved
+[2025-11-03 19:36:52] Update completed successfully

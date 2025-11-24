@@ -1,0 +1,174 @@
+[2025-11-07 07:00:01] Starting forward test update...
+[2025-11-07 07:00:15] Loading recent NBA game results...
+[2025-11-07 07:00:18] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-07 07:00:18] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-07 07:00:18] INFO:src.db.loaders:Stored 120 schedule rows into database
+[2025-11-07 07:00:18] Loading recent NFL game results...
+[2025-11-07 07:00:21] INFO:__main__:Downloading schedules (with betting lines) for seasons: [2025]
+[2025-11-07 07:00:21] INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2025_2025.parquet
+[2025-11-07 07:00:21] INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2025_2025.parquet
+[2025-11-07 07:00:21] INFO:src.db.loaders:Stored 272 schedule rows into database
+[2025-11-07 07:00:21] Loading recent CFB game results...
+[2025-11-07 07:00:25] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-07 07:00:25] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-07 07:00:25] INFO:__main__:Stored 648 CFB games
+[2025-11-07 07:00:25] Loading recent MLB game results...
+[2025-11-07 07:00:28] INFO:__main__:Downloading MLB schedules for seasons: [2025]
+[2025-11-07 07:00:28] INFO:__main__:Fetching 2025 season schedule...
+[2025-11-07 07:00:28] WARNING:__main__:Failed to fetch 2025 season: 'int' object has no attribute 'upper'
+[2025-11-07 07:00:28] WARNING:__main__:No MLB schedules found for seasons [2025]
+[2025-11-07 07:00:28] Loading recent EPL game results from ESPN API...
+[2025-11-07 07:00:34] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 07:00:34] INFO:__main__:Fetched 10 matches from ESPN for EPL
+[2025-11-07 07:00:34] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 07:00:34] INFO:__main__:Processing 10 EPL games
+[2025-11-07 07:00:34] INFO:__main__:Saved EPL schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_epl_espn_api_20251107.parquet
+[2025-11-07 07:00:34] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 07:00:34] Loading recent La Liga game results from ESPN API...
+[2025-11-07 07:00:40] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 07:00:40] INFO:__main__:Fetched 10 matches from ESPN for LALIGA
+[2025-11-07 07:00:40] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 07:00:40] INFO:__main__:Processing 10 LALIGA games
+[2025-11-07 07:00:40] INFO:__main__:Saved LALIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_laliga_espn_api_20251107.parquet
+[2025-11-07 07:00:40] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 07:00:40] Loading recent Bundesliga game results from ESPN API...
+[2025-11-07 07:00:45] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 07:00:45] INFO:__main__:Fetched 9 matches from ESPN for BUNDESLIGA
+[2025-11-07 07:00:45] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 07:00:45] INFO:__main__:Processing 9 BUNDESLIGA games
+[2025-11-07 07:00:45] INFO:__main__:Saved BUNDESLIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_bundesliga_espn_api_20251107.parquet
+[2025-11-07 07:00:45] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 07:00:45] Loading recent Serie A game results from ESPN API...
+[2025-11-07 07:00:50] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 07:00:50] INFO:__main__:Fetched 10 matches from ESPN for SERIEA
+[2025-11-07 07:00:50] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 07:00:50] INFO:__main__:Processing 10 SERIEA games
+[2025-11-07 07:00:50] INFO:__main__:Saved SERIEA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_seriea_espn_api_20251107.parquet
+[2025-11-07 07:00:50] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 07:00:50] Loading recent Ligue 1 game results from ESPN API...
+[2025-11-07 07:00:56] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 07:00:56] INFO:__main__:Fetched 9 matches from ESPN for LIGUE1
+[2025-11-07 07:00:56] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 07:00:56] INFO:__main__:Processing 9 LIGUE1 games
+[2025-11-07 07:00:56] INFO:__main__:Saved LIGUE1 schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_ligue1_espn_api_20251107.parquet
+[2025-11-07 07:00:56] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 07:00:56] Updating predictions with results across all leagues...
+[2025-11-07 07:00:58] INFO:__main__:Checking 6 predictions for results
+[2025-11-07 07:00:58] INFO:__main__:Updated predictions saved
+[2025-11-07 07:00:58] Forward test update completed successfully
+[2025-11-07 13:21:36] Starting forward test update...
+[2025-11-07 13:21:39] Loading recent NBA game results...
+[2025-11-07 13:21:41] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-07 13:21:41] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-07 13:21:41] INFO:src.db.loaders:Stored 120 schedule rows into database
+[2025-11-07 13:21:41] Loading recent NFL game results...
+[2025-11-07 13:21:43] INFO:__main__:Downloading schedules (with betting lines) for seasons: [2025]
+[2025-11-07 13:21:43] INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2025_2025.parquet
+[2025-11-07 13:21:43] INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2025_2025.parquet
+[2025-11-07 13:21:43] INFO:src.db.loaders:Stored 272 schedule rows into database
+[2025-11-07 13:21:43] Loading recent CFB game results...
+[2025-11-07 13:21:46] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-07 13:21:46] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-07 13:21:46] INFO:__main__:Stored 648 CFB games
+[2025-11-07 13:21:46] Loading recent MLB game results...
+[2025-11-07 13:21:48] INFO:__main__:Downloading MLB schedules for seasons: [2025]
+[2025-11-07 13:21:48] INFO:__main__:Fetching 2025 season schedule...
+[2025-11-07 13:21:48] WARNING:__main__:Failed to fetch 2025 season: 'int' object has no attribute 'upper'
+[2025-11-07 13:21:48] WARNING:__main__:No MLB schedules found for seasons [2025]
+[2025-11-07 13:21:48] Loading recent EPL game results from ESPN API...
+[2025-11-07 13:21:54] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 13:21:54] INFO:__main__:Fetched 10 matches from ESPN for EPL
+[2025-11-07 13:21:54] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 13:21:54] INFO:__main__:Processing 10 EPL games
+[2025-11-07 13:21:54] INFO:__main__:Saved EPL schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_epl_espn_api_20251107.parquet
+[2025-11-07 13:21:54] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 13:21:54] Loading recent La Liga game results from ESPN API...
+[2025-11-07 13:21:59] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 13:21:59] INFO:__main__:Fetched 10 matches from ESPN for LALIGA
+[2025-11-07 13:21:59] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 13:21:59] INFO:__main__:Processing 10 LALIGA games
+[2025-11-07 13:21:59] INFO:__main__:Saved LALIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_laliga_espn_api_20251107.parquet
+[2025-11-07 13:21:59] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 13:21:59] Loading recent Bundesliga game results from ESPN API...
+[2025-11-07 13:22:05] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 13:22:05] INFO:__main__:Fetched 9 matches from ESPN for BUNDESLIGA
+[2025-11-07 13:22:05] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 13:22:05] INFO:__main__:Processing 9 BUNDESLIGA games
+[2025-11-07 13:22:05] INFO:__main__:Saved BUNDESLIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_bundesliga_espn_api_20251107.parquet
+[2025-11-07 13:22:05] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 13:22:05] Loading recent Serie A game results from ESPN API...
+[2025-11-07 13:22:10] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 13:22:10] INFO:__main__:Fetched 10 matches from ESPN for SERIEA
+[2025-11-07 13:22:10] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 13:22:10] INFO:__main__:Processing 10 SERIEA games
+[2025-11-07 13:22:10] INFO:__main__:Saved SERIEA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_seriea_espn_api_20251107.parquet
+[2025-11-07 13:22:10] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 13:22:10] Loading recent Ligue 1 game results from ESPN API...
+[2025-11-07 13:22:15] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 13:22:15] INFO:__main__:Fetched 9 matches from ESPN for LIGUE1
+[2025-11-07 13:22:15] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 13:22:15] INFO:__main__:Processing 9 LIGUE1 games
+[2025-11-07 13:22:15] INFO:__main__:Saved LIGUE1 schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_ligue1_espn_api_20251107.parquet
+[2025-11-07 13:22:15] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 13:22:15] Updating predictions with results across all leagues...
+[2025-11-07 13:22:17] INFO:__main__:Checking 2 predictions for results
+[2025-11-07 13:22:17] INFO:__main__:No completed games found to update
+[2025-11-07 13:22:17] Forward test update completed successfully
+[2025-11-07 22:47:44] Starting forward test update...
+[2025-11-07 22:48:00] Loading recent NBA game results...
+[2025-11-07 22:48:04] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-07 22:48:04] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-07 22:48:04] INFO:src.db.loaders:Stored 129 schedule rows into database
+[2025-11-07 22:48:04] Loading recent NFL game results...
+[2025-11-07 22:48:06] INFO:__main__:Downloading schedules (with betting lines) for seasons: [2025]
+[2025-11-07 22:48:06] INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2025_2025.parquet
+[2025-11-07 22:48:06] INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2025_2025.parquet
+[2025-11-07 22:48:06] INFO:src.db.loaders:Stored 272 schedule rows into database
+[2025-11-07 22:48:06] Loading recent CFB game results...
+[2025-11-07 22:48:09] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-07 22:48:09] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-07 22:48:09] INFO:__main__:Stored 648 CFB games
+[2025-11-07 22:48:09] Loading recent MLB game results...
+[2025-11-07 22:48:13] INFO:__main__:Downloading MLB schedules for seasons: [2025]
+[2025-11-07 22:48:13] INFO:__main__:Fetching 2025 season schedule...
+[2025-11-07 22:48:13] WARNING:__main__:Failed to fetch 2025 season: 'int' object has no attribute 'upper'
+[2025-11-07 22:48:13] WARNING:__main__:No MLB schedules found for seasons [2025]
+[2025-11-07 22:48:13] Loading recent EPL game results from ESPN API...
+[2025-11-07 22:48:19] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 22:48:19] INFO:__main__:Fetched 10 matches from ESPN for EPL
+[2025-11-07 22:48:19] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 22:48:19] INFO:__main__:Processing 10 EPL games
+[2025-11-07 22:48:19] INFO:__main__:Saved EPL schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_epl_espn_api_20251107.parquet
+[2025-11-07 22:48:19] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 22:48:19] Loading recent La Liga game results from ESPN API...
+[2025-11-07 22:48:25] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 22:48:25] INFO:__main__:Fetched 10 matches from ESPN for LALIGA
+[2025-11-07 22:48:25] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 22:48:25] INFO:__main__:Processing 10 LALIGA games
+[2025-11-07 22:48:25] INFO:__main__:Saved LALIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_laliga_espn_api_20251107.parquet
+[2025-11-07 22:48:25] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 22:48:25] Loading recent Bundesliga game results from ESPN API...
+[2025-11-07 22:48:30] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 22:48:30] INFO:__main__:Fetched 9 matches from ESPN for BUNDESLIGA
+[2025-11-07 22:48:30] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 22:48:30] INFO:__main__:Processing 9 BUNDESLIGA games
+[2025-11-07 22:48:30] INFO:__main__:Saved BUNDESLIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_bundesliga_espn_api_20251107.parquet
+[2025-11-07 22:48:30] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 22:48:30] Loading recent Serie A game results from ESPN API...
+[2025-11-07 22:48:36] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 22:48:36] INFO:__main__:Fetched 10 matches from ESPN for SERIEA
+[2025-11-07 22:48:36] INFO:__main__:Processed 10 games from ESPN API
+[2025-11-07 22:48:36] INFO:__main__:Processing 10 SERIEA games
+[2025-11-07 22:48:36] INFO:__main__:Saved SERIEA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_seriea_espn_api_20251107.parquet
+[2025-11-07 22:48:36] INFO:src.db.loaders:Stored 10 schedule rows into database
+[2025-11-07 22:48:36] Loading recent Ligue 1 game results from ESPN API...
+[2025-11-07 22:48:42] INFO:__main__:Fetching upcoming soccer matches from ESPN API...
+[2025-11-07 22:48:42] INFO:__main__:Fetched 9 matches from ESPN for LIGUE1
+[2025-11-07 22:48:42] INFO:__main__:Processed 9 games from ESPN API
+[2025-11-07 22:48:42] INFO:__main__:Processing 9 LIGUE1 games
+[2025-11-07 22:48:42] INFO:__main__:Saved LIGUE1 schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_ligue1_espn_api_20251107.parquet
+[2025-11-07 22:48:42] INFO:src.db.loaders:Stored 9 schedule rows into database
+[2025-11-07 22:48:42] Updating predictions with results across all leagues...
+[2025-11-07 22:48:44] INFO:__main__:Checking 19 predictions for results
+[2025-11-07 22:48:44] INFO:__main__:Updated predictions saved
+[2025-11-07 22:48:44] Forward test update completed successfully

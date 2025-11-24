@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.data.team_mappings import normalize_team_code
+from src.data.team_mappings import normalize_team_code, get_full_team_name
 from src.db.core import connect
 
 FORWARD_TEST_DIR = Path("data/forward_test")
@@ -570,12 +570,16 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
             profit = _bet_profit(float(price), stake, won)
             description = f"{side.title()} {line:.1f}" if pd.notna(line) else side.title()
 
+            # Get full team names
+            home_full = get_full_team_name(row.get("league"), row.get("home_team"))
+            away_full = get_full_team_name(row.get("league"), row.get("away_team"))
+
             records.append(
                 {
                     "game_id": row.get("game_id"),
                     "league": row.get("league"),
-                    "home_team": row.get("home_team"),
-                    "away_team": row.get("away_team"),
+                    "home_team": home_full or row.get("home_team"),
+                    "away_team": away_full or row.get("away_team"),
                     "side": side,
                     "description": description,
                     "total_line": float(line),
@@ -591,6 +595,8 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
                     "settled_at": row.get("result_updated_at") if "result_updated_at" in row.index else row.get("commence_time"),
                     "total_points": actual_total,
                     "predicted_total_points": row.get("predicted_total_points"),
+                    "home_score": row.get("home_score"),
+                    "away_score": row.get("away_score"),
                 }
             )
 
@@ -1311,8 +1317,8 @@ def _match_games_to_db(recommended: pd.DataFrame) -> pd.DataFrame:
             if not sport_id:
                 continue
 
-            home_name = row.get("home_team_name") or row.get("team")
-            away_name = row.get("away_team_name") or row.get("opponent")
+            home_name = row.get("home_team_name") or row.get("home_team") or row.get("team")
+            away_name = row.get("away_team_name") or row.get("away_team") or row.get("opponent")
             if not home_name or not away_name:
                 continue
 

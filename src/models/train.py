@@ -7,6 +7,7 @@ import json
 import logging
 import uuid
 import hashlib
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,8 @@ import numpy as np  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
 try:  # pragma: no cover - optional dependency for certain model types
     from lightgbm import LGBMClassifier  # type: ignore[import]
+    # Suppress LightGBM warnings about splits
+    warnings.filterwarnings('ignore', category=UserWarning, message='.*No further splits.*')
 except ImportError:  # noqa: F401
     LGBMClassifier = None  # type: ignore[assignment]
 from sklearn.base import clone  # type: ignore[import]

@@ -1,0 +1,400 @@
+[2025-11-05 00:13:30] Starting forward test update...
+[2025-11-05 00:13:32] Loading recent NBA game results...
+[2025-11-05 00:13:35] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 00:13:35] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 00:13:35] INFO:src.db.loaders:Stored 107 schedule rows into database
+[2025-11-05 00:13:35] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 00:13:35] Loading recent CFB game results...
+[2025-11-05 00:13:39] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 00:13:39] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 00:13:39] INFO:__main__:Stored 648 CFB games
+[2025-11-05 00:13:39] Updating predictions with results across all leagues...
+[2025-11-05 00:13:41] INFO:__main__:Checking 7 predictions for results
+[2025-11-05 00:13:41] INFO:__main__:Updated predictions saved
+[2025-11-05 00:13:41] Forward test update completed successfully
+[2025-11-05 01:46:42] Starting forward test update...
+[2025-11-05 01:47:02] Loading recent NBA game results...
+[2025-11-05 01:47:05] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 01:47:05] Traceback (most recent call last):
+[2025-11-05 01:47:05]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 01:47:05]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 169, in <module>
+[2025-11-05 01:47:05]     main()
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 165, in main
+[2025-11-05 01:47:05]     run(seasons, season_type=args.season_type)
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 118, in run
+[2025-11-05 01:47:05]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 01:47:05]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 31, in _fetch_game_logs
+[2025-11-05 01:47:05]     finder = leaguegamefinder.LeagueGameFinder(
+[2025-11-05 01:47:05]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 249, in __init__
+[2025-11-05 01:47:05]     self.get_request()
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 01:47:05]     self.load_response()
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 01:47:05]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 01:47:05]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 01:47:05]     raw_dict = self.get_dict()
+[2025-11-05 01:47:05]                ^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 01:47:05]     return json.loads(self._response)
+[2025-11-05 01:47:05]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 01:47:05]     return _default_decoder.decode(s)
+[2025-11-05 01:47:05]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 01:47:05]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 01:47:05]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 01:47:05]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 01:47:05]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 01:47:05] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 01:47:05] WARNING: NBA results ingestion exited with 1
+[2025-11-05 01:47:05] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 01:47:05] Loading recent CFB game results...
+[2025-11-05 01:47:08] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 01:47:08] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 01:47:08] INFO:__main__:Stored 648 CFB games
+[2025-11-05 01:47:08] Updating predictions with results across all leagues...
+[2025-11-05 01:47:10] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 01:47:10] INFO:__main__:No completed games found to update
+[2025-11-05 01:47:10] Forward test update completed successfully
+[2025-11-05 01:47:10] Completed with warnings/errors (exit code 1)
+[2025-11-05 02:10:23] Starting forward test update...
+[2025-11-05 02:10:25] Loading recent NBA game results...
+[2025-11-05 02:10:26] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 02:10:26] Traceback (most recent call last):
+[2025-11-05 02:10:26]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 02:10:26]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 169, in <module>
+[2025-11-05 02:10:26]     main()
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 165, in main
+[2025-11-05 02:10:26]     run(seasons, season_type=args.season_type)
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 118, in run
+[2025-11-05 02:10:26]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 02:10:26]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 31, in _fetch_game_logs
+[2025-11-05 02:10:26]     finder = leaguegamefinder.LeagueGameFinder(
+[2025-11-05 02:10:26]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 249, in __init__
+[2025-11-05 02:10:26]     self.get_request()
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 02:10:26]     self.load_response()
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 02:10:26]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 02:10:26]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 02:10:26]     raw_dict = self.get_dict()
+[2025-11-05 02:10:26]                ^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 02:10:26]     return json.loads(self._response)
+[2025-11-05 02:10:26]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 02:10:26]     return _default_decoder.decode(s)
+[2025-11-05 02:10:26]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 02:10:26]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 02:10:26]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 02:10:26]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 02:10:26]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 02:10:26] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 02:10:26] WARNING: NBA results ingestion exited with 1
+[2025-11-05 02:10:26] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 02:10:26] Loading recent CFB game results...
+[2025-11-05 02:10:29] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 02:10:29] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 02:10:29] INFO:__main__:Stored 648 CFB games
+[2025-11-05 02:10:29] Updating predictions with results across all leagues...
+[2025-11-05 02:10:31] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 02:10:31] INFO:__main__:No completed games found to update
+[2025-11-05 02:10:31] Forward test update completed successfully
+[2025-11-05 02:10:31] Completed with warnings/errors (exit code 1)
+[2025-11-05 07:00:02] Starting forward test update...
+[2025-11-05 07:00:16] Loading recent NBA game results...
+[2025-11-05 07:00:18] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 07:00:18] Traceback (most recent call last):
+[2025-11-05 07:00:18]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 07:00:18]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 169, in <module>
+[2025-11-05 07:00:18]     main()
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 165, in main
+[2025-11-05 07:00:18]     run(seasons, season_type=args.season_type)
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 118, in run
+[2025-11-05 07:00:18]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 07:00:18]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 31, in _fetch_game_logs
+[2025-11-05 07:00:18]     finder = leaguegamefinder.LeagueGameFinder(
+[2025-11-05 07:00:18]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 249, in __init__
+[2025-11-05 07:00:18]     self.get_request()
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 07:00:18]     self.load_response()
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 07:00:18]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 07:00:18]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 07:00:18]     raw_dict = self.get_dict()
+[2025-11-05 07:00:18]                ^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 07:00:18]     return json.loads(self._response)
+[2025-11-05 07:00:18]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 07:00:18]     return _default_decoder.decode(s)
+[2025-11-05 07:00:18]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 07:00:18]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 07:00:18]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 07:00:18]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 07:00:18]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 07:00:18] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 07:00:18] WARNING: NBA results ingestion exited with 1
+[2025-11-05 07:00:18] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 07:00:18] Loading recent CFB game results...
+[2025-11-05 07:00:21] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 07:00:21] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 07:00:21] INFO:__main__:Stored 648 CFB games
+[2025-11-05 07:00:21] Updating predictions with results across all leagues...
+[2025-11-05 07:00:23] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 07:00:23] INFO:__main__:No completed games found to update
+[2025-11-05 07:00:23] Forward test update completed successfully
+[2025-11-05 07:00:23] Completed with warnings/errors (exit code 1)
+[2025-11-05 10:48:37] Starting forward test update...
+[2025-11-05 10:48:38] Loading recent NBA game results...
+[2025-11-05 10:48:40] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 10:48:40] Traceback (most recent call last):
+[2025-11-05 10:48:40]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 10:48:40]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 169, in <module>
+[2025-11-05 10:48:40]     main()
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 165, in main
+[2025-11-05 10:48:40]     run(seasons, season_type=args.season_type)
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 118, in run
+[2025-11-05 10:48:40]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 10:48:40]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 31, in _fetch_game_logs
+[2025-11-05 10:48:40]     finder = leaguegamefinder.LeagueGameFinder(
+[2025-11-05 10:48:40]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 249, in __init__
+[2025-11-05 10:48:40]     self.get_request()
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 10:48:40]     self.load_response()
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 10:48:40]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 10:48:40]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 10:48:40]     raw_dict = self.get_dict()
+[2025-11-05 10:48:40]                ^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 10:48:40]     return json.loads(self._response)
+[2025-11-05 10:48:40]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 10:48:40]     return _default_decoder.decode(s)
+[2025-11-05 10:48:40]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 10:48:40]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 10:48:40]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:40]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 10:48:40]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 10:48:40] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 10:48:40] WARNING: NBA results ingestion exited with 1
+[2025-11-05 10:48:40] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 10:48:40] Loading recent CFB game results...
+[2025-11-05 10:48:43] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 10:48:43] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 10:48:43] INFO:__main__:Stored 648 CFB games
+[2025-11-05 10:48:43] Updating predictions with results across all leagues...
+[2025-11-05 10:48:45] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 10:48:51] INFO:__main__:No completed games found to update
+[2025-11-05 10:48:51] Forward test update completed successfully
+[2025-11-05 10:48:51] Completed with warnings/errors (exit code 1)
+[2025-11-05 10:48:55] Starting forward test update...
+[2025-11-05 10:48:56] Loading recent NBA game results...
+[2025-11-05 10:48:58] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 10:48:58] Traceback (most recent call last):
+[2025-11-05 10:48:58]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 10:48:58]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 169, in <module>
+[2025-11-05 10:48:58]     main()
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 165, in main
+[2025-11-05 10:48:58]     run(seasons, season_type=args.season_type)
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 118, in run
+[2025-11-05 10:48:58]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 10:48:58]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 31, in _fetch_game_logs
+[2025-11-05 10:48:58]     finder = leaguegamefinder.LeagueGameFinder(
+[2025-11-05 10:48:58]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 249, in __init__
+[2025-11-05 10:48:58]     self.get_request()
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 10:48:58]     self.load_response()
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 10:48:58]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 10:48:58]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 10:48:58]     raw_dict = self.get_dict()
+[2025-11-05 10:48:58]                ^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 10:48:58]     return json.loads(self._response)
+[2025-11-05 10:48:58]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 10:48:58]     return _default_decoder.decode(s)
+[2025-11-05 10:48:58]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 10:48:58]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 10:48:58]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 10:48:58]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 10:48:58]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 10:48:58] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 10:48:58] WARNING: NBA results ingestion exited with 1
+[2025-11-05 10:48:58] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 10:48:58] Loading recent CFB game results...
+[2025-11-05 10:49:02] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 10:49:02] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 10:49:02] INFO:__main__:Stored 648 CFB games
+[2025-11-05 10:49:02] Updating predictions with results across all leagues...
+[2025-11-05 10:49:04] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 10:49:04] INFO:__main__:No completed games found to update
+[2025-11-05 10:49:04] Forward test update completed successfully
+[2025-11-05 10:49:04] Completed with warnings/errors (exit code 1)
+[2025-11-05 10:56:09] Starting forward test update...
+[2025-11-05 10:56:11] Loading recent NBA game results...
+[2025-11-05 10:56:26] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 11:13:30] WARNING:__main__:NBA stats API returned an invalid payload for 2025-26 (attempt 1/4, status=403): Expecting value: line 1 column 1 (char 0)
+[2025-11-05 11:13:30] INFO:__main__:Retrying NBA stats API for 2025-26 in 2.0 seconds (attempt 2/4)
+[2025-11-05 11:13:30] WARNING:__main__:NBA stats API returned an invalid payload for 2025-26 (attempt 2/4, status=403): Expecting value: line 1 column 1 (char 0)
+[2025-11-05 11:13:30] INFO:__main__:Retrying NBA stats API for 2025-26 in 4.0 seconds (attempt 3/4)
+[2025-11-05 11:13:30] WARNING:__main__:NBA stats API returned an invalid payload for 2025-26 (attempt 3/4, status=403): Expecting value: line 1 column 1 (char 0)
+[2025-11-05 11:13:30] INFO:__main__:Retrying NBA stats API for 2025-26 in 6.0 seconds (attempt 4/4)
+[2025-11-05 11:13:30] WARNING:__main__:NBA stats API returned an invalid payload for 2025-26 (attempt 4/4, status=403): Expecting value: line 1 column 1 (char 0)
+[2025-11-05 11:13:30] Traceback (most recent call last):
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 122, in _fetch_single_season
+[2025-11-05 11:13:30]     finder.get_request()
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 259, in get_request
+[2025-11-05 11:13:30]     self.load_response()
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\endpoints\leaguegamefinder.py", line 262, in load_response
+[2025-11-05 11:13:30]     data_sets = self.nba_response.get_data_sets()
+[2025-11-05 11:13:30]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\stats\library\http.py", line 127, in get_data_sets
+[2025-11-05 11:13:30]     raw_dict = self.get_dict()
+[2025-11-05 11:13:30]                ^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\nba_api\library\http.py", line 42, in get_dict
+[2025-11-05 11:13:30]     return json.loads(self._response)
+[2025-11-05 11:13:30]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+[2025-11-05 11:13:30]     return _default_decoder.decode(s)
+[2025-11-05 11:13:30]            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 337, in decode
+[2025-11-05 11:13:30]     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+[2025-11-05 11:13:30]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 355, in raw_decode
+[2025-11-05 11:13:30]     raise JSONDecodeError("Expecting value", s, err.value) from None
+[2025-11-05 11:13:30] json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+[2025-11-05 11:13:30] System.Management.Automation.RemoteException
+[2025-11-05 11:13:30] The above exception was the direct cause of the following exception:
+[2025-11-05 11:13:30] System.Management.Automation.RemoteException
+[2025-11-05 11:13:30] Traceback (most recent call last):
+[2025-11-05 11:13:30]   File "<frozen runpy>", line 198, in _run_module_as_main
+[2025-11-05 11:13:30]   File "<frozen runpy>", line 88, in _run_code
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 305, in <module>
+[2025-11-05 11:13:30]     main()
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 301, in main
+[2025-11-05 11:13:30]     run(seasons, season_type=args.season_type)
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 254, in run
+[2025-11-05 11:13:30]     logs = _fetch_game_logs(seasons, season_type)
+[2025-11-05 11:13:30]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 170, in _fetch_game_logs
+[2025-11-05 11:13:30]     df = _fetch_single_season(season, season_type)
+[2025-11-05 11:13:30]          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[2025-11-05 11:13:30]   File "C:\Users\Bobby\Desktop\sports\src\data\ingest_results_nba.py", line 161, in _fetch_single_season
+[2025-11-05 11:13:30]     raise RuntimeError(error_message) from last_error
+[2025-11-05 11:13:30] RuntimeError: Failed to download NBA Regular Season logs for 2025-26 after 4 attempts
+[2025-11-05 11:13:30] WARNING: NBA results ingestion exited with 1
+[2025-11-05 11:13:30] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 11:13:30] Loading recent CFB game results...
+[2025-11-05 11:13:32] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 11:13:32] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 11:13:32] INFO:__main__:Stored 648 CFB games
+[2025-11-05 11:13:32] Updating predictions with results across all leagues...
+[2025-11-05 11:13:34] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 11:13:36] INFO:__main__:No completed games found to update
+[2025-11-05 11:13:36] Forward test update completed successfully
+[2025-11-05 11:13:36] Completed with warnings/errors (exit code 1)
+[2025-11-05 11:20:45] Starting forward test update...
+[2025-11-05 11:20:47] Loading recent NBA game results...
+[2025-11-05 11:20:49] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 11:20:49] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 11:20:49] INFO:src.db.loaders:Stored 108 schedule rows into database
+[2025-11-05 11:20:49] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 11:20:49] Loading recent CFB game results...
+[2025-11-05 11:20:53] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 11:20:53] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 11:20:53] INFO:__main__:Stored 648 CFB games
+[2025-11-05 11:20:53] Updating predictions with results across all leagues...
+[2025-11-05 11:20:55] INFO:__main__:Checking 4 predictions for results
+[2025-11-05 11:20:55] INFO:__main__:Updated predictions saved
+[2025-11-05 11:20:55] Forward test update completed successfully
+[2025-11-05 11:34:59] Starting forward test update...
+[2025-11-05 11:35:01] Loading recent NBA game results...
+[2025-11-05 11:35:04] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 11:35:04] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 11:35:04] INFO:src.db.loaders:Stored 108 schedule rows into database
+[2025-11-05 11:35:04] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 11:35:04] Loading recent CFB game results...
+[2025-11-05 11:35:13] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 11:35:13] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 11:35:13] INFO:__main__:Stored 648 CFB games
+[2025-11-05 11:35:13] Updating predictions with results across all leagues...
+[2025-11-05 11:35:14] INFO:__main__:Checking 2 predictions for results
+[2025-11-05 11:35:14] INFO:__main__:No completed games found to update
+[2025-11-05 11:35:14] Forward test update completed successfully
+[2025-11-05 11:37:29] Starting forward test update...
+[2025-11-05 11:37:30] Loading recent NBA game results...
+[2025-11-05 11:37:33] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 11:37:33] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 11:37:33] INFO:src.db.loaders:Stored 108 schedule rows into database
+[2025-11-05 11:37:33] No automated results ingestion implemented for NFL; skipping
+[2025-11-05 11:37:33] Loading recent CFB game results...
+[2025-11-05 11:37:37] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 11:37:40] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 11:37:40] INFO:__main__:Stored 648 CFB games
+[2025-11-05 11:37:40] Updating predictions with results across all leagues...
+[2025-11-05 11:37:42] INFO:__main__:Checking 2 predictions for results
+[2025-11-05 11:37:44] INFO:__main__:No completed games found to update
+[2025-11-05 11:37:44] Forward test update completed successfully
+[2025-11-05 21:43:47] Starting forward test update...
+[2025-11-05 21:43:57] Loading recent NBA game results...
+[2025-11-05 21:44:00] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 21:44:00] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 21:44:00] INFO:src.db.loaders:Stored 115 schedule rows into database
+[2025-11-05 21:44:00] Loading recent NFL game results...
+[2025-11-05 21:44:03] INFO:__main__:Downloading schedules (with betting lines) for seasons: [2025]
+[2025-11-05 21:44:03] INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2025_2025.parquet
+[2025-11-05 21:44:03] INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2025_2025.parquet
+[2025-11-05 21:44:03] INFO:src.db.loaders:Stored 272 schedule rows into database
+[2025-11-05 21:44:03] Loading recent CFB game results...
+[2025-11-05 21:44:06] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 21:44:06] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 21:44:06] INFO:__main__:Stored 648 CFB games
+[2025-11-05 21:44:06] Updating predictions with results across all leagues...
+[2025-11-05 21:44:08] INFO:__main__:Checking 12 predictions for results
+[2025-11-05 21:44:08] INFO:__main__:No completed games found to update
+[2025-11-05 21:44:08] Forward test update completed successfully
+[2025-11-05 22:40:34] Starting forward test update...
+[2025-11-05 22:40:36] Loading recent NBA game results...
+[2025-11-05 22:40:38] INFO:__main__:Downloading NBA Regular Season data for 2025-26
+[2025-11-05 22:40:38] INFO:__main__:Saved NBA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_nba_2025_2025.parquet
+[2025-11-05 22:40:38] INFO:src.db.loaders:Stored 119 schedule rows into database
+[2025-11-05 22:40:38] Loading recent NFL game results...
+[2025-11-05 22:40:41] INFO:__main__:Downloading schedules (with betting lines) for seasons: [2025]
+[2025-11-05 22:40:41] INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2025_2025.parquet
+[2025-11-05 22:40:41] INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2025_2025.parquet
+[2025-11-05 22:40:41] INFO:src.db.loaders:Stored 272 schedule rows into database
+[2025-11-05 22:40:41] Loading recent CFB game results...
+[2025-11-05 22:40:44] INFO:__main__:Fetching CollegeFootballData games for 2025 (regular)
+[2025-11-05 22:40:44] INFO:src.db.loaders:Stored 648 schedule rows into database
+[2025-11-05 22:40:44] INFO:__main__:Stored 648 CFB games
+[2025-11-05 22:40:44] Updating predictions with results across all leagues...
+[2025-11-05 22:40:46] INFO:__main__:Checking 13 predictions for results
+[2025-11-05 22:40:46] INFO:__main__:Updated predictions saved
+[2025-11-05 22:40:46] Forward test update completed successfully

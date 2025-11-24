@@ -1,0 +1,877 @@
+Date;Team_Home;Team_Away;League;Class_Home;Class_Away;Home_Prediction;Draw_Prediction;Away_Prediction;Odd_Home;Odd_Draw;Odd_Away;Result;_Double result;Goals
+2022-12-19;Adanasport;Denizlispor;Turquia 2;3;1;65;20;15;1,59;3,73;5,01;Away;Away_Home;One
+2022-12-19;CD Leganes;Real Zaragoza;Espanha 2;1;3;35;30;35;2,43;2,81;3,12;Home;Home_Draw;More_Two
+2022-12-19;Wigan Athletic;Sheffield United;Inglaterra 2;3;1;25;27;47;3,71;3,33;1,97;Away;Draw_Away;More_Two
+2022-12-20;CFR Cluj;FC Hermannstadt;Roménia 1;3;1;55;27;18;1,56;3,46;5,88;Away;Away_Home;Two
+2022-12-20;Union Saint-Gilloise;KV Oostende;Belgica 1;1;3;64;21;16;1,29;5,05;7,59;Home;Home_Draw;More_Two
+2022-12-20;Sestao River;Athletic Bilbao;Espanha T;3;1;10;18;72;17,00;5,75;1,28;Away;Draw_Away;More_Two
+2022-12-20;Real Unión;Real Mallorca;Espanha T;3;1;22;24;54;9,50;4,60;1,45;Away;Draw_Away;More_Two
+2022-12-20;Aberdeen FC;Rangers FC;Escócia 1;3;1;26;23;51;5,05;3,94;1,57;Away;Draw_Away;More_Two
+2022-12-21;CD Ibiza-Islas;SD Eibar;Espanha T;1;3;8;17;75;5,25;3,75;1,75;Home;Away_Home;More_Two
+2022-12-21;Pontevedra;CD Tenerife;Espanha T;1;3;32;30;38;3,60;3,30;2,20;Home;Away_Home;One
+2022-12-21;Mariners;Newcastle;Australia 1;1;3;56;22;22;1,83;4,30;4,20;Home;Home_Draw;More_Two
+2022-12-21;Persib Bandung;Persita Tangerang;Indonesia 1;1;3;56;23;21;1,73;4,10;4,90;Home;Home_Draw;One
+2022-12-21;Levante;Andorra;Espanha T;1;3;55;26;19;1,85;3,50;5,30;Home;Home_Draw;Two
+2022-12-21;CD Coria;Real Sociedad;Espanha T;3;1;5;11;84;21,00;7,60;1,20;Away;Draw_Away;Two
+2022-12-21;Torremolinos;Sevilha;Espanha T;3;1;6;14;79;17,00;6,50;1,25;Away;Draw_Away;More_Two
+2022-12-21;PAS Giannina;Olympiakos FC;Grécia 1;3;1;19;25;56;10,50;4,75;1,37;Away;Draw_Away;More_Two
+2022-12-21;Levadiakos;Aris Salonica;Grécia 1;2;2;20;27;53;5,80;3,75;1,79;Draw;Draw_Away;One
+2022-12-22;Polidesportivo Cacereno;Girona FC;Espanha T;1;3;10;16;74;13,00;5,00;1,33;Home;Away_Home;One
+2022-12-22;Pordenone;Triestina;Itália 3;1;3;68;19;12;1,73;3,50;4,90;Home;Home_Draw;Two
+2022-12-22;Gernika Club;Celta de Vigo;Espanha T;3;1;8;16;76;21,00;6,45;1,25;Away;Draw_Away;One
+2022-12-22;Panetolikos;PAOK Salonica;Grécia 1;3;1;24;29;47;5,70;3,64;1,80;Away;Draw_Away;More_Two
+2022-12-22;La Nucia;Las Palmas;Espanha T;2;2;17;26;57;4,20;4,40;2,00;Draw;Draw_Away;More_Two
+2022-12-22;Semarang;Bali;Indonesia 1;3;1;28;26;46;3,18;3,30;2,24;Away;Draw_Away;More_Two
+2022-12-23;Antalyaspor;MKE Ankaragucu;Turquia 1;3;1;41;25;34;2,02;3,76;4,00;Away;Away_Home;More_Two
+2022-12-23;Juve Stabia;Gelbison Cilento;Itália 3;1;3;43;30;27;1,99;3,20;4,00;Home;Home_Draw;More_Two
+2022-12-23;KAA Gent;Standard Liége;Belgica 1;2;2;68;19;13;1,67;4,14;5,50;Draw;Home_Draw;Two
+2022-12-23;FC Crotone;ACR Messina;Itália 3;1;3;84;11;5;1,31;5,00;9,50;Home;Home_Draw;One
+2022-12-23;Ross County;Rangers FC;Escócia 1;3;1;11;18;71;9,00;5,50;1,36;Away;Draw_Away;One
+2022-12-23;GZ Evergrande FC;Beijing Guoan;China 1;3;1;13;18;69;5,50;4,00;1,66;Away;Draw_Away;One
+2022-12-23;KV Mechelen;Cercle Brugge;Belgica 1;2;2;46;24;30;2,66;3,80;2,55;Draw;Draw_Away;More_Two
+2022-12-24;Sydney FC;Macarthur FC;Australia 1;3;1;49;23;28;1,64;4,60;5,50;Away;Away_Home;One
+2022-12-24;Paradou AC;RC Arbaa;Argelia 1;2;2;60;24;17;1,95;3,28;4,20;Draw;Home_Draw;Two
+2022-12-24;ES Sétif;JS Saoura;Argelia 1;2;2;65;22;13;1,94;3,24;4,40;Draw;Home_Draw;Two
+2022-12-24;USM Khenchla;ASO Chief;Argelia 1;1;3;67;20;12;1,71;3,35;5,60;Home;Home_Draw;One
+2022-12-24;Hapoel Beer Sheva;Beitar Jerusalem;Israel 1;1;3;71;18;11;1,46;4,50;7,20;Home;Home_Draw;One
+2022-12-24;PS TIRA;Persib Bandung;Indonesia 1;2;2;17;22;60;4,75;3,44;1,80;Draw;Draw_Away;One
+2022-12-25;Galatasaray;Istanbulspor AS;Turquia 1;1;3;73;16;11;1,30;7,60;13,00;Home;Home_Draw;One
+2022-12-25;Konyaspor;Alanyaspor;Turquia 1;2;2;61;21;17;1,87;3,96;4,60;Draw;Home_Draw;More_Two
+2022-12-25;Adana Demirspor;Fatih Karagumruk;Turquia 1;1;3;57;21;22;1,75;4,50;4,70;Home;Home_Draw;One
+2022-12-25;CS Sfaxien;CA Bizertin;Tunisia 1;1;3;60;26;14;1,92;3,20;5,10;Home;Home_Draw;Two
+2022-12-25;Samsunspor;Adanaspor;Turquia 2;1;3;76;16;8;1,57;4,24;6,00;Home;Home_Draw;Two
+2022-12-25;Gaziantep FK;Besiktas;Turquia 1;2;2;35;25;40;4,70;4,30;1,79;Draw;Draw_Away;More_Two
+2022-12-26;Kortrijk;Racing Genk;Belgica 1;1;3;14;18;68;7,00;5,30;1,49;Home;Away_Home;One
+2022-12-26;Sheffield United;Coventry City;Inglaterra 2;1;3;63;21;16;1,73;4,00;5,70;Home;Home_Draw;More_Two
+2022-12-26;Port Vale;Morecambe;Inglaterra 3;1;3;61;23;15;1,61;4,10;7,20;Home;Home_Draw;More_Two
+2022-12-26;Cagliari Calcio;Cosenza Calcio;Itália 2;1;3;61;23;16;1,53;4,30;8,00;Home;Home_Draw;More_Two
+2022-12-26;Union Saint-Gilloise;KV Oostende;Belgica 1;1;3;71;18;12;1,37;5,90;9,00;Home;Home_Draw;One
+2022-12-26;Al Batin;Al Raed Club;Arábia Saudita 1;3;1;21;24;55;8,00;4,20;1,40;Away;Draw_Away;More_Two
+2022-12-27;Adelaide United;Newcastle Jets;Australia 1;3;1;58;22;21;1,83;4,00;4,80;Away;Away_Home;Two
+2022-12-27;Fenerbace;Hatayapsor;Turquia 1;1;3;77;14;8;1,34;6,20;11,00;Home;Home_Draw;More_Two
+2022-12-27;Melbourne City;Central Coast Mariners;Australia 1;1;3;61;21;18;1,71;4,30;5,20;Home;Home_Draw;Two
+2022-12-27;Wuhan Three Towns;Zhejiang;China 1;1;3;45;25;30;1,62;4,42;5,50;Home;Home_Draw;One
+2022-12-27;Raja Casablanca;Maghreb Fes;Marrocos 1;2;2;55;28;17;1,59;3,62;6,25;Draw;Home_Draw;More_Two
+2022-12-27;Westerlo;Antwerp;Belgica 1;2;2;32;25;43;3,15;3,75;2,22;Draw;Draw_Away;One
+2022-12-28;Istanbulspor;Kasimpasa;Turquia 1;1;3;33;25;43;2,80;3,80;2,47;Home;Away_Home;One
+2022-12-28;Rangers;Motherwell;Escócia 1;1;3;80;13;7;1,24;6,50;13,00;Home;Home_Draw;Zero
+2022-12-28;Paris Saint Germain;Strasbourg;França 1;1;3;74;15;11;1,25;7,30;15,00;Home;Home_Draw;One
+2022-12-28;Troyes;Nantes;França 1;2;2;46;26;28;2,54;3,70;3,00;Draw;Home_Draw;One
+2022-12-28;Hibernian;Celtic;Escócia 1;3;1;23;23;55;7,60;5,20;1,43;Away;Draw_Away;One
+2022-12-28;Auxerre;Mónaco;França 1;3;1;29;25;46;4,60;4,10;1,82;Away;Draw_Away;More_Two
+2022-12-29;Lorient;Montpellier;França 1;3;1;49;26;25;2,08;3,84;3,70;Away;Away_Home;One
+2022-12-29;Sporting CP;Paços de Ferreira;Portugal 1;1;3;84;11;5;1,14;10,50;23,00;Home;Home_Draw;More_Two
+2022-12-29;Lamia;PAS Giannina;Grécia 1;2;2;51;28;22;2,17;3,20;3,80;Draw;Home_Draw;One
+2022-12-29;Besiktas;Adana Demirspor;Turquia 1;1;3;58;21;20;1,81;4,20;4,28;Home;Home_Draw;Two
+2022-12-29;Peterborough United;Milton Keynes Dons;Inglaterra 3;1;3;62;22;17;1,85;3,82;4,60;Home;Home_Draw;Zero
+2022-12-29;Sheffield Wednesday;Port Vale;Inglaterra 3;1;3;63;21;15;1,75;3,85;5,50;Home;Home_Draw;More_Two
+2022-12-30;Braga;Benfica;Portugal 1;1;3;15;21;65;4,80;4,10;1,73;Home;Away_Home;More_Two
+2022-12-30;Liverpool;Leicester;Inglaterra 1;1;3;70;16;14;1,34;6,30;10,50;Home;Home_Draw;One
+2022-12-30;Bastia;Valenciennes;França 2;1;3;38;31;31;2,28;3,20;3,55;Home;Home_Draw;Two
+2022-12-30;Al Wahda;Al Adalh;Arábia Saudita 1;2;2;68;20;12;1,97;3,00;4,04;Draw;Home_Draw;More_Two
+2022-12-30;Al Shabab;Al Ittifaq;Arábia Saudita 1;1;3;65;21;14;1,40;4,54;7,00;Home;Home_Draw;One
+2022-12-30;Real Valladolid;Real Madrid;Espanha 1;3;1;21;22;56;7,00;4,90;1,52;Away;Draw_Away;More_Two
+2022-12-31;Al Hilal;Dhamk;Arábia Saudita 1;2;2;60;21;19;1,31;5,00;10,00;Draw;Home_Draw;More_Two
+2022-12-31;Al Tai;Al Batin;Arábia Saudita 1;1;3;65;20;15;1,24;5,25;13,00;Home;Home_Draw;More_Two
+2022-12-31;Manchester City;Everton;Inglaterra 1;2;2;88;8;4;1,17;10,00;24,00;Draw;Home_Draw;Zero
+2022-12-31;Sekhukhune United;AmaZulu;África do Sul 1;2;2;38;31;31;2,50;2,80;3,25;Draw;Home_Draw;One
+2022-12-31;Beitar Jerusalem;Sektzia Nes Tziona;Israel 1;1;3;49;24;27;1,91;3,75;3,60;Home;Home_Draw;Two
+2022-12-31;Richards Bay;Moroka Swallows;África do Sul 1;1;3;37;32;31;2,20;3,10;3,94;Home;Home_Draw;More_Two
+2023-01-01;Oxford United;Exeter City;Inglaterra 3;3;1;58;22;20;2,02;3,64;3,80;Away;Away_Home;More_Two
+2023-01-01;Tottenham;Aston Villa;Inglaterra 1;3;1;68;18;14;1,71;4,28;5,40;Away;Away_Home;More_Two
+2023-01-01;Olympique Lyonnais;Clermont;França 1;3;1;68;19;14;1,57;4,74;7,00;Away;Away_Home;More_Two
+2023-01-01;Maccabi Haifa;Hapoel Beer Sheva;Israel 1;1;3;51;25;24;1,74;4,10;4,50;Home;Home_Draw;One
+2023-01-01;Mónaco;Brest;França 1;1;3;60;21;18;1,57;4,80;6,50;Home;Home_Draw;Two
+2023-01-01;Millwall;Rotheram United;Inglaterra 2;1;3;71;20;9;1,62;4,10;6,80;Home;Home_Draw;More_Two
+2023-01-02;Brentford;Liverpool;Inglaterra 1;1;3;18;20;62;6,00;4,80;1,59;Home;Away_Home;Two
+2023-01-02;Aberdeen FC;Ross County;Escócia 1;2;2;61;22;17;1,65;4,00;5,80;Draw;Home_Draw;Two
+2023-01-02;Derby County;Accrington Stanley;Inglaterra 3;1;3;61;22;17;1,62;4,20;6,85;Home;Home_Draw;Zero
+2023-01-02;Sheffield Wednesday;Cambridge United;Inglaterra 3;1;3;76;16;8;1,39;5,50;9,80;Home;Home_Draw;More_Two
+2023-01-02;Lincoln City;Ipswich Town;Inglaterra 3;2;2;22;25;54;6,40;4,40;1,63;Draw;Draw_Away;Zero
+2023-01-02;Montpellier;Olympique Marseille;França 1;3;1;20;22;58;4,70;4,18;1,82;Away;Draw_Away;More_Two
+2023-01-03;PAS Giannina;AEK Athens;Grécia 1;1;3;11;19;70;12,50;5,20;1,33;Home;Away_Home;More_Two
+2023-01-03;Ceuta;Elche;Espanha T;1;3;13;19;68;5,70;3,90;1,74;Home;Away_Home;More_Two
+2023-01-03;Manchester United;AFC Burnemouth;Inglaterra 1;1;3;80;13;7;1,32;6,20;12,00;Home;Home_Draw;Two
+2023-01-03;Arsenal;Newcastle;Inglaterra 1;2;2;55;22;23;1,85;4,00;4,68;Draw;Home_Draw;More_Two
+2023-01-03;Mamelodi Sundowns;Moroka Swallows;África do Sul 1;1;3;72;19;9;1,40;4,20;8,50;Home;Home_Draw;Two
+2023-01-03;Cacereño;Real Madrid;Espanha T;3;1;12;18;70;26,00;9,40;1,13;Away;Draw_Away;One
+2023-01-03;Ionikos;Olympiakos FC;Grécia 1;3;1;21;25;54;14,00;5,60;1,26;Away;Draw_Away;More_Two
+2023-01-03;Cartagena;Villarreal;Espanha T;3;1;35;27;39;5,90;4,20;1,66;Away;Draw_Away;More_Two
+2023-01-03;Antalyaspor;Fenerbace;Turquia 1;3;1;23;23;53;4,46;3,90;1,95;Away;Draw_Away;One
+2023-01-04;Roma ;Bolonha;Itália 1;1;3;68;20;13;1,67;4,04;6,20;Home;Home_Draw;More_Two
+2023-01-04;Udinese;Empoli;Itália 1;2;2;53;25;23;1,67;4,20;6,40;Draw;Home_Draw;More_Two
+2023-01-04;Galatasaray;Ankaragucu;Turquia 1;1;3;59;21;19;1,48;5,00;8,00;Home;Home_Draw;Two
+2023-01-04;Intercity;FC Barcelona;Espanha T;2;2;3;8;89;26,00;8,90;1,13;Draw;Draw_Away;Two
+2023-01-04;Linares Deportivo;Sevilha;Espanha T;3;1;21;25;54;11,00;5,25;1,36;Away;Draw_Away;More_Two
+2023-01-04;UD Logrones;Real Sociedad;Espanha T;3;1;19;25;56;8,00;4,70;1,44;Away;Draw_Away;More_Two
+2023-01-05;Wydad Casablanca;Chabab Mohammedia;Marrocos 1;3;1;65;22;13;1,36;4,24;10,00;Away;Away_Home;More_Two
+2023-01-05;Adana Demirspor;Instanbulspor;Turquia 1;1;3;69;18;14;1,45;5,60;7,20;Home;Home_Draw;Two
+2023-01-05;Ibiza Islas Pitiusas;Real Betis;Espanha T;3;1;12;19;69;17,00;7,00;1,22;Away;Draw_Away;More_Two
+2023-01-05;Eldense;Athletic Bilbao;Espanha T;3;1;18;24;59;10,50;5,70;1,36;Away;Draw_Away;One
+2023-01-05;Santa Clara;Braga;Portugal 1;3;1;29;26;44;5,25;4,00;1,71;Away;Draw_Away;More_Two
+2023-01-05;Riadi Salmi;FAR Rabat;Marrocos 1;2;2;22;28;50;4,33;3,15;1,91;Draw;Draw_Away;More_Two
+2023-01-06;Al Adalh;Al Fateh;Arábia Saudita 1;1;3;25;26;49;4,35;3,80;1,78;Home;Away_Home;More_Two
+2023-01-06;Al Taawon;Al Khaleej;Arábia Saudita 1;3;1;51;25;24;1,38;5,00;7,50;Away;Away_Home;More_Two
+2023-01-06;Al Nassr;Al Tai;Arábia Saudita 1;1;3;65;20;15;1,29;5,25;10,00;Home;Home_Draw;More_Two
+2023-01-06;Benfica;Portimonense;Portugal 1;1;3;78;14;8;1,19;8,60;19,00;Home;Home_Draw;More_Two
+2023-01-06;St. Liege;St. Truiden;Belgica 1;2;2;37;27;36;2,46;3,25;3,45;Draw;Home_Draw;One
+2023-01-06;Manchester United;Everton;Inglaterra T;1;3;72;17;11;1,51;4,82;7,60;Home;Home_Draw;More_Two
+2023-01-06;Chateauroux;Paris Saint Germain;França T;3;1;12;17;71;51,00;14,00;1,07;Away;Draw_Away;One
+2023-01-06;Richards Bay;Mamelodi Sundowns;África do Sul 1;3;1;16;27;58;6,25;3,60;1,61;Away;Draw_Away;Two
+2023-01-06;Gijon;Levante;Espanha 2;13;3;32;29;39;2,72;3,08;3,05;Draw;Draw_Away;Two
+2023-01-07;Torrense;Oliveirense;Portugal 2;15;14;43;27;30;2,24;3,30;3,30;Draw;Home_Draw;Two
+2023-01-07;Mafra;B SAD;Portugal 2;12;16;38;27;35;1,80;3,60;4,70;Away;Away_Home;More_Two
+2023-01-07;Arouca;Estoril;Portugal 1;10;14;37;28;35;2,28;3,34;3,30;Home;Home_Draw;Two
+2023-01-07;Villarreal;Real Madrid;Espanha 1;7;2;26;24;50;3,50;4,00;2,14;Home;Away_Home;More_Two
+2023-01-07;Guimaraes;Rio Ave;Portugal 1;6;8;50;27;23;2,06;3,40;4,10;Draw;Home_Draw;Two
+2023-01-07;Casa Pia;Porto;Portugal 1;5;3;11;20;68;9,80;5,00;1,39;Draw;Draw_Away;More_Two
+2023-01-07;Le Puy F,43 Auvergne;Nice;França T;1;3;18;23;59;15,00;6,00;1,25;Home;Away_Home;One
+2023-01-07;Mónaco;Rodez;França T;2;2;67;20;13;1,17;8,80;17,00;Draw;Home_Draw;More_Two
+2023-01-07;Tottenham;Portsmouth;Inglaterra T;1;3;61;20;19;1,17;9,20;23,00;Home;Home_Draw;More_Two
+2023-01-07;Cape Town City;Orlando Pirates;África do Sul 1;1;3;35;31;34;2,38;2,88;3,30;Home;Home_Draw;More_Two
+2023-01-07;Celtic;Kilmarnock;Escócia 1;1;3;89;8;3;1,10;13,00;36,00;Home;Home_Draw;More_Two
+2023-01-07;Linas-Montlhery;Lens;França T;3;1;2;6;92;41,00;15,00;1,06;Away;Draw_Away;More_Two
+2023-01-07;Gillingham;Leicester;Inglaterra T;3;1;22;22;56;15,00;6,80;1,23;Away;Draw_Away;More_Two
+2023-01-08;Covilhã;Vilafranquense;Portugal 2;18;7;34;27;39;3,26;3,20;2,25;Draw;Draw_Away;More_Two
+2023-01-08;P. Ferreira;Desp. Chaves;Portugal 1;18;10;41;27;32;2,90;3,30;2,60;Draw;Draw_Away;One
+2023-01-08;Maritimo;Sporting;Portugal 1;17;4;14;20;66;9,00;5,00;1,40;Home;Away_Home;One
+2023-01-08;Boavista;Gil Vicente;Portugal 1;13;16;41;26;33;2,64;3,34;2,80;Home;Home_Draw;More_Two
+2023-01-08;Benfica B;Feirense;Portugal 2;6;8;37;28;35;2,38;3,30;2,90;Away;Away_Home;One
+2023-01-08;Atletico Madrid;Barcelona ;Espanha 1;5;1;21;23;56;3,25;3,62;2,40;Away;Draw_Away;One
+2023-01-08;Manchester City;Chelsea;Inglaterra T;4;7;55;21;24;1,44;5,20;7,90;Home;Home_Draw;More_Two
+2023-01-08;Milan;Roma;Itália 1;3;6;50;26;25;1,92;3,72;4,60;Draw;Home_Draw;Two
+2023-01-08;Aston Villa;Stevenage;Inglaterra T;3;1;48;24;28;1,21;7,80;18,00;Away;Away_Home;More_Two
+2023-01-08;Fenerbace;Galatasaray;Turquia 1;3;1;54;23;22;2,18;3,70;3,50;Away;Away_Home;More_Two
+2023-01-08;Genk;Club Brugge;Belgica 1;1;3;57;22;21;2,21;3,90;3,10;Home;Home_Draw;More_Two
+2023-01-08;TS Galaxy;Stellenbosch;África do Sul 1;2;2;35;33;32;2,30;2,80;3,60;Draw;Home_Draw;One
+2023-01-08;Lille;Troyes;França T;1;3;54;23;23;1,45;4,80;7,20;Home;Home_Draw;More_Two
+2023-01-08;Eibar;Ibiza;Espanha 2;1;3;63;22;15;1,55;4,00;8,40;Home;Home_Draw;More_Two
+2023-01-08;Loon-Plage;Reims;França T;3;1;2;6;92;57,00;21,00;1,03;Away;Draw_Away;One
+2023-01-08;La Chataignerale;Lorient;França T;3;1;1;4;95;41,00;15,00;1,06;Away;Draw_Away;One
+2023-01-08;Lannion;Toulouse;França T;3;1;2;6;92;19,00;7,30;1,17;Away;Draw_Away;One
+2023-01-08;Ultrecht;Feyenoord;Países Baixos 1;2;2;28;22;50;4,20;4,20;1,87;Draw;Draw_Away;Two
+2023-01-09;Alanyaspor;Tranzonspor;Turquia 1;1;3;39;23;37;3,15;3,85;2,25;Home;Away_Home;Two
+2023-01-09;Tondela;Penafiel;Portugal 2;3;1;49;27;24;2,40;3,25;3,00;Away;Away_Home;One
+2023-01-09;Panaitolikos;OFI Creta;Grécia 1;3;1;46;28;25;2,45;3,10;3,25;Away;Away_Home;Two
+2023-01-09;Istanbul Basaksehir;Adana Demirspor;Turquia 1;1;3;52;24;24;2,12;3,65;3,60;Home;Home_Draw;One
+2023-01-09;Hapoel Beer Sheva;Hapoel Tel Aviv;Israel 1;1;3;64;21;16;1,56;4,24;5,90;Home;Home_Draw;One
+2023-01-09;Athletic Bilbau;Osasuna;Espanha 1;2;2;53;26;21;1,74;3,90;6,00;Draw;Home_Draw;Two
+2023-01-09;Oxford United;Arsenal;Inglaterra T;3;1;22;22;56;18,00;9,20;1,18;Away;Draw_Away;One
+2023-01-09;Bologna;Atalanta;Itália 1;3;1;29;25;45;3,75;3,65;2,16;Away;Draw_Away;One
+2023-01-10;Barito Putera;PSM;Indonesia 1;16;1;27;27;45;3,80;3,50;2,10;Draw;Draw_Away;More_Two
+2023-01-10;Al Raed;Al Hilal;Arábia Saudita 1;11;4;13;19;67;6,50;4,75;1,44;Draw;Draw_Away;More_Two
+2023-01-10;Valenciennes;Annecy;França 2;9;14;39;29;33;2,25;3,15;3,65;Draw;Home_Draw;Two
+2023-01-10;Inter Milao;Parma;Itália T;7;5;54;24;23;1,23;7,00;13,00;Draw;Home_Draw;One
+2023-01-10;Caen;Bordeaux;França 2;7;2;42;28;30;2,45;3,20;3,20;Draw;Home_Draw;More_Two
+2023-01-10;Pachuca;Puebla;Mexico 1;5;19;63;21;17;1,65;4,20;5,50;Home;Home_Draw;More_Two
+2023-01-10;Sparta Rotterdam;PSV;Países Baixos T;5;3;20;20;60;5,80;4,25;1,54;Away;Draw_Away;More_Two
+2023-01-10;Leixões;Famalicão;Portugal T;5;4;16;22;62;3,32;3,30;2,30;Draw;Draw_Away;Two
+2023-01-10;FC Twente;Telstar;Países Baixos T;2;6;78;14;8;1,29;5,80;10,00;Home;Home_Draw;More_Two
+2023-01-10;Newcastle;Leicester;Inglaterra TL;2;4;65;25;10;1,65;4,14;5,80;Home;Home_Draw;One
+2023-01-10;Mamelodi Sundowns;Chippa United;África do Sul 1;1;9;80;14;6;1,37;3,98;11,00;Home;Home_Draw;One
+2023-01-10;Varzim;Benfica;Portugal T;1;5;8;17;75;11,00;5,50;1,31;Away;Draw_Away;Two
+2023-01-11;Troyes;Olympique Marseille;França 1;13;3;21;23;56;5,10;4,18;1,77;Away;Draw_Away;More_Two
+2023-01-11;Den Bosch;Ajax;Países Baixos 1;12;9;6;10;84;30,00;11,50;1,09;Away;Draw_Away;One
+2023-01-11;Nice;Montpellier;França 1;11;14;50;24;26;1,90;3,82;4,70;Home;Home_Draw;One
+2023-01-11;Excelsior;AZ Alkmaar;Países Baixos 1;10;6;29;22;49;7,50;4,90;1,45;Away;Draw_Away;One
+2023-01-11;Nottingam Forest;Wolves;Inglaterra TL;9;5;34;25;41;2,80;3,32;2,88;Draw;Home_Draw;Zero
+2023-01-11;Vilaverdense;B SAD;Portugal T;7;4;44;25;32;2,17;3,34;3,60;Away;Away_Home;More_Two
+2023-01-11;Persib;Persija;Indonesia 1;6;5;40;28;33;2,25;3,24;3,60;Home;Home_Draw;One
+2023-01-11;Real Madrid;Valência;Espanha ST;6;4;64;20;16;1,57;4,64;6,45;Draw;Home_Draw;One
+2023-01-11;Milan;Torino;Itália T;5;5;59;23;18;1,66;4,26;6,10;Draw;Home_Draw;More_Two
+2023-01-11;Heerenveen;Volendam;Países Baixos 1;4;11;59;20;21;1,60;4,55;5,75;Home;Home_Draw;One
+2023-01-11;Académico Viseu;Beira-Mar;Portugal T;4;6;49;24;27;1,44;4,60;7,00;Home;Home_Draw;One
+2023-01-11;Braga;Guimarães;Portugal T;3;7;56;24;20;1,55;4,20;5,80;Home;Home_Draw;One
+2023-01-11;Porto;Arouca;Portugal T;2;7;75;16;9;1,14;7,70;21,00;Home;Home_Draw;More_Two
+2023-01-11;Nacional;Rabo de Peixe;Portugal T;2;9;59;23;18;1,45;4,60;7,00;Home;Home_Draw;Zero
+2023-01-11;Paris Saint Germain;Angers;França 1;1;20;88;8;4;1,18;10,00;20,00;Home;Home_Draw;More_Two
+2023-01-12;Setúbal;Casa Pia;Portugal T;11;3;25;25;50;5,80;3,72;1,70;Away;Draw_Away;More_Two
+2023-01-12;Groninguen;Spakenburg;Países Baixos T;8;8;66;17;17;1,40;5,00;8,00;Away;Away_Home;One
+2023-01-12;Fulham;Chelsea;Inglaterra 1;7;10;31;25;44;3,45;3,74;2,28;Home;Away_Home;Two
+2023-01-12;Ghazl El Mehalla;ENPPI;Egipto 1;7;15;36;29;35;2,88;2,80;2,96;Home;Home_Draw;More_Two
+2023-01-12;Blaw Geel ‘38;Utrecht;Países Baixos T;7;4;3;7;90;18,00;9,10;1,12;Away;Draw_Away;More_Two
+2023-01-12;Al Tai;Al Taawon;Arábia Saudita 1;7;5;37;26;37;3,10;3,30;2,25;Away;Draw_Away;Two
+2023-01-12;Fiorentina;Sampdoria;Itália T;5;9;63;20;17;1,50;4,20;7,00;Home;Home_Draw;One
+2023-01-12;Real Bétis;Barcelona ;Espanha ST;5;7;20;22;58;6,00;4,64;1,59;Draw;Draw_Away;More_Two
+2023-01-12;Urk;Katwijk;Países Baixos T;3;6;19;18;63;23,00;10,00;1,12;Away;Draw_Away;More_Two
+2023-01-12;Feyenoord;Zwolle;Países Baixos T;2;4;57;20;23;1,33;6,00;8,80;Home;Home_Draw;More_Two
+2023-01-12;Al Ahly;Al Masry;Egipto 1;1;8;59;25;17;1,52;4,20;7,60;Draw;Home_Draw;One
+2023-01-13;Ismaily;Al Mokawloon;Egipto 1;18;6;36;31;33;2,75;2,75;3,11;Away;Away_Home;Two
+2023-01-13;Denizlispor;Eyupspor;Turquia 2;17;1;34;25;41;7,20;4,00;1,55;Away;Draw_Away;More_Two
+2023-01-13;Enosis;Paphos;Chipre 1;11;3;20;25;55;6,00;4,00;1,55;Away;Draw_Away;Zero
+2023-01-13;Carrick Rangers;Cliftonville;Irlanda do Norte 1;9;1;22;24;55;5,00;3,94;1,70;Draw;Draw_Away;More_Two
+2023-01-13;Club Africain;Ben Guerdane;Tunisia 1;5;2;59;26;15;1,46;4,73;9,00;Away;Away_Home;More_Two
+2023-01-13;Martigues;Bastia-Borgo;França N;2;18;68;20;13;1,41;4,70;7,60;Home;Home_Draw;Two
+2023-01-13;Galatasaray;Hatayapsor;Turquia 1;1;16;74;16;10;1,37;6,05;9,80;Home;Home_Draw;More_Two
+2023-01-14;Wolves;West Ham;Inglaterra 1;19;17;33;26;41;2,80;3,40;2,88;Home;Home_Draw;Two
+2023-01-14;Vizela;Maritimo;Portugal 1;12;17;42;28;30;1,87;3,55;4,50;Home;Home_Draw;Zero
+2023-01-14;Rio Ave;Paços de Ferreira;Portugal 1;8;18;55;25;20;1,98;3,40;4,40;Away;Away_Home;Two
+2023-01-14;Vilafranquense;Leixões;Portugal 2;6;11;33;28;40;2,38;3,10;3,13;Home;Home_Draw;Zero
+2023-01-14;Real Sociedade;Athletic Bilbao;Espanha 1;3;7;36;28;36;2,54;3,22;3,25;Home;Home_Draw;One
+2023-01-14;Braga;Boavista;Portugal 1;2;10;62;22;16;1,34;5,30;11,00;Home;Home_Draw;More_Two
+2023-01-15;Oliveirense;B SAD;Portugal 2;14;15;44;26;31;2,20;3,40;3,25;Home;Home_Draw;More_Two
+2023-01-15;Chaves;Arouca;Portugal 1;9;7;42;27;31;2,15;3,45;3,60;Draw;Home_Draw;One
+2023-01-15;Porto B;Tondela;Portugal 2;8;10;39;27;35;2,10;3,30;3,50;Draw;Home_Draw;More_Two
+2023-01-15;Feirense;Académico Viseu;Portugal 2;5;3;40;26;34;2,38;3,20;3,05;Draw;Home_Draw;More_Two
+2023-01-15;Tottenham;Arsenal;Inglaterra 1;5;1;33;26;41;3,38;3,85;2,26;Away;Draw_Away;More_Two
+2023-01-15;Porto;Famalicão;Portugal 1;3;13;75;16;9;1,19;7,00;19,00;Home;Home_Draw;More_Two
+2023-01-15;Farense;Benfica B;Portugal 2;2;7;61;22;17;1,75;3,75;4,40;Home;Home_Draw;More_Two
+2023-01-15;Benfica;Sporting;Portugal 1;1;4;52;22;26;1,85;4,00;4,40;Draw;Home_Draw;Two
+2023-01-17;Wolves;Liverpool;Inglaterra T;5;10;27;22;51;3,75;3,75;2,14;Away;Draw_Away;One
+2023-01-17;Nápoles;Cremonese;Itália T;4;8;61;19;20;1,30;6,50;12,00;Draw;Home_Draw;Two
+2023-01-17;Alavés;Sevilha;Espanha T;2;4;30;28;43;4,05;3,50;2,06;Away;Draw_Away;Two
+2023-01-18;Anderlecht;Zulte Waregem;Belgica 1;12;17;65;21;15;1,61;4,60;6,00;Away;Away_Home;More_Two
+2023-01-18;Crystal Palace;Manchester United;Inglaterra 1;12;4;29;25;46;4,70;4,00;1,87;Draw;Draw_Away;Two
+2023-01-18;Cercle Brugge;Union Saint-Gilloise;Belgica 1;10;2;26;23;50;3,70;3,60;2,10;Draw;Draw_Away;More_Two
+2023-01-18;Kortrijk;Seraing;Belgica 1;6;9;43;26;31;1,85;4,00;4,60;Home;Home_Draw;More_Two
+2023-01-18;Milan;Inter;Itália ST;6;5;40;20;40;2,98;3,54;2,60;Away;Draw_Away;One
+2023-01-18;Athletic Bilbau;Espanyol;Espanha T;4;5;59;24;17;1,63;4,00;6,50;Home;Home_Draw;More_Two
+2023-01-19;Atalanta;Spezia;Itália T;10;4;58;21;21;1,42;5,10;8,00;Home;Home_Draw;More_Two
+2023-01-19;St. Truiden;Club Brugge;Belgica 1;8;4;34;27;39;3,70;3,56;2,18;Draw;Draw_Away;More_Two
+2023-01-19;Lázio;Bolonha;Itália T;7;10;56;22;22;1,93;3,66;4,75;Home;Home_Draw;Two
+2023-01-19;Juventus;Monza;Itália T;5;6;51;24;25;1,55;4,45;7,00;Home;Home_Draw;More_Two
+2023-01-19;Manchester City;Tottenham;Inglaterra 1;2;5;68;17;15;1,36;5,00;8,50;Home;Home_Draw;More_Two
+2023-01-21;Paços de Ferreira;Braga;Portugal 1;18;2;19;22;59;7,40;4,80;1,48;Away;Draw_Away;More_Two
+2023-01-21;Santa Clara;Benfica;Portugal 1;16;1;8;16;76;11,50;5,90;1,32;Away;Draw_Away;More_Two
+2023-01-21;Mafra;Trofense;Portugal 2;13;17;55;24;21;1,62;4,00;5,50;Home;Home_Draw;Two
+2023-01-21;Crystal Palace;Newcastle;Inglaterra 1;12;4;31;26;43;4,70;3,65;1,95;Draw;Draw_Away;Two
+2023-01-21;Leixões;Oliveirense;Portugal 2;11;12;42;26;31;2,05;3,50;3,60;Away;Away_Home;One
+2023-01-21;Guimarães;Porto;Portugal 1;6;3;14;21;65;8,60;4,80;1,44;Away;Draw_Away;More_Two
+2023-01-22;Maritimo;Estoril;Portugal 1;17;13;38;28;34;2,56;3,20;3,35;Home;Home_Draw;More_Two
+2023-01-22;Famalicão;Rio Ave;Portugal 1;14;10;44;27;29;2,24;3,25;3,50;Draw;Home_Draw;More_Two
+2023-01-22;Tondela;Farense;Portugal 2;10;2;45;26;29;2,88;3,20;2,55;Home;Away_Home;One
+2023-01-22;Benfica B;Porto B;Portugal 2;8;7;35;25;39;2,63;3,48;2,63;Draw;Away_Home;More_Two
+2023-01-22;Athletic Bilbau;Real Madrid;Espanha 1;8;2;28;26;46;3,05;3,60;2,50;Away;Draw_Away;One
+2023-01-22;Casa Pia;Gil Vicente;Portugal 1;5;15;37;27;36;2,40;3,25;3,30;Away;Away_Home;More_Two
+2023-01-22;E. Amadora;Penafiel;Portugal 2;4;9;42;28;31;2,30;3,20;3,17;Home;Home_Draw;Two
+2023-01-22;Arsenal;Manchester United;Inglaterra 1;1;3;58;21;21;1,93;4,00;4,35;Home;Home_Draw;More_Two
+2023-01-24;Hertha Berlim;Wolfsburgo;Alemanha 1;17;7;39;26;35;3,00;3,60;2,58;Away;Draw_Away;Two
+2023-01-24;Hoffenheim;Estugarda;Alemanha 1;13;16;53;22;25;2,09;3,86;3,75;Draw;Home_Draw;More_Two
+2023-01-24;Arouca;Sporting;Portugal TL;10;4;10;25;65;8,20;4,75;1,44;Away;Draw_Away;More_Two
+2023-01-24;Lázio;Milan;Itália 1;4;2;32;25;42;3,20;3,55;2,46;Home;Away_Home;More_Two
+2023-01-24;Southampton;Newcastle;Inglaterra TL;4;2;27;24;49;5,10;3,70;1,81;Away;Draw_Away;More_Two
+2023-01-25;Augsburgo;Monchagladbach;Alemanha 1;15;8;30;23;47;3,20;3,70;2,39;Home;Away_Home;Two
+2023-01-25;Leverkusen;Bochum;Alemanha 1;12;14;67;19;14;1,49;5,00;7,50;Home;Home_Draw;More_Two
+2023-01-25;Mainz;Dortmund;Alemanha 1;11;7;25;22;54;3,10;3,86;2,36;Away;Draw_Away;More_Two
+2023-01-25;Werder Bremen;Union Berlim;Alemanha 1;9;3;31;25;44;2,88;3,46;2,68;Away;Draw_Away;More_Two
+2023-01-25;Nottingam Forest;Manchester United;Inglaterra TL;6;3;26;24;50;5,60;3,98;1,73;Away;Draw_Away;More_Two
+2023-01-25;Friburgo;Frankfurt;Alemanha 1;4;2;41;24;35;2,60;3,64;2,82;Draw;Home_Draw;One
+2023-01-25;Porto;Académico Viseu;Portugal TL;2;1;65;25;10;1,14;8,50;19,00;Home;Home_Draw;Two
+2023-01-26;Groningen;Cambuur;Países Baixos 1;15;18;41;24;35;2,23;3,50;3,33;Away;Away_Home;More_Two
+2023-01-26;Ajax;Volendam;Países Baixos 1;4;17;84;10;6;1,12;13,00;23,00;Draw;Home_Draw;Two
+2023-01-28;Real Valladolid;Valência;Espanha 1;18;12;31;27;41;3,25;3,32;2,50;Home;Away_Home;One
+2023-01-28;Osasuna;Atlético Madrid;Espanha 1;7;4;23;25;51;3,95;3,36;2,26;Away;Draw_Away;More_Two
+2023-01-28;Lázio;Fiorentina;Itália 1;3;11;47;25;27;2,18;3,45;4,00;Draw;Home_Draw;Two
+2023-01-28;Real Madrid;Real Sociedad;Espanha 1;2;3;55;23;22;1,75;4,10;5,35;Draw;Home_Draw;More_Two
+2023-01-28;Nápoles;Roma;Itália 1;1;5;52;25;24;1,79;3,90;5,40;Home;Home_Draw;One
+2023-01-29;Famalicão;Estoril;Portugal 1;15;13;48;27;26;2,15;3,30;3,80;Home;Home_Draw;More_Two
+2023-01-29;Leixões;Penafiel;Portugal 2;13;10;37;28;35;2,80;3,13;2,60;Home;Away_Home;More_Two
+2023-01-29;Mafra;Oliveirense;Portugal 2;12;11;44;26;30;1,90;3,60;4,30;Away;Away_Home;More_Two
+2023-01-29;Boavista;Portimonense;Portugal 1;11;12;51;26;23;2,26;3,32;3,75;Home;Home_Draw;More_Two
+2023-01-29;Vizela;Rio Ave;Portugal 1;9;10;37;28;35;1,96;3,60;4,40;Home;Home_Draw;More_Two
+2023-01-29;Tondela;Nacional;Portugal 2;8;15;46;27;28;1,87;3,50;4,33;Home;Home_Draw;More_Two
+2023-01-29;Casa Pia;Santa Clara;Portugal 1;5;16;39;28;32;2,16;3,25;4,10;Home;Home_Draw;More_Two
+2023-01-29;Vilafranquense;Moreirense;Portugal 2;4;1;21;25;54;3,60;3,32;2,15;Away;Draw_Away;More_Two
+2023-01-29;E. Amadora;Feirense;Portugal 2;3;6;45;27;28;2,30;3,30;3,30;Home;Home_Draw;More_Two
+2023-01-31;Paços de Ferreira;Gil Vicente;Portugal 1;18;15;29;24;46;3,05;3,28;2,48;Home;Away_Home;More_Two
+2023-01-31;Union Berlim;Wolfsburgo;Alemanha T;8;3;45;25;30;2,38;3,30;3,35;Home;Home_Draw;More_Two
+2023-01-31;Arouca;Benfica;Portugal 1;6;1;7;13;80;10,50;5,70;1,36;Away;Draw_Away;More_Two
+2023-01-31;Inter Milao;Atalanta;Itália T;5;8;49;24;26;2,04;3,65;4,10;Home;Home_Draw;One
+2023-01-31;Newcastle;Southampton;Inglaterra TL;2;4;58;23;19;1,47;4,70;9,00;Home;Home_Draw;More_Two
+2023-02-01;Maritimo;Porto;Portugal 1;17;3;9;18;73;12,50;6,00;1,29;Away;Draw_Away;Two
+2023-02-01;Mainz;Bayern Munique;Alemanha T;7;4;14;16;70;6,20;4,90;1,40;Away;Draw_Away;More_Two
+2023-02-01;Manchester United;Nottingam Forest;Inglaterra TL;6;9;68;19;13;1,44;4,90;9,20;Home;Home_Draw;Two
+2023-02-01;Real Bétis;Barcelona ;Espanha 1;6;1;14;20;67;5,60;4,20;1,70;Away;Draw_Away;More_Two
+2023-02-01;Fiorentina;Torino;Itália T;5;4;53;24;24;2,12;3,40;4,00;Home;Home_Draw;More_Two
+2023-02-01;Sporting CP;Braga;Portugal 1;4;2;48;25;27;1,97;3,70;4,00;Home;Home_Draw;More_Two
+2023-02-02;Juventus;Lázio;Itália T;11;3;45;25;30;2,19;3,50;3,64;Home;Home_Draw;One
+2023-02-02;Real Madrid;Valência;Espanha 1;2;14;68;19;14;1,50;5,00;7,00;Home;Home_Draw;Two
+2023-02-04;Nacional;Torreense;Portugal 2;15;13;44;28;29;2,72;3,18;2,76;Home;Home_Draw;More_Two
+2023-02-04;Estoril;Guimarães;Portugal 1;14;6;31;29;40;2,75;3,20;2,90;Away;Away_Home;One
+2023-02-04;Benfica;Casa Pia;Portugal 1;1;5;76;15;9;1,21;7,80;19,00;Home;Home_Draw;More_Two
+2023-02-05;Trofense;Leixões;Portugal 2;17;11;29;27;45;2,62;3,28;2,72;Away;Away_Home;One
+2023-02-05;Gil Vicente;Arouca;Portugal 1;15;7;52;25;23;2,36;3,38;3,45;Draw;Home_Draw;Two
+2023-02-05;Nottingam Forest;Leeds United;Inglaterra 1;13;15;33;26;41;2,71;3,60;2,84;Home;Home_Draw;One
+2023-02-05;Fiorentina;Bolonha;Itália 1;12;9;68;18;14;1,89;3,66;4,90;Away;Away_Home;More_Two
+2023-02-05;Penafiel;Mafra;Portugal 2;12;14;42;27;32;2,10;3,34;3,60;Home;Home_Draw;One
+2023-02-05;Benfica B;Tondela;Portugal 2;10;7;30;24;46;2,57;3,48;2,55;Home;Home_Draw;More_Two
+2023-02-05;Chaves;Maritimo;Portugal 1;10;17;51;26;23;2,16;3,36;3,75;Home;Home_Draw;More_Two
+2023-02-05;Tottenham;Manchester City;Inglaterra 1;5;2;24;23;53;4,70;4,30;1,78;Home;Away_Home;One
+2023-02-05;Braga;Famalicão;Portugal 1;3;12;64;22;14;1,41;5,10;8,00;Home;Home_Draw;More_Two
+2023-02-05;Porto;Vizela;Portugal 1;2;8;85;10;5;1,22;7,60;16,50;Home;Home_Draw;Two
+2023-02-05;Inter Milao;Milan;Itália 1;2;5;51;24;26;2,04;3,65;4,20;Home;Home_Draw;One
+2023-02-06;Rio Ave;Sporting;Portugal 1;11;4;15;22;63;7,60;4,50;1,50;Away;Draw_Away;One
+2023-02-06;Farul;Universatea Craiova;Roménia 1;2;5;33;29;38;2,70;3,18;2,90;Home;Home_Draw;More_Two
+2023-02-11;Valência;Athletic Bilbao;Espanha 1;17;8;36;27;37;3,25;3,38;2,50;Away;Draw_Away;More_Two
+2023-02-11;Fulham;Nottingam Forest;Inglaterra 1;8;13;55;23;22;1,98;3,70;4,50;Home;Home_Draw;Two
+2023-02-11;Arouca;Santa Clara;Portugal 1;7;16;36;28;35;2,18;3,36;3,90;Home;Home_Draw;One
+2023-02-11;Guimarães;Portimonense;Portugal 1;6;11;57;25;18;1,86;3,54;4,60;Home;Home_Draw;One
+2023-02-11;Vilafranquense;Trofense;Portugal 2;5;7;45;27;28;1,79;3,50;4,90;Away;Away_Home;One
+2023-02-11;Lázio;Atalanta;Itália 1;4;5;39;26;35;2,50;3,56;3,10;Away;Away_Home;Two
+2023-02-12;Maritimo;Braga;Portugal 1;17;3;18;22;60;6,00;4,20;1,66;Away;Draw_Away;More_Two
+2023-02-12;Leeds United;Manchester United;Inglaterra 1;16;3;33;24;43;4,10;4,00;1,98;Away;Draw_Away;Two
+2023-02-12;Famalicão;Gil Vicente;Portugal 1;13;15;52;25;24;2,24;3,40;3,50;Away;Away_Home;One
+2023-02-12;Oliveirense;Porto B;Portugal 2;10;6;32;26;42;2,75;3,38;2,55;Home;Away_Home;More_Two
+2023-02-12;Juventus;Fiorentina;Itália 1;10;13;46;25;29;1,91;3,76;4,70;Home;Home_Draw;One
+2023-02-12;Villarreal;Barcelona ;Espanha 1;6;1;16;20;65;4,60;4,10;1,84;Away;Draw_Away;One
+2023-02-12;Académico Viseu;Farense;Portugal 2;4;2;46;24;30;2,23;3,34;3,30;Home;Home_Draw;Two
+2023-02-12;Sporting;Porto;Portugal 1;4;2;29;26;46;2,75;3,50;2,68;Away;Draw_Away;More_Two
+2023-02-14;Milan;Tottenham;UEFA Champions League;13;8;40;20;40;2,40;3,20;2,90;Home;Home_Draw;One
+2023-02-14;PSG;Bayern Munique;UEFA Champions League;8;4;40;20;40;2,70;3,50;2,40;Away;Draw_Away;One
+2023-02-15;Stoke City;Huddersfield Town;Inglaterra 2;19;23;50;27;24;1,90;3,50;5,20;Home;Home_Draw;More_Two
+2023-02-15;West Bromwich Albion;Blackburn Rovers;Inglaterra 2;10;9;65;21;14;1,65;4,00;6,60;Draw;Home_Draw;Two
+2023-02-15;Club Brugge;Benfica;UEFA Champions League;5;1;16;19;65;5,00;3,70;1,89;Away;Draw_Away;Two
+2023-02-15;Dortmund;Chelsea;UEFA Champions League;3;3;39;24;37;2,45;3,50;3,25;Home;Home_Draw;One
+2023-02-15;Real Madrid;Elche;Espanha 1;2;20;86;10;4;1,24;7,50;16,00;Home;Home_Draw;More_Two
+2023-02-15;Arsenal ;Manchester City;Inglaterra 1;1;2;31;25;44;3,25;3,52;2,45;Away;Draw_Away;More_Two
+2023-02-16;Bodo / Glimt;Lech Poznan;UEFA Conference League;13;3;59;20;21;1,96;3,90;4,20;Draw;Home_Draw;Zero
+2023-02-16;Braga;Fiorentina;UEFA Conference League;9;6;45;25;30;2,50;3,52;3,10;Away;Away_Home;More_Two
+2023-02-16;Shakhtar Donetsk;Rennes;UEFA Europa League;6;9;20;22;58;3,40;3,62;2,34;Home;Away_Home;More_Two
+2023-02-16;Salzburg;Roma;UEFA Europa League;6;5;46;24;30;3,30;3,22;2,61;Home;Away_Home;One
+2023-02-16;Bayer Leverkusen;Mónaco;UEFA Europa League;6;5;49;25;27;2,14;3,76;3,70;Away;Away_Home;More_Two
+2023-02-16;Goa;Chennaiyin;India 1;6;8;52;21;27;1,78;4,40;4,40;Away;Away_Home;More_Two
+2023-02-16;AEK Larnaca;Dnipro;UEFA Conference League;6;6;44;27;30;2,32;3,45;3,50;Home;Home_Draw;One
+2023-02-16;Juventus;Nantes;UEFA Europa League;5;3;50;26;23;1,42;5,20;10,00;Draw;Home_Draw;Two
+2023-02-16;Lázio;Cluj;UEFA Conference League;5;4;51;24;24;1,35;4,84;11,00;Home;Home_Draw;One
+2023-02-16;Sporting;Midtjylland;UEFA Europa League;5;5;66;19;15;1,36;5,70;11,00;Draw;Home_Draw;Two
+2023-02-16;Qarabag;Gent;UEFA Conference League;5;9;52;23;24;2,36;3,45;3,60;Home;Home_Draw;One
+2023-02-16;Sevilha;PSV;UEFA Europa League;5;4;39;24;37;2,25;3,52;3,75;Home;Home_Draw;More_Two
+2023-02-16;Trabzonspor;Basileia;UEFA Conference League;5;9;54;23;23;1,80;3,90;5,20;Home;Home_Draw;One
+2023-02-16;Sheriff;Partizan;UEFA Conference League;5;7;60;24;16;3,30;3,20;2,74;Away;Draw_Away;One
+2023-02-16;Ludogorets;Anderlecht;UEFA Conference League;3;4;39;27;34;2,42;3,30;3,45;Home;Home_Draw;One
+2023-02-16;Ajax;Union Berlim;UEFA Europa League;3;4;72;16;12;3,65;3,56;4,00;Draw;Home_Draw;Zero
+2023-02-16;Future;Haras El Hodood;Egipto 1;3;16;46;30;25;1,66;3,65;7,60;Home;Home_Draw;One
+2023-02-16;Pyramids;Enppi;Egipto 1;2;14;59;24;17;1,54;4,40;7,40;Home;Home_Draw;More_Two
+2023-02-16;Barcelona;Manchester United;UEFA Europa League;1;4;66;19;14;1,81;4,00;5,00;Draw;Home_Draw;More_Two
+2023-02-17;Auxerre;Lyon;França 1;19;9;21;23;57;4,40;3,88;1,94;Home;Away_Home;More_Two
+2023-02-17;Sassuolo;Nápoles;Itália 1;15;1;12;17;72;5,80;4,40;1,67;Away;Draw_Away;Two
+2023-02-17;Mechelen;Genk;Belgica 1;13;1;23;21;57;4,33;4,10;1,91;Draw;Draw_Away;More_Two
+2023-02-17;Girona;Almeria;Espanha 1;11;15;54;25;21;1,89;3,82;4,70;Home;Home_Draw;More_Two
+2023-02-17;Shelbourne;Drogheda;Irlanda 1;7;4;63;21;15;1,65;4,00;6,20;Draw;Home_Draw;Zero
+2023-02-17;Belupo;Sibenik;Croácia 1;4;9;50;30;20;2,08;3,34;4,10;Away;Away_Home;One
+2023-02-17;Paderborn;Kaiserslautern;Alemanha 2;4;5;51;24;25;1,95;3,90;4,20;Home;Home_Draw;One
+2023-02-17;Al-Nassr;Al Taawon;Arábia Saudita 1;3;5;56;23;21;1,48;4,80;7,60;Home;Home_Draw;More_Two
+2023-02-21;Frankfurt;Nápoles;UEFA Champions League;6;1;20;21;59;3,30;3,50;2,15;Away;Draw_Away;Two
+2023-02-21;Liverpool;Real Madrid;UEFA Champions League;5;1;44;26;30;2,25;3,60;3,00;Away;Away_Home;More_Two
+2023-02-22;Moretos;Zacatecas;México 1;4;12;50;30;20;1,93;3,50;3,74;Draw;Home_Draw;More_Two
+2023-02-22;Leipzig;Manchester City;UEFA Champions League;4;4;19;22;60;4,50;3,80;1,75;Draw;Draw_Away;Two
+2023-02-22;Celje;Bravo;Eslovénia 1;3;7;49;26;25;1,84;3,58;4,28;Home;Home_Draw;More_Two
+2023-02-22;Inter Milao;Porto;UEFA Champions League;2;1;41;27;32;1,70;3,60;5,25;Home;Home_Draw;One
+2023-02-22;Ljubljana;Gorica;Eslovénia 1;1;10;56;24;20;1,33;4,20;8,00;Home;Home_Draw;More_Two
+2023-02-23;Gent;Qarabag;UEFA Conference League;10;3;43;25;32;1,91;3,30;4,33;Home;Home_Draw;Two
+2023-02-23;Basileia;Trabzonspor;UEFA Conference League;8;4;49;23;28;2,30;3,40;3,10;Home;Home_Draw;Two
+2023-02-23;PSV;Sevilha;UEFA Europa League;8;4;62;20;18;2,05;3,50;3,60;Home;Home_Draw;Two
+2023-02-23;Rennes;Shakhtar;UEFA Europa League;8;7;59;21;20;1,62;3,80;5,25;Home;Home_Draw;One
+2023-02-23;Mónaco;Leverkusen;UEFA Europa League;6;10;51;23;26;2,20;3,50;3,20;Away;Away_Home;More_Two
+2023-02-23;Dnipro;Larnaka;UEFA Conference League;6;5;41;27;32;2,20;3,40;3,30;Draw;Home_Draw;Zero
+2023-02-23;Partizan;Sheriff;UEFA Conference League;5;5;38;26;37;1,91;3,30;4,50;Away;Away_Home;More_Two
+2023-02-23;Manchester United;Barcelona ;UEFA Europa League;5;3;39;26;35;2,25;3,10;3,30;Home;Home_Draw;More_Two
+2023-02-23;Fiorentina;Braga;UEFA Conference League;5;7;49;24;27;1,73;3,60;4,75;Home;Home_Draw;More_Two
+2023-02-23;Nantes;Juventus;UEFA Europa League;5;1;30;26;44;4,75;3,40;1,75;Away;Draw_Away;More_Two
+2023-02-23;Cluj;Lazio;UEFA Conference League;5;4;30;26;44;4,50;3,30;1,85;Draw;Draw_Away;Zero
+2023-02-23;Lech Pozman;Bodo / Glimt;UEFA Conference League;4;11;39;24;39;2,50;3,25;2,90;Home;Home_Draw;One
+2023-02-23;Anderlecht;Ludogorets;UEFA Conference League;4;3;44;26;30;1,91;3,60;4,00;Home;Home_Draw;More_Two
+2023-02-23;Roma ;Salzburgo;UEFA Europa League;4;2;47;25;28;1,65;3,80;5,00;Home;Home_Draw;Two
+2023-02-23;Midtjylland;Sporting;UEFA Europa League;4;4;26;25;49;4,33;3,50;1,83;Away;Draw_Away;More_Two
+2023-02-23;Union Berlim;Ajax;UEFA Europa League;3;1;54;22;24;2,20;3,20;3,30;Home;Home_Draw;More_Two
+2023-02-24;Elche;Real Betis;Espanha 1;20;5;29;26;45;3,70;3,30;1,98;Away;Draw_Away;More_Two
+2023-02-24;Trofense;Penafiel;Portugal 2;17;11;32;29;39;2,57;2,95;2,67;Away;Away_Home;More_Two
+2023-02-24;Famalicão;Portimonense;Portugal 1;13;10;61;22;16;1,78;3,40;4,45;Home;Home_Draw;One
+2023-02-24;Mainz;Monchagladbach;Alemanha 1;11;8;46;24;30;2,10;3,55;3,10;Home;Home_Draw;More_Two
+2023-02-24;Fulham;Wolves;Inglaterra 1;6;15;51;24;25;2,45;3,05;2,92;Draw;Home_Draw;Two
+2023-02-24;Lille;Brest;França 1;6;16;71;18;11;1,28;5,40;8,75;Home;Home_Draw;More_Two
+2023-02-26;Sevilha;Osasuna;Espanha 1;13;10;58;24;19;1,75;3,40;4,65;Away;Away_Home;More_Two
+2023-02-26;Vitesse;Ajax;Países Baixos 1;13;3;19;21;61;5,80;4,75;1,44;Away;Draw_Away;More_Two
+2023-02-26;Manchester United;Newcastle;Inglaterra TL;5;5;45;25;29;2,10;3,20;3,40;Home;Home_Draw;Two
+2023-02-26;Tottenham;Chelsea;Inglaterra 1;4;10;45;26;29;2,77;3,05;2,55;Home;Away_Home;Two
+2023-02-26;Mónaco;Nice;França 1;3;9;60;22;18;1,93;3,55;3,55;Away;Away_Home;More_Two
+2023-02-26;Bayern Munique;União Berlim;Alemanha 1;2;3;77;15;9;1,35;4,80;7,60;Home;Home_Draw;More_Two
+2023-02-27;Verona;Fiorentina;Itália 1;18;15;27;26;47;3,35;3,15;2,15;Away;Draw_Away;More_Two
+2023-02-27;Swansea;Rotherham;Inglaterra 2;15;20;68;19;13;1,50;4,10;6,10;Draw;Home_Draw;Two
+2023-02-27;Colonia;Freiburg II;Alemanha 3;11;2;39;26;34;2,42;3,10;2,75;Away;Away_Home;More_Two
+2023-02-27;Villarreal;Getafe;Espanha 1;9;19;61;22;16;1,57;3,60;5,90;Home;Home_Draw;More_Two
+2023-02-27;Petrolul;Cluj;Roménia 1;8;2;25;28;47;5,20;3,50;1,65;Away;Draw_Away;More_Two
+2023-02-27;Guimarães;Braga;Portugal 1;5;3;34;26;40;3,90;3,45;1,87;Home;Away_Home;More_Two
+2023-02-27;Granada;Malaga;Espanha 2;5;20;57;25;18;1,62;3,60;5,50;Home;Home_Draw;One
+2023-02-27;Lázio;Sampdoria;Itália 1;5;19;68;20;12;1,36;4,70;7,60;Home;Home_Draw;One
+2023-07-07;Drogheda;Shamrock;Irlanda 1;8;1;21;25;54;5,00;3,00;1,50;Draw;Home_Draw;Zero
+2023-07-07;Bohemians;Dundalk;Irlanda 1;5;4;43;27;30;1,90;3,50;4,50;Home;Away_Home;More_Two
+2023-07-07;St. Patricks;Cork;Irlanda 1;2;9;63;22;15;1,30;3,00;5,00;Draw;Draw_Away;Two
+2023-07-08;Haka Valkeakovski;Inter Turku;Finlândia 1;10;6;33;26;41;2,80;3,65;2,84;Draw;Home_Draw;More_Two
+2023-07-08;HJK Helsinquia;Lahti;Finlândia 1;2;11;63;22;15;1,34;5,90;11,50;Away;Away_Home;One
+2023-07-08;Kuopio ;VPS;Finlândia 1;1;12;60;23;17;2,00;3,70;5,40;Away;Away_Home;One
+2023-07-09;Coritiba;Américo Mineiro;Brasil 1;20;19;40;28;33;2,38;3,25;2,90;Home;Home_Draw;More_Two
+2023-07-09;Vasco da Gama;Cruzeiro;Brasil 1;18;12;44;27;29;2,62;3,25;2,62;Away;Away_Home;One
+2023-07-09;Santos;Goiás;Brasil 1;14;17;57;25;18;1,85;3,40;4,33;Home;Home_Draw;More_Two
+2023-07-09;Rosenborg;Lillestrom;Noruega 1;12;7;45;24;31;2,25;3,40;3,00;Away;Away_Home;More_Two
+2023-07-09;Mariehamn;AC Oulu;Finlândia 1;12;4;32;26;43;2,90;3,30;2,22;Away;Draw_Away;More_Two
+2023-07-09;Sirius;Hammarby;Suécia 1;12;10;32;25;43;2,69;3,55;2,50;Away;Draw_Away;More_Two
+2023-07-09;Fortaleza;Atlético Paranaense;Brasil 1;11;9;63;22;15;1,80;3,60;4,50;Home;Home_Draw;One
+2023-07-09;Atlético Mineiro;Corinthians;Brasil 1;10;16;67;22;11;1,55;3,75;6,50;Away;Away_Home;One
+2023-07-09;Kapa;Jaro;Finlândia 2;10;11;31;25;44;2,35;3,05;2,30;Away;Draw_Away;More_Two
+2023-07-09;Stromsgodset;Sarpsborg 08 ;Noruega 1;8;5;35;24;41;3,00;3,75;2,00;Home;Away_Home;More_Two
+2023-07-09;Strömsgodset;Sarpsborg 08 ;Noruega 1;8;5;34;24;42;2,88;3,60;2,25;Home;Away_Home;More_Two
+2023-07-09;Molde;SC Brann;Noruega 1;6;3;49;20;30;2,00;3,60;3,60;Home;Home_Draw;Two
+2023-07-09;Fluminense;Internacional;Brasil 1;6;8;57;25;19;1,80;3,30;4,50;Home;Home_Draw;Two
+2023-07-09;Bragantino;São Paulo;Brasil 1;5;7;41;27;32;1,91;3,50;3,80;Draw;Home_Draw;Zero
+2023-07-09;Kalmar;Elfsborg;Suécia 1;5;2;37;27;37;3,16;3,58;2,20;Away;Draw_Away;More_Two
+2023-07-09;Palmeiras;Flamengo;Brasil 1;4;3;63;20;17;2,00;3,40;3,25;Draw;Home_Draw;Two
+2023-07-09;Grémio;Botafogo;Brasil 1;2;1;56;25;18;2,15;3,20;3,30;Away;Away_Home;Two
+2023-07-15;Vålerenga IF;Molde;Noruega 1;13;5;32;24;44;4,00;3,60;1,85;Away;Draw_Away;More_Two
+2023-07-15;Häcken;Brommapojkarna;Suécia 1;3;9;62;20;19;1,27;6,30;9,45;Home;Home_Draw;More_Two
+2023-07-16;Aalesunds FC;Odds BK;Noruega 1;16;10;40;25;34;2,30;3,30;3,10;Away;Away_Home;More_Two
+2023-07-16;Rosenborg;Tromsø;Noruega 1;12;2;54;24;22;1,95;3,75;3,60;Home;Home_Draw;More_Two
+2023-07-16;Atlético Paranaense;Bahia;Brasil 1;11;16;61;23;16;1,67;3,60;5,00;Home;Home_Draw;Two
+2023-07-16;Hammarby;Kalmar;Suécia 1;10;6;55;24;21;1,93;3,53;4,05;Home;Home_Draw;More_Two
+2023-07-16;Internacional;Palmeiras;Brasil 1;10;5;42;29;29;2,80;3,20;2,45;Draw;Draw_Away;Zero
+2023-07-16;Cruzeiro;Coritiba;Brasil 1;9;18;65;21;14;1,65;3,75;5,25;Draw;Home_Draw;Zero
+2023-07-16;Stabaek IF;Viking IF;Noruega 1;9;3;39;25;36;2,90;3,40;2,30;Away;Draw_Away;One
+2023-07-16;Mjällby;IFK Norrköping;Suécia 1;8;7;43;27;30;2,20;3,35;3,55;Away;Away_Home;More_Two
+2023-07-16;São Paulo;Santos;Brasil 1;8;13;65;22;13;1,57;3,75;5,75;Home;Home_Draw;More_Two
+2023-07-16;Fortaleza;Cuiabá;Brasil 1;7;14;62;23;15;1,60;3,80;5,25;Away;Away_Home;One
+2023-07-16;Fluminense;Flamengo;Brasil 1;4;2;47;25;28;2,70;3,20;2,45;Draw;Draw_Away;Zero
+2023-07-16;Botafogo;Bragantino-SP;Brasil 1;1;6;61;23;17;1,95;3,40;3,80;Home;Home_Draw;Two
+2023-07-23;Santos;Botafogo;Brasil 1;14;1;30;30;40;3,85;3,25;2,25;Draw;Draw_Away;More_Two
+2023-07-23;Portimonense;CF Estrela;Portugal TL;13;8;31;26;43;2,15;2,85;2,72;Home;Home_Draw;More_Two
+2023-07-23;Leixões;Feirense;Portugal TL;12;8;28;35;37;2,25;2,90;2,55;Draw;Home_Draw;Zero
+2023-07-23;Oliveirense;Gil Vicente;Portugal TL;10;7;23;38;39;3,10;3,00;1,90;Home;Away_Home;One
+2023-07-23;Moreirense;Farense;Portugal TL;9;2;50;33;17;2,05;2,95;2,80;Draw;Home_Draw;Two
+2023-07-23;Vizela;Maritimo;Portugal TL;8;8;40;41;19;1,75;3,05;3,60;Home;Home_Draw;More_Two
+2023-07-23;Bragantino;Internacional;Brasil 1;7;11;49;29;22;2,22;3,36;3,80;Draw;Home_Draw;Zero
+2023-07-23;Palmeiras;Fortaleza;Brasil 1;6;9;55;26;19;1,73;4,00;5,50;Home;Home_Draw;More_Two
+2023-07-23;AVS;Desp. Chaves;Portugal TL;6;3;22;19;59;3,30;2,95;1,85;Draw;Draw_Away;Two
+2023-07-23;Belenenses;Famalicão;Portugal TL;5;8;26;34;40;3,50;3,05;1,78;Home;Away_Home;More_Two
+2023-07-23;Nacional;Penafiel;Portugal TL;5;12;44;38;18;2,15;2,90;2,72;Draw;Home_Draw;One
+2023-07-23;Estoril;Paços de Ferreira;Portugal TL;4;11;34;41;25;1,82;3,00;3,40;Home;Home_Draw;Two
+2023-07-23;Países Baixo;Portugal;Mundial Feminino;2;3;44;27;29;1,39;3,90;4,90;Home;Home_Draw;One
+2023-07-23;Vilaverdense;Casa Pia;Portugal TL;1;6;31;34;35;3,75;3,20;1,65;Away;Draw_Away;Two
+2023-07-29;Corinthians;Vasco da Gama;Brasil 1;15;20;50;27;24;1,85;3,30;4,50;Home;Home_Draw;More_Two
+2023-07-29;Santa Clara;Tondela;Portugal TL;14;8;31;36;33;1,72;3,10;3,60;Draw;Home_Draw;Zero
+2023-07-29;Internacional;Cuiabá;Brasil 1;10;12;58;25;17;1,80;3,30;4,50;Away;Away_Home;More_Two
+2023-07-29;Fortaleza;Bragantino;Brasil 1;9;8;57;24;19;1,98;3,30;3,65;Away;Away_Home;More_Two
+2023-07-29;Fluminense;Santos;Brasil 1;7;14;66;21;12;1,52;3,85;6,20;Home;Home_Draw;One
+2023-07-29;Atlético Paranaense;Cruzeiro;Brasil 1;5;11;42;28;30;1,95;3,35;3,70;Draw;Home_Draw;More_Two
+2023-07-30;América Mineiro;Palmeiras;Brasil 1;19;4;30;27;43;3,65;3,40;1,95;Away;Draw_Away;More_Two
+2023-07-30;Atlético Mineiro;Flamengo;Brasil 1;13;3;48;26;26;2,35;3,15;2,95;Away;Away_Home;More_Two
+2023-07-30;Royal Antwerp;Cercle Brugge;Bélgica 1;8;9;59;22;19;1,75;3,65;4,25;Home;Home_Draw;One
+2023-07-30;St. Truiden;Standard Liége;Bélgica 1;7;14;48;24;28;2,57;3,25;2,60;Home;Home_Draw;One
+2023-07-30;Club Brugge;Mechelen;Bélgica 1;7;10;57;23;21;1,44;4,65;6,00;Draw;Home_Draw;Two
+2023-07-30;São Paulo;Bahia;Brasil 1;6;17;70;19;11;1,53;3,75;6,20;Draw;Home_Draw;Zero
+2023-07-30;Gent;Kortrijk;Bélgica 1;5;7;70;17;12;1,30;5,30;8,25;Home;Home_Draw;More_Two
+2023-07-30;Botafogo;Coritiba;Brasil 1;1;18;71;19;10;1,50;3,90;6,50;Home;Home_Draw;More_Two
+2023-08-03;Bohemians 1905;Bodo / Glimt;UEFA Conference League;9;3;14;17;69;4,00;3,60;1,80;Away;Draw_Away;More_Two
+2023-08-03;Rosenborg;Crusaders;UEFA Conference League;4;6;64;21;16;1,29;5,00;9,50;Draw;Home_Draw;Two
+2023-08-03;Petroclub;Maccabi Tel Aviv;UEFA Conference League;4;6;19;24;57;7,50;4,33;1,40;Away;Draw_Away;Two
+2023-08-03;Pogon Szczecin;Linfield;UEFA Conference League;3;7;54;23;24;1,30;5,25;8,00;Home;Home_Draw;More_Two
+2023-08-03;Tobol;Basileia;UEFA Conference League;1;7;37;25;39;3,20;3,40;2,10;Away;Draw_Away;More_Two
+2023-08-05;Goiás;Fortaleza;Brasil 1;16;11;42;30;28;3,00;3,35;2,62;Home;Away_Home;One
+2023-08-05;Santos;Atlético Paranaense;Brasil 1;15;7;49;28;23;2,46;3,20;3,30;Draw;Home_Draw;Two
+2023-08-05;Internacional;Corinthians;Brasil 1;12;14;58;26;16;2,20;3,25;4,20;Draw;Home_Draw;More_Two
+2023-08-05;Cercle Brugge;Charleroi;Bélgica 1;7;10;49;24;27;1,97;3,90;4,00;Home;Home_Draw;Two
+2023-08-05;Manchester City;Arsenal;Inglaterra Super Taça;3;5;61;22;17;1,84;4,35;4,75;Draw;Home_Draw;Two
+2023-08-06;Vasco da Gama;Grémio;Brasil 1;20;4;38;29;33;2,96;3,40;2,66;Home;Away_Home;One
+2023-08-06;Coritiba;Bragantino;Brasil 1;18;6;39;27;34;3,00;3,36;2,55;Away;Draw_Away;One
+2023-08-06;Bahia;Américo Mineiro;Brasil 1;17;19;53;24;23;2,02;3,60;3,75;Home;Home_Draw;More_Two
+2023-08-06;Sandefjord;Sarpsborg 08 ;Noruega 1;15;7;32;22;46;4,75;4,33;1,65;Home;Away_Home;More_Two
+2023-08-06;Anderlecht;Royal Antwerp;Bélgica 1;12;6;34;27;39;2,63;3,75;2,66;Home;Home_Draw;One
+2023-08-06;Cruzeiro;Botafogo;Brasil 1;10;1;46;28;26;2,45;3,35;3,30;Draw;Home_Draw;Zero
+2023-08-06;Westerlo;Club Brugge;Bélgica 1;9;5;25;23;52;3,80;3,84;1,98;Away;Draw_Away;One
+2023-08-06;Kraft;TP-47;Finlândia ;8;9;37;24;40;2,10;3,50;2,88;Draw;Home_Draw;More_Two
+2023-08-06;São Paulo;Atlético Mineiro;Brasil 1;8;13;47;27;27;2,20;3,22;3,60;Away;Away_Home;Two
+2023-08-06;Mechelen;Gent;Bélgica 1;7;7;24;22;54;3,95;3,96;1,92;Away;Draw_Away;One
+2023-08-06;Kfum;Asane;Noruega 2;5;15;53;22;25;1,55;4,33;5,75;Home;Home_Draw;More_Two
+2023-08-06;Fluminense;Palmeiras;Brasil 1;5;3;44;28;28;2,63;3,35;2,98;Home;Home_Draw;More_Two
+2023-08-06;Breidablik;KR;Islândia;3;6;53;22;26;1,62;4,20;5,00;Away;Away_Home;More_Two
+2023-08-06;Viking;Bodo / Glimt;Noruega 1;2;1;24;22;54;2,70;3,75;2,40;Home;Away_Home;More_Two
+2023-08-07;Varbergs;Mjallby;Suécia 1;16;9;31;28;42;2,90;3,25;2,45;Away;Draw_Away;More_Two
+2023-08-07;Cantolao;Huancayo;Peru 1;15;6;24;26;50;4,50;3,50;1,83;Draw;Draw_Away;Two
+2023-08-07;Aldosivi;Estudiantes;Argentina 1;13;12;48;28;24;2,40;3,10;3,20;Draw;Home_Draw;Two
+2023-08-07;Garcillaso;Deportivo Municipal;Peru 1;10;19;63;20;16;1,33;5,75;7,50;Home;Home_Draw;More_Two
+2023-08-07;KTP;Inter Turku;Finlândia 1;9;7;33;26;42;3,30;3,50;2,15;Away;Draw_Away;More_Two
+2023-08-07;Voluntari;Rapid;Roménia 1;7;8;33;28;39;3,25;3,30;2,10;Home;Away_Home;More_Two
+2023-08-07;Norrkoping;Gotenborg;Suécia 1;6;15;48;26;26;2,10;3,30;3,60;Home;Home_Draw;More_Two
+2023-08-07;Wexford;Waterford;Irlanda 1;5;2;16;22;62;5,75;5,00;1,36;Away;Draw_Away;One
+2023-08-07;Malmo;Halmstads;Suécia 1;3;8;75;16;9;1,29;6,00;9,50;Home;Home_Draw;More_Two
+2023-08-07;Valur;KA;Islândia 1;2;7;57;22;21;1,45;4,75;6,00;Home;Home_Draw;More_Two
+2023-08-08;Quito;Cuenca;Equador 1;13;14;79;15;7;1,33;5,00;9,50;Home;Home_Draw;Two
+2023-08-08;Meizhou;Yatai;China 1;13;9;39;25;36;2,30;3,50;3,00;Home;Home_Draw;More_Two
+2023-08-08;Qingdao;Shanghai;China 1;11;1;19;24;57;6,50;4,33;1,50;Away;Draw_Away;More_Two
+2023-08-08;Braga;Backa Topola;UEFA Champions League;7;8;70;18;12;1,25;6,00;11,00;Home;Home_Draw;More_Two
+2023-08-08;Zhejiang;Nantong;China 1;6;15;41;27;32;1,57;4,20;5,75;Draw;Home_Draw;Two
+2023-08-08;FH;Vikingur;Islândia 1;6;1;34;23;43;3,80;3,80;1,83;Away;Draw_Away;More_Two
+2023-08-08;Copenhaga;Sparta Praga;UEFA Champions League;6;3;41;25;34;2,20;3,40;3,30;Draw;Home_Draw;Zero
+2023-08-08;PSV;Sturm Graz;UEFA Champions League;6;5;55;20;25;1,53;4,00;6,00;Home;Home_Draw;More_Two
+2023-08-08;Grotta;IA Akranes;Islândia 2;5;3;25;21;54;3,10;3,75;1,91;Away;Draw_Away;More_Two
+2023-08-08;Derby County;Blackpool;Inglaterra Taça da Liga;5;5;50;24;25;2,00;3,75;3,50;Away;Away_Home;Two
+2023-08-08;Olimpija;Galatasaray;UEFA Champions League;5;3;29;24;47;4,33;3,60;1,83;Away;Draw_Away;More_Two
+2023-08-08;Rakow;Aris Salonica;UEFA Champions League;5;9;59;22;19;1,95;3,60;3,60;Home;Home_Draw;More_Two
+2023-08-08;Klaksvik;Molde;UEFA Champions League;3;2;30;36;34;4,75;4,00;1,70;Home;Away_Home;More_Two
+2023-08-09;Asane;Mjondalen;Noruega 2;15;9;50;22;28;1,91;3,80;3,75;Home;Home_Draw;More_Two
+2023-08-09;AEK Larnaca;Macabi Tel Aviv;UEFA Conference League;6;4;31;26;43;3,50;3,40;2,05;Draw;Draw_Away;Two
+2023-08-09;Start;Skeid;Noruega 2;6;16;62;20;18;1,50;4,50;6,00;Home;Home_Draw;More_Two
+2023-08-09;Gent;Pogon Szczecin;UEFA Conference League;6;5;53;22;24;1,44;5,00;6,50;Home;Home_Draw;More_Two
+2023-08-09;Panathinaikos;Marselha;UEFA Champions League;6;8;34;28;38;3,50;3,25;2,15;Home;Away_Home;One
+2023-08-09;Benfica;Porto;Portugal Super Taça;6;5;39;26;35;2,65;3,30;2,90;Home;Home_Draw;Two
+2023-08-09;Lublin;Lech Poznan II;Polónia Taça;5;12;59;20;21;1,30;4,75;7,50;Home;Home_Draw;One
+2023-08-09;Slovan Bratislava;Macabi Haifa;UEFA Champions League;4;3;36;38;26;3,40;3,10;2,25;Away;Draw_Away;More_Two
+2023-08-09;Rangers;Servette;UEFA Champions League;4;7;56;22;22;1,45;4,75;6,00;Home;Home_Draw;More_Two
+2023-08-10;Bodo / Glimt;Pyunik;UEFA Conference League;9;3;67;19;14;1,20;6,00;8,50;Home;Home_Draw;More_Two
+2023-08-10;Neftci;Besiktas;UEFA Conference League;7;3;9;16;75;5,20;3,90;1,53;Away;Draw_Away;More_Two
+2023-08-10;TPS;JJK;Finlândia 1;5;12;70;17;13;1,20;5,75;10,00;Home;Home_Draw;Two
+2023-08-10;Santa Coloma;AZ Alkmaar;UEFA Conference League;5;6;13;20;66;21,00;8,00;1,10;Away;Draw_Away;One
+2023-08-10;Fenerbace;Maribor;UEFA Conference League;3;5;69;17;13;1,14;7,00;17,00;Home;Home_Draw;More_Two
+2023-08-11;Groningen;Jong Ajax;Países Baixos 2;16;7;55;21;24;1,57;4,33;5,25;Home;Home_Draw;More_Two
+2023-08-11;Aegir;Thor;Islândia 2;12;9;38;24;38;3,60;3,75;1,80;Away;Draw_Away;More_Two
+2023-08-11;Udinese;Catanzaro;Itália Taça;7;6;48;23;28;1,40;4,50;7,50;Home;Home_Draw;More_Two
+2023-08-11;Copenhaga;OB;Dinamarca 1;2;6;65;19;17;1,45;5,00;6,00;Home;Home_Draw;More_Two
+2023-08-12;Penafiel;Leixões;Portugal 2;12;12;41;26;33;2,05;3,20;3,25;Home;Home_Draw;More_Two
+2023-08-12;Estrela Amadora;Guimarães;Portugal 1;10;7;32;27;42;2,30;3,20;2,90;Away;Away_Home;One
+2023-08-12;Athletic Bilbau;Real Madrid;Espanha 1;10;8;34;26;40;3,40;3,50;2,10;Away;Draw_Away;Two
+2023-08-12;Chelsea;Liverpool;Inglaterra 1;9;5;29;23;48;2,90;3,40;2,38;Draw;Draw_Away;Two
+2023-08-12;Rio Ave;Chaves;Portugal 1;8;6;38;28;34;2,15;3,20;3,30;Home;Home_Draw;Two
+2023-08-12;Académico Viseu;Vilaverdense;Portugal 2;8;1;42;26;32;1,73;3,60;3,80;Draw;Home_Draw;Two
+2023-08-12;Gil Vicente;Portimonense;Portugal 1;7;13;45;27;28;1,91;3,20;4,00;Home;Home_Draw;More_Two
+2023-08-12;Benfica B;Mafra;Portugal 2;7;6;36;27;37;2,25;3,50;2,63;Home;Home_Draw;More_Two
+2023-08-12;Villarreal;Real Betis;Espanha 1;6;4;49;24;27;1,73;4,00;4,33;Away;Away_Home;More_Two
+2023-08-12;Sporting;Vizela;Portugal 1;5;8;66;20;15;1,14;6,50;17,00;Home;Home_Draw;More_Two
+2023-08-12;Arouca;Estoril;Portugal 1;4;4;45;28;28;2,05;3,20;3,40;Home;Home_Draw;More_Two
+2023-08-12;Farense;Casa Pia;Portugal 1;2;7;37;28;35;2,45;3,10;2,80;Away;Away_Home;More_Two
+2023-08-12;Aves;Belenenses;Portugal 2;1;3;35;31;34;1,85;3,30;3,70;Home;Home_Draw;One
+2023-08-12;Bayern Munique;Leipzig;Alemanha Super Taça;3;1;79;9;12;1,61;4,69;5,53;Away;Away_Home;More_Two
+2023-08-19;Portimonense;Boavista;Portugal 1;14;7;29;27;44;2,70;3,25;2,60;Away;Draw_Away;More_Two
+2023-08-19;Vizela;Arouca;Portugal 1;9;7;42;27;31;2,15;3,25;3,40;Draw;Home_Draw;More_Two
+2023-08-19;Feirense;Penafiel;Portugal 2;9;9;42;27;31;2,30;3,20;2,90;Home;Home_Draw;Two
+2023-08-19;Estoril;Rio Ave;Portugal 1;8;8;39;27;33;2,50;3,20;2,88;Home;Home_Draw;Two
+2023-08-19;Chaves;Braga;Portugal 1;8;5;19;22;59;4,75;4,00;1,65;Away;Draw_Away;More_Two
+2023-08-19;Tottenham;Manchester United;Inglaterra 1;8;4;47;24;29;2,90;3,60;2,30;Home;Away_Home;Two
+2023-08-19;Guimarães;Gil Vicente;Portugal 1;7;5;45;25;29;2,05;3,30;3,50;Home;Home_Draw;More_Two
+2023-08-19;Tondela;Académico Viseu;Portugal 2;7;8;51;26;24;2,20;3,25;3,00;Draw;Home_Draw;More_Two
+2023-08-19;Benfica;Estrela Amadora;Portugal 1;6;10;85;10;5;1,09;9,00;23,00;Home;Home_Draw;Two
+2023-08-19;Belenenses;Porto B;Portugal 2;5;5;36;25;38;2,60;3,20;2,50;Draw;Draw_Away;Two
+2023-08-19;West Ham;Chelsea;Inglaterra 1;5;9;36;26;38;3,50;3,50;2,10;Home;Away_Home;More_Two
+2023-08-19;Porto;Farense;Portugal 1;4;4;83;11;6;1,13;8,00;17,00;Home;Home_Draw;More_Two
+2023-08-19;Real Bétis;Atlético Madrid;Espanha 1;4;7;26;26;48;3,80;3,40;1,95;Draw;Draw_Away;Zero
+2023-08-19;Manchester City;Newcastle;Inglaterra 1;3;5;56;20;24;1,73;4,00;4,50;Home;Home_Draw;One
+2023-08-26;Arouca;Portimonense;Portugal 1;9;17;44;27;29;1,75;3,50;4,75;Draw;Home_Draw;Two
+2023-08-26;Everton;Wolves;Inglaterra 1;9;13;41;27;31;2,50;3,30;2,80;Away;Away_Home;One
+2023-08-26;Guimarães;Vizela;Portugal 1;8;8;47;27;27;1,85;3,30;4,33;Home;Home_Draw;Two
+2023-08-26;Boavista;Casa Pia;Portugal 1;8;7;38;28;35;2,20;3,20;3,40;Draw;Home_Draw;Two
+2023-08-26;Oiiveirense;Penafiel;Portugal 2;8;11;44;27;29;2,25;3,25;2,75;Home;Home_Draw;More_Two
+2023-08-26;Sporting;Famalicão;Portugal 1;7;7;65;20;15;1,25;6,50;9,00;Home;Home_Draw;One
+2023-08-26;Santa Clara;Vilaverdense;Portugal 2;7;7;45;31;24;1,55;3,50;5,50;Home;Home_Draw;Two
+2023-08-26;Farense;Desp. Chaves;Portugal 1;6;11;37;28;36;2,20;3,30;3,25;Home;Home_Draw;More_Two
+2023-08-26;Belenenses;Mafra;Portugal 2;6;9;42;26;32;2,38;3,25;2,63;Draw;Home_Draw;Two
+2023-08-26;Villarreal;Barcelona ;Espanha 1;6;5;27;24;49;3,60;3,50;2,00;Away;Draw_Away;More_Two
+2023-08-26;Athletic Bilbau;Real Betis;Espanha 1;6;4;47;26;26;1,85;3,50;4,20;Home;Home_Draw;More_Two
+2023-08-26;Gil Vicente;Benfica;Portugal 1;4;6;19;22;60;7,50;6,00;1,30;Away;Draw_Away;More_Two
+2023-08-26;Newcastle;Liverpool;Inglaterra 1;4;7;41;23;36;2,20;3,75;3,00;Away;Away_Home;More_Two
+2023-08-26;Aves;Torreense;Portugal 2;1;10;49;26;25;1,95;3,25;3,30;Draw;Home_Draw;Zero
+2023-09-02;Chaves;Moreirense;Portugal 1;18;16;32;26;42;2,40;3,25;2,88;Away;Away_Home;More_Two
+2023-09-02;Portimonense;Estrela Amadora;Portugal 1;17;15;50;25;25;2,55;3,25;2,80;Draw;Home_Draw;Two
+2023-09-02;Estoril;Boavista;Portugal 1;13;4;39;27;34;2,40;3,25;2,90;Away;Away_Home;More_Two
+2023-09-02;Braga;Sporting;Portugal 1;12;2;36;26;38;2,90;3,80;2,20;Draw;Draw_Away;Two
+2023-09-02;Penafiel;Académico Viseu;Portugal 2;12;5;42;27;31;2,80;3,50;2,20;Draw;Draw_Away;Zero
+2023-09-02;Torreense;Oliveirense;Portugal 2;10;1;41;26;32;1,91;3,30;3,80;Home;Home_Draw;More_Two
+2023-09-02;Leiria;Aves;Portugal 2;9;3;55;25;20;2,25;2,90;3,30;Away;Away_Home;More_Two
+2023-09-02;Famalicão;Farense;Portugal 1;8;11;52;24;23;1,91;3,50;4,00;Home;Home_Draw;One
+2023-09-02;Casa Pia;Rio Ave;Portugal 1;7;14;42;27;31;2,10;3,50;3,25;Draw;Home_Draw;Two
+2023-09-02;Benfica;Guimarães;Portugal 1;5;1;67;19;14;1,20;6,00;13,00;Home;Home_Draw;More_Two
+2023-09-02;Arsenal;Manchester United;Inglaterra 1;5;8;55;22;23;1,75;3,80;4,50;Home;Home_Draw;More_Two
+2023-09-02;Porto;Arouca;Portugal 1;3;6;76;15;8;1,25;6,00;10,00;Draw;Home_Draw;Two
+2023-09-02;Inter Milao;Fiorentina;Itália 1;3;6;41;25;33;1,65;3,80;5,25;Home;Home_Draw;More_Two
+2023-09-07;Lituânia;Montenegro;Euro;5;3;13;22;65;5,25;3,60;1,67;Draw;Draw_Away;More_Two
+2023-09-07;Chipre;Escócia;Euro;5;1;16;24;60;11,00;5,00;1,29;Away;Draw_Away;More_Two
+2023-09-07;Países Baixos;Grécia;Euro;4;2;44;26;30;1,44;4,33;7,00;Home;Home_Draw;More_Two
+2023-09-07;Polónia ;Ilhas Faroé;Euro;4;5;56;25;19;1,13;8,00;23,00;Home;Home_Draw;Two
+2023-09-07;Eslovénia;Irlanda do Norte;Euro;4;5;42;27;31;1,80;3,50;4,50;Home;Home_Draw;More_Two
+2023-09-07;Croácia;Letónia;Euro;3;5;52;27;22;1,09;9,50;29,00;Home;Home_Draw;More_Two
+2023-09-07;Luxemburgo;Islândia;Euro;3;4;23;25;52;2,63;3,20;2,75;Home;Home_Draw;More_Two
+2023-09-07;Eslováquia;Portugal;Euro;2;1;25;27;48;8,00;4,33;1,44;Away;Draw_Away;One
+2023-09-07;Cazaquistão;Finlândia;Euro;2;1;24;26;50;3,50;3,30;2,05;Away;Draw_Away;One
+2023-09-07;Geórgia;Espanha;Euro;2;4;33;28;39;10,00;5,00;1,30;Away;Draw_Away;More_Two
+2023-09-07;Sérvia;Hungria;Euro;2;1;64;22;14;1,73;3,60;4,75;Away;Away_Home;More_Two
+2023-09-07;França;Irlanda;Euro;1;3;57;25;18;1,20;6,50;12,00;Home;Home_Draw;Two
+2023-09-07;Chéquia;Albânia;Euro;1;2;53;24;23;1,53;3,60;7,50;Draw;Home_Draw;Two
+2023-09-07;Turquia;Arménia;Euro;1;2;84;11;5;1,33;5,25;11,00;Draw;Home_Draw;Two
+2023-09-09;Moreirense;Braga;Portugal 1;10;9;22;23;55;3,75;3,60;1,91;Away;Draw_Away;More_Two
+2023-09-09;Guimarães;Tondela;Portugal Taça da Liga;7;10;65;25;10;1,35;3,80;5,60;Away;Away_Home;One
+2023-09-09;São Marino;Eslovénia;Euro;6;3;4;11;85;40,00;15,00;1,04;Away;Draw_Away;More_Two
+2023-09-09;Kosovo;Suiça;Euro;5;1;29;26;45;4,75;3,75;1,73;Draw;Draw_Away;More_Two
+2023-09-09;Estónia;Suécia;Euro;4;3;32;28;40;8,00;4,50;1,40;Away;Draw_Away;More_Two
+2023-09-09;Macedónia do Norte;Itália;Euro;4;3;36;26;38;8,00;5,00;1,36;Draw;Draw_Away;Two
+2023-09-09;Cazaquistão;Irlanda do Norte;Euro;4;5;23;26;51;3,10;3,10;2,45;Home;Away_Home;One
+2023-09-09;Irlanda;Países Baixos;Euro;4;2;30;26;44;5,50;4,00;1,60;Away;Draw_Away;More_Two
+2023-09-09;Montenegro;Bulgária;Euro;3;5;43;29;29;1,80;3,40;5,00;Home;Away_Home;More_Two
+2023-09-09;Ucrânia;Inglaterra;Euro;2;1;31;28;41;8,50;4,33;1,44;Draw;Draw_Away;Two
+2023-09-09;Roménia;Israel;Euro;2;3;50;26;25;2,00;3,50;3,75;Draw;Home_Draw;Two
+2023-09-09;Albânia;Polónia;Euro;2;3;18;24;58;3,30;3,20;2,25;Home;Away_Home;Two
+2023-09-09;Hungria;Chéquia;Amigável;1;3;40;20;40;2,60;3,00;2,75;Draw;Home_Draw;Two
+2023-09-09;Finlândia;Dinamarca;Euro;1;2;34;28;38;5,75;3,60;1,67;Away;Draw_Away;One
+2023-09-12;Alemanha;França;Amigável;13;1;40;20;40;2,86;3,32;2,05;Home;Away_Home;More_Two
+2023-09-12;Letónia;País de Gales;Euro;5;4;35;26;39;7,10;4,02;1,47;Away;Draw_Away;Two
+2023-09-12;Islândia;Bósnia;Euro;5;4;35;27;38;2,86;3,18;2,46;Home;Away_Home;One
+2023-09-12;Malta;Macedónia do Norte;Euro;5;4;22;24;54;4,88;3,53;1,63;Away;Draw_Away;Two
+2023-09-12;Noruega;Geórgia;Euro;3;4;68;19;12;1,26;4,95;9,75;Home;Home_Draw;More_Two
+2023-09-12;Itália;Ucrânia;Euro;3;2;39;28;32;1,43;4,00;6,55;Home;Home_Draw;More_Two
+2023-09-12;Suécia;Áustria;Euro;3;2;45;28;27;2,26;3,18;2,91;Away;Away_Home;More_Two
+2023-09-12;Israel;Bielorrússia;Euro;3;4;61;23;16;1,30;4,78;8,25;Home;Home_Draw;One
+2023-09-12;Eslováquia;Liechtenstein;Euro;2;6;92;6;1;1,03;13,25;52,00;Home;Home_Draw;More_Two
+2023-09-12;Espanha;Chipre;Euro;2;5;86;9;4;1,01;11,00;43,00;Home;Home_Draw;More_Two
+2023-09-12;Roménia ;Kosovo;Euro;2;5;52;26;22;1,91;3,23;3,75;Home;Home_Draw;Two
+2023-09-12;Portugal;Luxemburgo;Euro;1;3;77;15;8;1,09;9,50;22,50;Home;Home_Draw;More_Two
+2023-09-12;Bélgica;Estónia;Euro;1;4;64;21;15;1,05;9,40;27,00;Home;Home_Draw;More_Two
+2023-09-12;Escócia;Inglaterra;Amigável;1;2;20;30;50;3,88;3,42;1,70;Away;Draw_Away;More_Two
+2023-09-17;Farense;Braga;Portugal 1;15;7;22;23;55;4,50;3,83;1,68;Home;Away_Home;More_Two
+2023-09-17;Gil Vicente;Estoril;Portugal 1;14;16;42;26;32;2,11;3,43;3,17;Home;Home_Draw;More_Two
+2023-09-17;Benfica B;Torreense;Portugal 2;14;5;42;26;31;2,45;3,18;2,58;Away;Away_Home;Two
+2023-09-17;Vizela;Benfica;Portugal 1;12;4;17;21;62;7,75;5,15;1,32;Away;Draw_Away;More_Two
+2023-09-17;Rio Ave;Famalicão;Portugal 1;11;6;44;26;29;2,52;3,17;2,71;Draw;Home_Draw;Two
+2023-09-17;Valência;Atlético Madrid;Espanha 1;11;4;31;27;42;3,60;3,23;1,95;Home;Away_Home;More_Two
+2023-09-17;Belenenses;Leiria;Portugal 2;10;11;31;28;41;2,77;3,07;2,36;Away;Draw_Away;More_Two
+2023-09-17;Arouca;Casa Pia;Portugal 1;8;9;40;27;33;2,29;3,20;3,02;Away;Away_Home;One
+2023-09-17;Guimarães;Portimonense;Portugal 1;5;17;55;26;19;1,52;3,97;5,90;Away;Away_Home;More_Two
+2023-09-17;West Ham;Manchester City;Inglaterra 1;4;1;21;23;56;5,80;4,45;1,46;Away;Draw_Away;More_Two
+2023-09-17;Sporting;Moreirense;Portugal 1;3;10;63;21;16;1,20;5,75;10,75;Home;Home_Draw;More_Two
+2023-09-17;Oliveirense;Académico Viseu;Portugal 2;3;8;47;25;29;2,87;3,30;2,18;Draw;Draw_Away;More_Two
+2023-09-17;Barcelona;Real Betis;Espanha 1;3;7;67;19;14;1,32;4,90;7,10;Home;Home_Draw;More_Two
+2023-09-17;Inter;Milan;Itália 1;1;2;47;26;27;2,10;3,38;3,23;Home;Home_Draw;More_Two
+2023-09-21;Panathinaikos;Villarreal;UEFA Europa League;6;5;37;26;37;3,18;3,40;2,07;Home;Away_Home;Two
+2023-09-21;Shakhtar Donetsk;Porto;UEFA Champions League;5;4;21;23;56;5,20;4,12;1,71;Away;Draw_Away;More_Two
+2023-09-21;Braga;Nápoles;UEFA Champions League;5;4;28;26;46;4,05;3,80;1,79;Away;Draw_Away;More_Two
+2023-09-21;Sturm Graz;Sporting;UEFA Europa League;5;4;25;24;51;3,57;3,43;1,93;Away;Draw_Away;More_Two
+2023-09-21;Ajax;Marselha;UEFA Europa League;5;5;42;24;34;2,41;3,42;2,61;Draw;Home_Draw;More_Two
+2023-09-21;Rangers;Real Betis;UEFA Europa League;5;5;54;22;23;2,53;3,30;2,56;Home;Home_Draw;One
+2023-09-21;Lázio;Atlético Madrid;UEFA Champions League;4;4;43;28;30;2,95;3,10;2,45;Draw;Draw_Away;Two
+2023-09-21;Paris Saint Germain;Dortmund;UEFA Champions League;4;5;42;22;36;1,71;4,32;3,95;Home;Home_Draw;Two
+2023-09-21;Real Sociedade;Inter;UEFA Champions League;4;4;34;27;39;2,98;3,23;2,35;Draw;Draw_Away;Two
+2023-09-21;Benfica;Salzburgo;UEFA Champions League;3;6;52;23;25;1,37;5,05;7,05;Away;Away_Home;Two
+2023-09-21;Feyenoord;Celtic;UEFA Champions League;3;5;51;22;26;1,52;4,58;5,15;Home;Home_Draw;Two
+2023-09-21;Galatasaray;Copenhaga;UEFA Champions League;3;5;42;25;33;1,53;4,28;5,45;Draw;Home_Draw;More_Two
+2023-09-21;Sevilha;Lens;UEFA Champions League;3;4;42;26;32;1,88;3,53;2,35;Draw;Home_Draw;Two
+2023-09-21;Bayern Munique;Manchester United;UEFA Champions League;3;5;55;20;24;1,47;4,77;5,55;Home;Home_Draw;More_Two
+2023-09-23;Porto;Gil Vicente;Portugal 1;3;9;70;17;13;1,22;6,10;10,25;Home;Home_Draw;More_Two
+2023-09-23;Portimonense;Benfica;Portugal 1;13;4;11;16;73;9,90;5,80;1,24;Away;Draw_Away;More_Two
+2023-09-23;Braga;Boavista;Portugal 1;8;1;59;24;17;1,51;4,25;5,50;Home;Home_Draw;More_Two
+2023-09-23;Estoril;Vizela;Portugal 1;17;14;43;26;31;2,55;3,25;2,63;Draw;Home_Draw;More_Two
+2023-09-23;Moreirense;Farense;Portugal 1;16;10;46;25;28;2,15;3,37;3,15;Home;Home_Draw;One
+2023-09-23;Casa Pia;Guimarães;Portugal 1;7;6;36;28;36;2,37;3,12;2,96;Draw;Home_Draw;Zero
+2023-09-23;Chaves;Estrela Amadora;Portugal 1;18;15;46;25;29;2,60;3,33;2,53;Draw;Draw_Away;More_Two
+2023-09-23;Liverpool;West Ham;Inglaterra 1;3;6;63;19;18;1,38;5,05;6,40;Home;Home_Draw;More_Two
+2023-09-23;Chelsea;Aston Villa;Inglaterra 1;14;7;55;23;22;1,83;3,77;3,72;Away;Away_Home;One
+2023-09-23;Arsenal;Tottenham;Inglaterra 1;4;2;57;21;23;1,65;4,15;4,27;Draw;Home_Draw;More_Two
+2023-09-23;Rayo Vallecano;Villarreal;Espanha 1;6;13;36;26;39;2,38;3,42;2,58;Draw;Home_Draw;Two
+2023-09-23;Torino;Roma;Itália 1;7;12;34;30;36;2,99;2,93;2,48;Draw;Draw_Away;Two
+2023-09-23;Bolonha;Nápoles;Itália 1;11;6;19;23;58;3,50;3,55;1,95;Draw;Draw_Away;Zero
+2023-09-23;Atlético Madrid;Real Madrid;Espanha 1;4;1;38;25;36;2,67;3,27;2,38;Home;Away_Home;More_Two
+2023-10-01;Farense;Sporting;Portugal 1;11;1;13;20;67;6,75;4,63;1,42;Away;Draw_Away;More_Two
+2023-10-01;Boavista;Famalicão;Portugal 1;4;5;44;27;29;2,17;3,38;3,18;Draw;Home_Draw;More_Two
+2023-10-01;Vizela;Portimonense;Portugal 1;13;16;42;27;31;1,80;3,53;4,32;Away;Away_Home;More_Two
+2023-10-01;Arouca;Desp. Chaves;Portugal 1;12;18;39;27;34;1,78;3,63;4,12;Away;Away_Home;Two
+2023-10-01;Guimarães;Estoril;Portugal 1;7;17;52;25;23;1,72;3,57;4,55;Home;Home_Draw;More_Two
+2023-10-01;Rio Ave;Moreirense;Portugal 1;15;9;38;27;35;2,20;3,23;3,17;Away;Away_Home;More_Two
+2023-10-01;Académico Viseu;Aves;Portugal 2;9;1;43;27;30;2,05;3,22;3,20;Away;Away_Home;More_Two
+2023-10-01;Leixões;Porto B;Portugal 2;14;12;35;27;37;2,53;3,22;2,48;Away;Draw_Away;More_Two
+2023-10-01;Feirense;Paços de Ferreira;Portugal 2;17;15;32;26;42;2,89;3,22;2,21;Home;Away_Home;One
+2023-10-01;Leiria;Tondela;Portugal 2;7;13;42;28;30;1,90;3,28;3,58;Draw;Home_Draw;More_Two
+2023-10-01;Real Bétis;Valência;Espanha 1;11;8;37;29;34;2,29;3,18;3,03;Home;Home_Draw;More_Two
+2023-10-01;Real Sociedade;Athletic Bilbao;Espanha 1;5;4;38;28;34;2,21;3,13;3,25;Home;Home_Draw;More_Two
+2023-10-01;Manchester United;Crystal Palace;Inglaterra 1;9;10;55;23;22;1,55;4,15;5,50;Away;Away_Home;One
+2023-10-01;Tottenham;Liverpool;Inglaterra 1;4;2;38;24;38;2,85;3,92;2,15;Home;Away_Home;More_Two
+2023-10-08;Estoril;Benfica;Portugal 1;17;2;19;22;59;9,60;6,00;1,25;Away;Draw_Away;One
+2023-10-08;Porto;Portimonense;Portugal 1;3;11;73;17;10;1,14;7,55;16,25;Home;Home_Draw;One
+2023-10-08;Braga;Rio Ave;Portugal 1;5;16;57;23;21;1,28;5,55;9,25;Home;Home_Draw;More_Two
+2023-10-08;Sporting;Arouca;Portugal 1;1;13;67;20;14;1,24;5,75;10,75;Home;Home_Draw;More_Two
+2023-10-08;Desp. Chaves;Gil Vicente;Portugal 1;18;9;34;25;41;2,53;3,38;2,63;Home;Home_Draw;More_Two
+2023-10-08;Farense;Vizela;Portugal 1;12;14;39;26;34;2,10;3,40;3,35;Draw;Home_Draw;Zero
+2023-10-08;Famalicão;Guimarães;Portugal 1;7;6;45;27;28;2,53;3,20;2,76;Away;Draw_Away;More_Two
+2023-10-08;Casa Pia;Estrela Amadora;Portugal 1;10;15;49;26;25;2,04;3,25;3,65;Away;Draw_Away;One
+2023-10-08;Paços de Ferreira;Vilaverdense;Portugal 2;17;18;46;25;29;1,63;3,63;4,72;Home;Home_Draw;Two
+2023-10-08;Mafra;Leiria;Portugal 2;7;9;34;27;40;2,36;3,30;2,61;Home;Home_Draw;More_Two
+2023-10-08;Benfica B;Feirense;Portugal 2;10;12;37;27;36;2,02;3,20;3,30;Away;Home_Draw;More_Two
+2023-10-08;Nápoles;Fiorentina;Itália 1;3;5;47;23;30;1,59;4,13;5,05;Away;Away_Home;More_Two
+2023-10-08;West Ham;Newcastle;Inglaterra 1;7;8;31;25;44;3,27;3,62;2,05;Draw;Draw_Away;More_Two
+2023-10-08;Arsenal;Manchester City;Inglaterra 1;3;1;37;24;39;2,80;3,37;2,40;Home;Away_Home;One
+2023-10-15;Noruega;Espanha;Euro;3;2;32;25;42;3,73;3,50;1,93;Away;Draw_Away;One
+2023-10-15;Bulgária;Lituânia;Euro;4;5;56;24;20;1,52;3,83;6,60;Away;Away_Home;Two
+2023-10-15;Eslovénia;Finlândia;Euro;1;3;44;28;29;1,92;3,22;4,20;Home;Home_Draw;More_Two
+2023-10-15;Dinamarca;Cazaquistão;Euro;2;4;76;16;9;1,12;8,05;20,50;Home;Home_Draw;More_Two
+2023-10-15;Itália;Malta;Euro;2;5;63;23;14;1,02;13,00;66,00;Home;Home_Draw;More_Two
+2023-10-15;Geórgia;Chipre;Euro;4;5;90;7;3;1,25;5,50;11,25;Home;Home_Draw;More_Two
+2023-10-15;Chéquia;Ilhas Faroé;Euro;3;5;76;15;8;1,07;10,00;28,00;Home;Home_Draw;One
+2023-10-15;Suiça;Bielorrússia;Euro;1;5;75;17;8;1,08;9,50;24,50;Draw;Home_Draw;More_Two
+2023-10-15;País de Gales;Croácia;Euro;4;2;33;28;39;3,93;3,40;1,92;Home;Away_Home;More_Two
+2023-10-15;Polónia ;Moldávia;Euro;2;4;53;27;20;1,19;6,30;14,25;Draw;Home_Draw;Two
+2023-10-15;Roménia;Andorra;Euro;2;6;79;15;7;1,09;8,70;26,00;Home;Home_Draw;More_Two
+2023-10-15;Turquia;Letónia;Euro;1;5;73;16;11;1,12;8,05;19,00;Home;Home_Draw;More_Two
+2023-10-15;Hungria;Sérvia;Euro;1;2;37;30;34;2,81;3,17;2,50;Home;Away_Home;More_Two
+2023-10-22;Belenenses;Gil Vicente;Portugal Taça;11;11;21;23;56;6,80;4,45;1,32;Away;Draw_Away;More_Two
+2023-10-22;Académico Viseu;Leiria;Portugal Taça;9;9;36;28;36;2,09;3,08;3,05;Away;Away_Home;More_Two
+2023-10-22;Torreense;Rio Ave;Portugal Taça;7;11;36;26;39;2,63;3,07;2,36;Home;Away_Home;More_Two
+2023-10-22;Mafra;Feirense;Portugal Taça;6;7;42;28;30;1,83;3,20;3,70;Draw;Home_Draw;More_Two
+2023-10-22;Getafe;Real Betis;Espanha 1;12;8;46;25;28;2,37;3,03;3,13;Draw;Home_Draw;Two
+2023-10-22;Sevilha;Real Madrid;Espanha 1;14;1;28;26;46;4,15;3,90;1,74;Draw;Draw_Away;Two
+2023-10-22;Celta de Vigo;Atlético Madrid;Espanha 1;18;4;31;25;44;3,23;3,38;2,15;Away;Draw_Away;More_Two
+2023-10-22;Villarreal;Alavés;Espanha 1;16;17;52;25;23;1,71;3,70;4,67;Draw;Home_Draw;Two
+2023-10-22;Barcelona;Athletic Bilbao;Espanha 1;3;5;47;23;30;1,62;4,00;4,98;Home;Home_Draw;One
+2023-10-22;Las Palmas;Rayo Vallecano;Espanha 1;11;7;45;27;28;2,55;3,10;2,81;Away;Away_Home;One
+2023-10-22;Milan;Juventus;Itália 1;1;3;38;28;34;2,22;3,27;3,18;Away;Away_Home;One
+2023-10-22;Sassuolo;Lázio;Itália 1;12;13;36;26;39;2,62;3,52;2,48;Away;Draw_Away;Two
+2023-10-22;Aston Villa;West Ham;Inglaterra 1;5;7;42;28;30;1,86;3,77;3,77;Home;Home_Draw;More_Two
+2023-10-22;Chelsea;Arsenal;Inglaterra 1;11;2;31;25;44;3,30;3,30;2,36;Draw;Draw_Away;More_Two
+2023-10-24;Benfica;Real Sociedad;UEFA Champions League;3;1;54;24;22;2,23;3,38;3,27;Away;Away_Home;One
+2023-10-24;Antwerpia;Porto;UEFA Champions League;8;2;34;26;39;3,38;3,32;1,95;Away;Draw_Away;More_Two
+2023-10-24;Braga;Real Madrid;UEFA Champions League;4;2;36;24;40;5,75;4,73;1,38;Away;Draw_Away;More_Two
+2023-10-24;Sevilha;Arsenal;UEFA Champions League;3;2;29;26;45;4,57;3,68;1,62;Away;Draw_Away;More_Two
+2023-10-24;Feyenoord;Lázio;UEFA Champions League;3;2;63;20;16;1,85;3,58;3,45;Home;Home_Draw;More_Two
+2023-10-24;Union Berlim;Nápoles;UEFA Champions League;4;4;23;24;53;3,32;3,38;1,95;Away;Draw_Away;One
+2023-10-24;Newcastle;Dortmund;UEFA Champions League;1;2;43;23;34;1,60;3,80;4,55;Away;Away_Home;One
+2023-10-24;Leipzig;Estrela Vermelha;UEFA Champions League;4;5;44;23;32;1,20;6,00;9,10;Home;Home_Draw;More_Two
+2023-10-24;Celtic;Atlético Madrid;UEFA Champions League;4;3;28;24;49;3,63;3,50;1,82;Draw;Draw_Away;More_Two
+2023-10-24;Raków;Sporting;UEFA Europa League;3;3;21;23;57;4,23;3,67;1,72;Draw;Draw_Away;Two
+2023-10-24;Olympiacos;West Ham;UEFA Europa League;5;2;16;20;64;3,13;3,45;2,08;Home;Away_Home;More_Two
+2023-10-24;Sturm Graz;Atalanta;UEFA Europa League;2;1;34;26;40;3,63;3,47;1,90;Draw;Draw_Away;More_Two
+2023-10-24;Panathinaikos;Rennes;UEFA Europa League;1;2;38;26;36;2,61;3,20;2,53;Away;Draw_Away;More_Two
+2023-10-24;Paris Saint Germain;Milan;UEFA Champions League;5;1;49;24;27;1,69;3,58;4,18;Home;Home_Draw;More_Two
+2023-10-28;Benfica;Casa Pia;Portugal 1;2;10;70;18;11;1,16;6,40;15,25;Draw;Home_Draw;Two
+2023-10-28;Vizela;Porto;Portugal 1;16;3;19;23;58;6,70;4,63;1,36;Away;Draw_Away;Two
+2023-10-28;Gil Vicente;Braga;Portugal 1;9;4;24;22;54;4,20;4,08;1,62;Draw;Draw_Away;More_Two
+2023-10-28;Portimonense;Estoril;Portugal 1;12;18;28;25;48;2,45;3,25;2,60;Home;Home_Draw;One
+2023-10-28;Guimarães;Desp. Chaves;Portugal 1;5;14;45;27;28;1,60;3,87;4,65;Home;Home_Draw;More_Two
+2023-10-28;Rio Ave;Farense;Portugal 1;17;13;48;26;26;2,31;3,35;2,96;Away;Away_Home;More_Two
+2023-10-28;Estrela Amadora;Famalicão;Portugal 1;11;8;31;27;43;2,43;3,23;2,86;Home;Home_Draw;One
+2023-10-28;Maritimo;Tondela;Portugal 2;2;10;52;24;24;1,57;3,77;5,10;Draw;Home_Draw;More_Two
+2023-10-28;Oliveirense;Leiria;Portugal 2;7;11;27;25;48;2,60;3,42;2,36;Away;Draw_Away;More_Two
+2023-10-28;Inter;Roma;Itália 1;1;7;51;25;24;1,54;3,70;5,25;Home;Home_Draw;One
+2023-10-28;Nápoles;Milan;Itália 1;4;2;52;23;25;2,09;3,20;3,13;Draw;Home_Draw;More_Two
+2023-10-28;Athletic Bilbau;Valência;Espanha 1;6;8;53;26;22;1,55;3,65;5,25;Draw;Home_Draw;More_Two
+2023-10-28;Manchester United;Manchester City;Inglaterra 1;8;2;36;23;41;4,55;3,72;1,61;Away;Draw_Away;More_Two
+2023-10-28;Barcelona;Real Madrid;Espanha 1;3;2;46;23;31;2,47;3,55;2,61;Away;Away_Home;More_Two
+2023-11-02;Arouca;Benfica;Portugal Taça da Liga;7;4;26;27;47;7,05;4,65;1,31;Away;Draw_Away;Two
+2023-11-02;Braga;Casa Pia;Portugal Taça da Liga;8;5;71;18;11;1,27;4,90;8,00;Draw;Home_Draw;Two
+2023-11-02;Sporting;Farense;Portugal Taça da Liga;5;9;67;19;14;1,20;4,75;8,25;Home;Home_Draw;More_Two
+2023-11-02;West Ham;Arsenal;Inglaterra Taça da Liga;10;5;26;24;50;2,95;3,13;1,99;Home;Away_Home;More_Two
+2023-11-02;Bournemouth;Liverpool;Inglaterra Taça da Liga;10;3;22;21;57;4,97;3,98;1,42;Away;Draw_Away;More_Two
+2023-11-02;Chelsea;Blackburn Rovers;Inglaterra Taça da Liga;5;3;47;24;30;1,18;5,70;9,00;Home;Home_Draw;Two
+2023-11-02;Everton;Burnley;Inglaterra Taça da Liga;5;12;38;26;35;1,76;3,23;3,53;Home;Home_Draw;More_Two
+2023-11-02;Ipswich Town;Fulham;Inglaterra Taça da Liga;5;7;19;20;61;2,96;3,23;1,95;Away;Draw_Away;More_Two
+2023-11-02;Bahia;Fluminense;Brasil 1;15;8;46;26;29;1,45;3,87;5,80;Home;Home_Draw;One
+2023-11-02;Coritiba;Grémio;Brasil 1;19;4;33;25;41;2,83;3,37;2,13;Away;Draw_Away;More_Two
+2023-11-02;Atlético Mineiro;Fortaleza;Brasil 1;6;9;55;26;19;1,67;3,25;4,12;Home;Home_Draw;More_Two
+2023-11-02;Botafogo;Palmeiras;Brasil 1;1;2;39;28;33;2,67;2,90;2,33;Away;Draw_Away;More_Two
+2023-11-02;Cuiabá;Vasco da Gama;Brasil 1;10;18;49;27;24;2,12;2,84;3,07;Away;Away_Home;Two
+2023-11-02;Manchester United;Newcastle;Inglaterra Taça da Liga;8;7;41;25;34;1,96;3,15;3,00;Away;Away_Home;More_Two
+2023-11-05;Desp. Chaves;Benfica;Portugal 1;15;2;13;17;70;8,90;5,85;1,24;Away;Draw_Away;Two
+2023-11-05;Sporting;Estrela Amadora;Portugal 1;1;9;73;14;7;1,17;6,35;10,25;Home;Home_Draw;More_Two
+2023-11-05;Famalicão;Gil Vicente;Portugal 1;8;11;40;26;34;2,03;3,32;3,27;Home;Home_Draw;More_Two
+2023-11-05;Braga;Portimonense;Portugal 1;5;10;64;20;16;1,21;5,90;9,55;Home;Home_Draw;More_Two
+2023-11-05;Casa Pia;Vizela;Portugal 1;12;17;40;28;32;2,03;3,20;3,28;Away;Away_Home;One
+2023-11-05;Moreirense;Guimarães;Portugal 1;7;4;37;26;37;2,47;3,18;2,56;Home;Home_Draw;One
+2023-11-05;Rio Ave;Boavista;Portugal 1;18;6;39;26;36;2,52;3,18;2,51;Home;Away_Home;Two
+2023-11-05;Nacional;Santa Clara;Portugal 2;4;3;41;26;34;2,63;3,13;2,38;Draw;Draw_Away;Two
+2023-11-05;Tondela;Torreense;Portugal 2;12;7;48;26;26;2,25;3,15;2,79;Away;Away_Home;More_Two
+2023-11-05;Benfica B;Penafiel;Portugal 2;14;15;40;27;33;2,13;3,32;2,87;Home;Home_Draw;One
+2023-11-05;Atalanta;Inter;Itália 1;4;1;36;27;37;3,27;3,35;2,02;Away;Draw_Away;More_Two
+2023-11-05;Fiorentina;Juventus;Itália 1;7;2;51;24;25;2,73;3,10;2,38;Away;Draw_Away;One
+2023-11-05;Real Sociedade;Barcelona ;Espanha 1;5;4;27;24;50;3,05;3,30;2,13;Away;Draw_Away;One
+2023-11-05;Dortmund;Bayern Munique;Alemanha 1;4;2;35;23;42;3,45;4,00;1,78;Away;Draw_Away;More_Two
+2023-11-09;Real Sociedade;Benfica;UEFA Champions League;2;8;61;21;18;1,65;3,90;4,82;Home;Home_Draw;More_Two
+2023-11-09;Porto;Antwerp;UEFA Champions League;5;16;59;22;19;1,31;5,10;9,00;Home;Home_Draw;Two
+2023-11-09;Real Madrid;Braga;UEFA Champions League;4;9;55;22;22;1,19;6,65;11,00;Home;Home_Draw;More_Two
+2023-11-09;Lázio;Feyenoord;UEFA Champions League;8;5;34;25;41;2,53;3,32;2,68;Home;Home_Draw;One
+2023-11-09;Bayern Munique;Galatasaray;UEFA Champions League;6;9;54;21;25;1,16;7,65;11,50;Home;Home_Draw;More_Two
+2023-11-09;Salzburg;Inter;UEFA Champions League;7;4;30;25;44;5,40;4,18;1,53;Away;Draw_Away;One
+2023-11-09;Copenhaga;Manchester United;UEFA Champions League;9;10;29;24;47;4,30;3,83;1,70;Home;Away_Home;More_Two
+2023-11-09;Arsenal;Sevilha;UEFA Champions League;4;8;59;20;21;1,27;5,55;8,85;Home;Home_Draw;Two
+2023-11-09;PSV Eindhoven;Lens;UEFA Champions League;11;5;56;21;22;1,68;3,93;4,35;Home;Home_Draw;One
+2023-11-09;Sporting;Raków;UEFA Europa League;6;8;73;16;11;1,23;5,30;9,15;Home;Home_Draw;More_Two
+2023-11-09;AEK Atenas;Marselha;UEFA Europa League;8;7;39;25;36;2,33;3,33;2,63;Away;Away_Home;Two
+2023-11-09;Rangers;Sparta Praga;UEFA Europa League;5;6;51;24;25;1,97;3,35;3,30;Home;Home_Draw;More_Two
+2023-11-09;Ajax;Brighton;UEFA Europa League;10;8;23;20;57;3,90;4,10;1,64;Away;Draw_Away;Two
+2023-11-09;Milan;Paris Saint Germain;UEFA Champions League;7;5;37;25;38;2,91;3,50;2,27;Home;Away_Home;More_Two
+2023-11-07;Shakhtar Donetsk;Barcelona ;UEFA Champions League;10;2;22;22;56;8,55;5,25;1,23;Home;Away_Home;One
+2023-11-07;Dortmund;Newcastle;UEFA Champions League;4;5;42;23;35;2,58;3,00;2,51;Home;Away_Home;Two
+2023-11-07;Atletico Madrid;Celtic;UEFA Champions League;7;10;46;23;30;1,34;5,15;7,75;Home;Home_Draw;More_Two
+2023-11-07;Estrela Vermelha;Leipzig;UEFA Champions League;12;7;38;23;40;5,10;4,55;1,53;Away;Draw_Away;More_Two
+2023-11-07;Manchester City;Young Boys;UEFA Champions League;4;11;64;19;18;1,06;11,25;26,50;Home;Home_Draw;More_Two
+2023-11-08;Nápoles;União Berlim;UEFA Champions League;6;9;60;21;20;1,36;4,68;7,50;Draw;Home_Draw;Two
+2023-11-12;Benfica;Sporting;Portugal 1;2;1;39;24;37;2,18;3,48;3,00;Home;Home_Draw;More_Two
+2023-11-12;Guimarães;Porto;Portugal 1;5;3;23;25;52;4,90;3,87;1,62;Away;Draw_Away;More_Two
+2023-11-12;Portimonense;Desp. Chaves;Portugal 1;11;17;33;27;40;2,34;3,35;2,83;Home;Home_Draw;More_Two
+2023-11-12;Estrela Amadora;Moreirense;Portugal 1;10;6;29;27;45;2,60;3,25;2,58;Away;Draw_Away;One
+2023-11-12;Vizela;Famalicão;Portugal 1;15;7;36;27;36;2,43;3,15;2,84;Draw;Home_Draw;Zero
+2023-11-12;Boavista;Farense;Portugal 1;8;9;47;24;29;1,95;3,62;3,42;Away;Away_Home;More_Two
+2023-11-12;Gil Vicente;Rio Ave;Portugal 1;12;16;42;24;33;1,95;3,48;3,57;Draw;Home_Draw;Two
+2023-11-12;Arouca;Braga;Portugal 1;18;4;23;23;54;5,15;4,38;1,52;Away;Draw_Away;One
+2023-11-12;Oliveirense;Paços de Ferreira;Portugal 2;8;10;28;25;47;2,98;3,48;2,09;Draw;Draw_Away;Zero
+2023-11-12;Torreense;Mafra;Portugal 2;6;9;41;27;32;2,15;3,30;3,02;Draw;Home_Draw;Zero
+2023-11-12;Académico Viseu;Benfica B;Portugal 2;16;12;50;23;27;1,99;3,45;3,25;Home;Home_Draw;One
+2023-11-12;Lázio;Roma;Itália 1;10;7;44;28;28;2,92;3,00;2,53;Draw;Draw_Away;Zero
+2023-11-12;Sevilha;Real Betis;Espanha 1;15;6;44;26;30;2,08;3,53;3,27;Draw;Home_Draw;Two
+2023-11-12;Chelsea;Manchester City;Inglaterra 1;10;1;24;23;53;4,93;3,78;1,66;Draw;Draw_Away;More_Two
+2023-11-16;Liechtenstein;Portugal;Euro;31;3;0;1;99;46,50;47,50;1,01;Away;Draw_Away;Two
+2023-11-16;Geórgia;Escócia;Euro;17;5;15;18;68;3,22;3,20;2,10;Draw;Draw_Away;More_Two
+2023-11-16;Azerbaijão;Suécia;Euro;16;12;27;26;47;6,65;4,25;1,40;Home;Draw_Away;More_Two
+2023-11-16;Montenegro;Lituânia;Euro;11;16;62;24;15;1,27;4,90;9,25;Home;Home_Draw;Two
+2023-11-16;Eslováquia;Islândia;Euro;7;14;45;27;28;1,65;3,55;4,72;Home;Home_Draw;More_Two
+2023-11-16;Luxemburgo;Bósnia;Euro;21;18;31;26;44;2,68;3,33;2,35;Home;Draw_Away;More_Two
+2023-11-16;Moldávia;Albânia;Euro;10;4;24;25;51;4,40;3,27;1,73;Draw;Draw_Away;Two
+2023-11-16;Finlândia;Irlanda do Norte;Euro;13;14;43;27;30;1,87;3,40;4,13;Home;Home_Draw;More_Two
+2023-11-16;Dinamarca;Eslovénia;Euro;9;7;65;21;14;1,51;3,90;6,20;Home;Home_Draw;More_Two
+2023-11-16;Venezuela;Equador;Conmebol Mundial;6;9;35;38;27;3,05;3,05;2,25;Draw;Draw_Away;Zero
+2023-11-16;Argentina;Uruguai;Conmebol Mundial;1;7;48;35;17;1,51;3,87;5,55;Away;Home_Draw;Two
+2023-11-16;Colômbia;Brasil;Conmebol Mundial;7;7;21;42;37;3,10;3,15;2,18;Home;Draw_Away;More_Two
+2023-11-16;Chile;Paraguai;Conmebol Mundial;14;9;41;27;32;1,82;3,20;4,20;Draw;Home_Draw;Zero
+2023-11-16;Polónia ;Chéquia;Euro;12;7;39;28;33;2,39;2,94;2,85;Draw;Home_Draw;Two
+2023-11-27;Al Duhail;Istiqlol Dushanbe;Asia Champions League;2;4;53;22;26;1,29;5,75;10,00;Home;Home_Draw;Two
+2023-11-27;Jong AZ;Groningen;Países Baixos 2;4;2;35;24;41;3,50;3,80;1,95;Away;Draw_Away;More_Two
+2023-11-27;Al Sharjah;Al Sadd;Asia Champions League;2;3;37;23;40;2,50;3,60;2,75;Away;Away_Home;Two
+2023-11-27;Sepahan;Al Quwa Al Jawiya;Asia Champions League;2;4;55;25;20;1,55;4,00;6,00;Home;Home_Draw;One
+2023-11-28;Barnsley;Wycombe Wanderers;Inglaterra 3;7;15;56;22;21;1,91;3,50;4,00;Home;Home_Draw;One
+2023-11-28;Blackpool;Northampton Town;Inglaterra 3;8;13;55;23;22;1,50;4,33;6,50;Away;Away_Home;More_Two
+2023-11-28;Mansfield Town;Tranmere Rovers;Inglaterra 4;4;22;67;19;14;1,33;5,00;8,50;Draw;Away_Home;More_Two
+2023-11-28;Doncaster Rovers;Colchester United;Inglaterra 4;17;21;49;24;27;2,00;3,40;3,80;Home;Home_Draw;More_Two
+2023-11-28;Young Boys;Estrela Vermelha;UEFA Champions League;3;4;31;20;49;2,10;3,80;3,20;Home;Home_Draw;Two
+2023-11-29;Galatasaray;Manchester United;UEFA Champions League;3;4;45;23;32;2,70;3,60;2,45;Draw;Draw_Away;More_Two
+2023-11-29;Sevilha;PSV;UEFA Champions League;4;2;29;25;47;2,80;3,60;2,38;Away;Draw_Away;More_Two
+2023-11-29;Ipswich Town;Millwall;Inglaterra 2;2;19;44;26;30;1,65;4,00;5,00;Home;Home_Draw;More_Two
+2023-11-29;Real Madrid;Nápoles;UEFA Champions League;1;2;49;25;26;1,75;4,20;4,00;Home;Home_Draw;More_Two
+2023-11-30;Abha;Al Ahli;Arábia Saudita 1;15;3;29;24;46;6,00;4,50;1,44;Away;Draw_Away;More_Two
+2023-11-30;Rangers;Aris Salonica;UEFA Europa League;2;4;77;14;9;1,33;5,25;8,50;Draw;Home_Draw;Two
+2023-11-30;Freiburg;Olympiakos FC;UEFA Europa League;1;3;40;27;33;1,75;3,80;4,33;Home;Home_Draw;More_Two
+2023-11-30;Bodo / Glimt;Lugano;UEFA Conference League;2;3;65;18;16;1,36;5,00;7,00;Home;Home_Draw;More_Two
+2023-11-30;AZ Alkmar;Zrinjski;UEFA Conference League;4;3;75;16;9;1,29;6,00;9,00;Home;Home_Draw;One
+2025-01-14;Farense;Benfica;Portugal Taça;5;4;8;15;77;9,75;5,20;1,27;Away;Draw_Away;More_Two
+2025-01-14;Marselha;Lille;França T;3;4;42;26;32;2,00;3,40;3,70;Draw;Home_Draw;Two
+2025-01-14;Nottingam Forest;Liverpool;Inglaterra 1;3;1;20;21;59;5,25;4,10;1,62;Draw;Draw_Away;Two
+2025-01-15;Everton;Aston Villa;Inglaterra 1;16;8;29;27;44;3,30;3,20;2,30;Away;Draw_Away;One
+2025-01-15;Leicester City;Crystal Palace;Inglaterra 1;19;15;31;24;44;4,00;3,60;1,90;Away;Draw_Away;Two
+2025-01-15;Union Berlim;Augsburgo;Alemanha 1;12;13;44;26;30;1,83;3,50;4,50;Away;Away_Home;Two
+2025-01-15;Inter Milao;Bolonha;Itália 1;2;7;64;21;15;1,48;4,20;7,00;Draw;Home_Draw;More_Two
+2025-01-15;Brest ;Nantes;França T;4;7;46;26;29;2,10;3,20;3,60;Home;Home_Draw;More_Two
+2025-01-15;Troyes;Rennes;França T;4;7;31;26;43;4,50;3,60;1,73;Home;Away_Home;One
+2025-01-15;Newcastle;Wolves;Inglaterra 1;5;17;71;17;12;1,38;5,25;8,00;Home;Home_Draw;More_Two
+2025-01-15;Estugarda;Leipzig;Alemanha 1;7;4;61;20;19;1,95;3,90;3,40;Home;Home_Draw;More_Two
+2025-01-15;Arsenal;Tottenham;Inglaterra 1;2;12;59;20;20;1,44;5,00;6,25;Home;Home_Draw;More_Two
+2025-01-16;Ipswich Town;Brighton;Inglaterra 1;18;10;30;22;47;4,10;3,80;1,85;Away;Draw_Away;Two
+2025-01-16;Manchester United;Southampton;Inglaterra 1;13;20;64;19;17;1,30;6,00;8,50;Home;Home_Draw;More_Two
+2025-01-18;Rio Ave;Sporting;Portugal 1;10;1;12;18;70;10,00;5,75;1,27;Away;Draw_Away;More_Two
+2025-01-18;Gil Vicente;Porto;Portugal 1;11;2;23;25;52;7,50;4,50;1,40;Home;Away_Home;More_Two
+2025-01-18;Estrela Amadora;Braga;Portugal 1;14;4;24;24;52;4,75;3,80;1,67;Away;Draw_Away;One
+2025-01-18;Guimarães;Arouca;Portugal 1;6;16;49;25;26;1,60;3,80;5,50;Draw;Home_Draw;More_Two
+2025-01-18;Santa Clara;Estoril;Portugal 1;5;12;53;25;21;1,70;3,40;5,25;Away;Away_Home;More_Two
+2025-01-18;Moreirense;Farense;Portugal 1;8;17;40;28;32;1,90;3,20;4,33;Draw;Home_Draw;Zero
+2025-01-18;Nacional;Aves ;Portugal 1;13;15;40;26;34;2,10;3,20;3,60;Home;Home_Draw;More_Two
+2025-01-18;Feirense;Torreense;Portugal 2;9;4;33;29;37;2,55;3,00;2,90;Draw;Home_Draw;Two
+2025-01-18;Vizela;Leiria;Portugal 2;12;7;45;26;28;2,10;3,25;3,60;Home;Home_Draw;One
+2025-01-18;Paços de Ferreira;Mafra;Portugal 2;15;16;49;25;26;2,38;3,20;3,00;Home;Home_Draw;More_Two
+2025-01-18;Arsenal;Aston Villa;Inglaterra 1;3;8;73;17;11;1,48;4,50;6,00;Draw;Home_Draw;More_Two
+2025-01-18;Manchester United;Brighton;Inglaterra 1;14;11;44;22;34;2,00;3,60;3,40;Away;Away_Home;More_Two
+2025-01-18;Atalanta;Nápoles;Itália 1;3;1;46;26;29;2,20;3,30;3,25;Away;Away_Home;More_Two
+2025-01-18;Juventus;Milan;Itália 1;5;7;40;26;34;2,15;3,25;3,40;Home;Home_Draw;Two
+2025-01-21;Benfica;Barcelona ;UEFA Champions League;15;2;19;21;61;3,40;4,10;1,95;Away;Away_Home;More_Two
+2025-01-21;Atletico Madrid;Leverkusen;UEFA Champions League;11;4;49;25;26;2,40;3,25;3,00;Home;Away_Home;More_Two
+2025-01-21;Bolonha;Dortmund;UEFA Champions League;33;9;31;25;44;3,40;3,50;2,10;Home;Away_Home;More_Two
+2025-01-21;Club Brugge;Juventus;UEFA Champions League;19;14;30;26;45;3,30;3,25;2,25;Draw;Draw_Away;Zero
+2025-01-21;Estrela Vermelha;PSV;UEFA Champions League;31;23;25;20;55;4,10;4,20;1,73;Away;Away_Home;More_Two
+2025-01-21;Liverpool;Lille;UEFA Champions League;1;8;63;21;16;1,30;5,50;10,00;Home;Home_Draw;More_Two
+2025-01-21;Slovan Bratislava;Estugarda;UEFA Champions League;35;26;20;20;60;10,00;6,50;1,25;Away;Draw_Away;More_Two

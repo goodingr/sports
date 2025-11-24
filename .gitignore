@@ -57,3 +57,7 @@ data/**/*.json
 data/**/*.html
 data/**/*.db
 
+
+# Database files
+*.sqlite
+*.db

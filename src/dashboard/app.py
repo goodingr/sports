@@ -1098,13 +1098,84 @@ def update_overunder_page(
     # Calculate performance by league for the current model (using totals-specific function)
     league_performance = get_totals_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
 
-    recommended_table = components.overunder_recommended_table(recommended)
-    completed_table = components.overunder_completed_table(completed)
     totals_odds_json = ""
     totals_odds_df = get_totals_odds_for_recommended(recommended)
     if not totals_odds_df.empty:
         totals_odds_json = totals_odds_df.to_json(date_format="iso", orient="records")
+        
+        # Merge fresh odds into recommended dataframe for the table display
+        # Select the BEST odds (highest moneyline) for each game/side, regardless of line
+        # We want to show what's actually available in sportsbooks
+        best_odds = totals_odds_df.loc[totals_odds_df.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
+        
+        recommended = recommended.merge(
+            best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line']],
+            left_on=['game_id', 'side'],
+            right_on=['forward_game_id', 'outcome'],
+            how='left',
+            suffixes=('', '_sportsbook')
+        )
+        
+        # Update columns with sportsbook data where available
+        # NOTE: pandas merge only adds _sportsbook suffix if there's a column name collision
+        # If 'recommended' doesn't have 'book' or 'line', merge creates 'book'/'line' not '_sportsbook'
+        
+        if 'book' not in recommended.columns:
+            recommended['book'] = ""
+            
+        # Handle book column (might be 'book_sportsbook' or just from merge)
+        if 'book_sportsbook' in recommended.columns:
+            recommended['book'] = recommended['book_sportsbook'].fillna("")
+            recommended = recommended.drop(columns=['book_sportsbook'], errors='ignore')
+        
+        # Handle moneyline column
+        if 'moneyline_sportsbook' in recommended.columns:
+            # Use sportsbook moneyline when available
+            recommended['moneyline'] = recommended['moneyline_sportsbook'].fillna(recommended['moneyline'])
+            recommended = recommended.drop(columns=['moneyline_sportsbook'], errors='ignore')
+        
+        # Handle line column - THIS IS THE KEY FIX
+        # Check if we got 'line' from the merge (no collision) or 'line_sportsbook' (collision)
+        line_col = 'line_sportsbook' if 'line_sportsbook' in recommended.columns else 'line'
+        
+        if line_col in recommended.columns:
+            # IMPORTANT: Use the SPORTSBOOK's line, not the predicted line
+            # Only update where we have sportsbook data
+            has_sportsbook_data = recommended[line_col].notna()
+            recommended.loc[has_sportsbook_data, 'total_line'] = recommended.loc[has_sportsbook_data, line_col]
+            
+            # CRITICAL: Regenerate the 'description' (Pick) column with the updated line
+            # The description was created earlier with the predicted line, we need to update it
+            if 'description' in recommended.columns and 'side' in recommended.columns:
+                recommended.loc[has_sportsbook_data, 'description'] = recommended.loc[has_sportsbook_data].apply(
+                    lambda row: f"{row['side'].title()} {row['total_line']:.1f}" if pd.notna(row['total_line']) else row['side'].title(),
+                    axis=1
+                )
+            
+            # For rows WITHOUT sportsbook data, show N/A instead of predicted values
+            no_sportsbook_data = ~has_sportsbook_data
+            if no_sportsbook_data.any():
+                # Clear total_line - will show as empty/N/A in table
+                recommended.loc[no_sportsbook_data, 'total_line'] = pd.NA
+                # Clear moneyline - will show as empty/N/A in table
+                recommended.loc[no_sportsbook_data, 'moneyline'] = pd.NA
+                # Set book to empty string (will show as blank in table)
+                recommended.loc[no_sportsbook_data, 'book'] = ""
+                # Clear description (Pick column) - will show as blank in table
+                if 'description' in recommended.columns:
+                    recommended.loc[no_sportsbook_data, 'description'] = ""
+                # Clear edge - these are not actionable bets
+                if 'edge' in recommended.columns:
+                    recommended.loc[no_sportsbook_data, 'edge'] = pd.NA
+            
+            # Drop the line column after using it
+            recommended = recommended.drop(columns=[line_col], errors='ignore')
+        
+        # Clean up merge columns
+        recommended = recommended.drop(columns=['forward_game_id', 'outcome'], errors='ignore')
 
+    recommended_table = components.overunder_recommended_table(recommended)
+    completed_table = components.overunder_completed_table(completed)
     summary_section = components.summary_cards(metrics)
     bankroll_section = components.bankroll_cards(metrics)
 

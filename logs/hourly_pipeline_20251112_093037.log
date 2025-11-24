@@ -1,0 +1,5 @@
+[2025-11-12 09:30:37] =========================================
+[2025-11-12 09:30:37] Starting hourly pipeline
+[2025-11-12 09:30:37] =========================================
+[2025-11-12 09:30:37] Processing leagues: NFL, NBA, CFB, EPL, LALIGA, BUNDESLIGA, SERIEA, LIGUE1
+[2025-11-12 09:30:37] Detecting available soccer seasons from data/raw/results...

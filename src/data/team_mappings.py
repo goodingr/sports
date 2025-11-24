@@ -126,6 +126,7 @@ NFL_ALIASES: Dict[str, str] = {
     "san diego chargers": "LAC",
     "los angeles rams": "LAR",
     "st. louis rams": "LAR",
+    "la rams": "LAR",
     "miami dolphins": "MIA",
     "minnesota vikings": "MIN",
     "new england patriots": "NE",
@@ -727,6 +728,7 @@ LIGUE1_ALIASES: Dict[str, str] = {
     "as saint-etienne": "STE",
     "saint-etienne": "STE",
     "angers sco": "ANG",
+    "angers": "ANG",
     "dijon fco": "DIJ",
     "es troyes ac": "TRO",
     "en avant de guingamp": "GUI",
@@ -811,6 +813,7 @@ CFB_ALIASES: Dict[str, str] = {
     "california golden bears": "CAL",
     "central michigan": "CMU",
     "central michigan chippewas": "CMU",
+    "c michigan": "CMU",
     "charlotte": "CHAR",
     "charlotte 49ers": "CHAR",
     "cincinnati": "CIN",
@@ -847,6 +850,22 @@ CFB_ALIASES: Dict[str, str] = {
     "sam houston": "SHO",
     "sam houston state": "SHO",
     "louisiana tech": "LT",
+    "w michigan": "WMU",
+    "western michigan": "WMU",
+    "n illinois": "NIU",
+    "northern illinois": "NIU",
+    "san jose st": "SJSU",
+    "san jose state": "SJSU",
+    "utah st": "USU",
+    "utah state": "USU",
+    "new mexico st": "NMSU",
+    "new mexico state": "NMSU",
+    "kennesaw st": "KSU",
+    "kennesaw state": "KSU",
+    "jackson st": "JKST",
+    "jackson state": "JKST",
+    "jacksonville st": "JAX",
+    "jacksonville state": "JAX",
     "penn st": "PSU",
     "pennsylvania state": "PSU",
     "ohio st": "OSU",
@@ -1162,6 +1181,12 @@ CFB_ALIASES: Dict[str, str] = {
     "kennesaw st": "KEN",
     "ball st": "BALL",
     "texas st": "TXST",
+    # Additional common abbreviations from TeamRankings
+    "florida intl": "FIU",
+    "louisiana tech": "LT",
+    "missouri st": "MOS",
+    "sam houston": "SHO",
+    "wake forest": "WF",
 }
 
 ALIAS_MAP = {
@@ -1234,3 +1259,98 @@ def get_ncaab_team_code(team_id: int | str | None) -> str:
             return code
         return f"NCAAB{int(normalized_key):04d}"
     return normalize_team_code("NCAAB", key)
+
+
+def get_full_team_name(league: str, code: str) -> str:
+    """Convert a team code (e.g. 'BET') back to a full name (e.g. 'Real Betis')."""
+    if not code:
+        return ""
+    
+    # Check NCAAB first if applicable
+    if league.upper() in ("NCAAB", "NCAABB"):
+        # 1. Try manual overrides for known problematic codes (School[0] + Nickname[0:2])
+        manual_map = {
+            "AHO": "Alabama State",
+            "SCO": "SIU Edwardsville",
+            "GJA": "Georgia Tech",
+            "WWO": "West Georgia",
+            "MBE": "Mercer",
+            "BBE": "Binghamton",
+            "CLI": "Columbia",
+            "LLA": "Longwood",
+            "DDR": "Drexel",
+            "OMO": "Old Dominion",
+            "SBU": "Samford",
+            "PPA": "Prairie View A&M",
+            "NOS": "North Florida",
+            "MRE": "Ole Miss",
+            "ALI": "Arkansas-Pine Bluff",
+            "CGR": "Canisius",
+            "IJA": "IUPUI",
+            "AFA": "Air Force",
+            "FPA": "Furman",
+            "QRO": "Queens (NC)",
+            "QBO": "Quinnipiac",
+            "SGA": "Saint Mary's",
+            "NWI": "Northwestern",
+            "CCO": "Charleston",
+            "YBU": "Yale",
+            "BEA": "Boston College",
+            "TWA": "Tulane",
+            "MRA": "Murray State",
+            "JTI": "Jackson State",
+            "WEA": "Winthrop",
+            "EAC": "Evansville",
+            "AZI": "Akron",
+            "UMA": "UMass",
+            "GBU": "Gonzaga",
+            "ATI": "Auburn",
+            "MWO": "Michigan",
+            "SAZ": "San Diego State",
+            "MTE": "Maryland",
+            "URE": "UNLV",
+        }
+        
+        if code in manual_map:
+            return manual_map[code]
+        
+        # 2. Try to find name by code in NCAAB_ALIASES (reverse lookup)
+        candidates = [k for k, v in NCAAB_ALIASES.items() if v == code]
+        if candidates:
+            return max(candidates, key=len).title()
+            
+        # 3. Try the reverse code map (computed on demand or cached)
+        # We want to find a name N such that normalize_team_code("NCAAB", N) == code
+        # Since we don't have the reverse map pre-computed, let's do it lazily or just iterate (NCAAB is ~360 teams, fast enough)
+        for name in NCAAB_TEAM_NAMES.values():
+            if normalize_team_code("NCAAB", name) == code:
+                return name
+        
+        # 4. If still not found, check if it matches a generated code for any alias
+        for alias, known_code in NCAAB_ALIASES.items():
+            if normalize_team_code("NCAAB", alias) == code:
+                return alias
+
+    aliases = ALIAS_MAP.get(league.upper()) or {}
+    # Find all keys that map to this code
+    candidates = [k for k, v in aliases.items() if v == code]
+    
+    if not candidates:
+        return code
+        
+    # Heuristic: Pick the longest name that doesn't look like an alias (e.g. avoid "ny jets" if "new york jets" exists)
+    # Also capitalize properly
+    full_name = max(candidates, key=len)
+    return full_name.title()
+
+    aliases = ALIAS_MAP.get(league.upper()) or {}
+    # Find all keys that map to this code
+    candidates = [k for k, v in aliases.items() if v == code]
+    
+    if not candidates:
+        return code
+        
+    # Heuristic: Pick the longest name that doesn't look like an alias (e.g. avoid "ny jets" if "new york jets" exists)
+    # Also capitalize properly
+    full_name = max(candidates, key=len)
+    return full_name.title()
