@@ -39,6 +39,8 @@ htmlcov/
 ## Data artifacts
 data/betting.db
 data/forward_test/
+# Exception: Track prediction master files for version control
+!data/forward_test/*/predictions_master.parquet
 data/processed/
 data/raw/
 data/tmp/
