@@ -390,7 +390,6 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
     required_columns = [
         "game_id",
         "commence_time",
-        "predicted_at",
         "home_team",
         "away_team",
         "home_moneyline",
@@ -407,7 +406,7 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
     ]
     
     # Optional columns (may not exist in older predictions or non-soccer leagues)
-    optional_columns = ["result_updated_at", "draw_moneyline", "draw_predicted_prob", 
+    optional_columns = ["predicted_at", "result_updated_at", "draw_moneyline", "draw_predicted_prob", 
                        "draw_implied_prob", "draw_edge"]
 
     missing = [column for column in required_columns if column not in df.columns]
@@ -424,10 +423,14 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
             sides.append("draw")
         
         for side in sides:
+            # Resolve full team names
+            home_full = get_full_team_name(row.get("league"), row.get("home_team")) or row.get("home_team")
+            away_full = get_full_team_name(row.get("league"), row.get("away_team")) or row.get("away_team")
+
             if side == "draw":
                 # Handle draw bet
                 team = "Draw"
-                opponent = f"{row.get('home_team')} vs {row.get('away_team')}"
+                opponent = f"{home_full} vs {away_full}"
                 moneyline_col = "draw_moneyline"
                 prob_col = "draw_predicted_prob"
                 implied_col = "draw_implied_prob"
@@ -448,15 +451,18 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
                     won = None
             else:
                 # Handle home/away bets (existing logic)
-                team_col = f"{side}_team"
-                opp_col = "away_team" if side == "home" else "home_team"
                 moneyline_col = f"{side}_moneyline"
                 prob_col = f"{side}_predicted_prob"
                 implied_col = f"{side}_implied_prob"
                 edge_col = f"{side}_edge"
 
-                team = row.get(team_col)
-                opponent = row.get(opp_col)
+                if side == "home":
+                    team = home_full
+                    opponent = away_full
+                else:
+                    team = away_full
+                    opponent = home_full
+
                 moneyline = row.get(moneyline_col)
                 predicted_prob = row.get(prob_col)
                 implied_prob = row.get(implied_col)
@@ -479,8 +485,8 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
                     "team": team,
                     "opponent": opponent,
                     "league": row.get("league"),
-                    "home_team_name": row.get("home_team"),
-                    "away_team_name": row.get("away_team"),
+                    "home_team_name": home_full,
+                    "away_team_name": away_full,
                     "moneyline": float(moneyline) if moneyline is not None else np.nan,
                     "predicted_prob": float(predicted_prob) if predicted_prob is not None else np.nan,
                     "implied_prob": float(implied_prob) if implied_prob is not None else np.nan,
@@ -927,16 +933,17 @@ def get_recommended_bets(
         return pd.DataFrame()
 
     # Prefer the strongest edge per game_id to avoid duplicate rows (e.g., both sides recommended)
-    upcoming = upcoming.sort_values(
-        by=["edge", "commence_time"], ascending=[False, True], na_position="last"
-    )
+    # UPDATE: User wants to see more games, and if both sides have edge (arb?), show both.
+    # upcoming = upcoming.sort_values(
+    #     by=["edge", "commence_time"], ascending=[False, True], na_position="last"
+    # )
 
-    if "game_id" in upcoming.columns:
-        upcoming = upcoming.drop_duplicates(subset=["game_id"], keep="first")
-    else:
-        dedupe_cols = [col for col in ["league", "commence_time", "team", "opponent"] if col in upcoming.columns]
-        if dedupe_cols:
-            upcoming = upcoming.drop_duplicates(subset=dedupe_cols, keep="first")
+    # if "game_id" in upcoming.columns:
+    #     upcoming = upcoming.drop_duplicates(subset=["game_id"], keep="first")
+    # else:
+    #     dedupe_cols = [col for col in ["league", "commence_time", "team", "opponent"] if col in upcoming.columns]
+    #     if dedupe_cols:
+    #         upcoming = upcoming.drop_duplicates(subset=dedupe_cols, keep="first")
 
     return upcoming.sort_values("commence_time", ascending=True, na_position="last")
 
@@ -1322,8 +1329,17 @@ def _match_games_to_db(recommended: pd.DataFrame) -> pd.DataFrame:
             if not home_name or not away_name:
                 continue
 
-            home_code = normalize_team_code(league, home_name)
-            away_code = normalize_team_code(league, away_name)
+            # Try to expand abbreviations to full names first
+            from src.data.team_mappings import get_full_team_name
+            home_expanded = get_full_team_name(league, str(home_name))
+            away_expanded = get_full_team_name(league, str(away_name))
+            
+            # Use expanded names if available, otherwise use original
+            home_to_normalize = home_expanded if home_expanded else home_name
+            away_to_normalize = away_expanded if away_expanded else away_name
+
+            home_code = normalize_team_code(league, home_to_normalize)
+            away_code = normalize_team_code(league, away_to_normalize)
             if not home_code or not away_code:
                 continue
 
@@ -1795,7 +1811,9 @@ def get_totals_odds_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
             o.line,
             o.price_american AS moneyline,
             b.name AS book,
-            s.fetched_at_utc
+            s.fetched_at_utc,
+            t1.name AS home_team_full,
+            t2.name AS away_team_full
         FROM odds o
         JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
         JOIN books b ON o.book_id = b.book_id
@@ -1803,6 +1821,9 @@ def get_totals_odds_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
           ON ls.game_id = o.game_id
          AND ls.book_id = o.book_id
          AND ls.max_fetched = s.fetched_at_utc
+        JOIN games g ON o.game_id = g.game_id
+        JOIN teams t1 ON g.home_team_id = t1.team_id
+        JOIN teams t2 ON g.away_team_id = t2.team_id
         WHERE o.market = 'totals'
           AND LOWER(o.outcome) IN ('over', 'under')
           AND o.price_american IS NOT NULL
@@ -1815,15 +1836,15 @@ def get_totals_odds_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
 
     if not rows:
         return pd.DataFrame(
-            columns=["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]
+            columns=["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc", "home_team_full", "away_team_full"]
         )
 
-    odds_df = pd.DataFrame(rows, columns=["db_game_id", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    odds_df = pd.DataFrame(rows, columns=["db_game_id", "outcome", "line", "moneyline", "book", "fetched_at_utc", "home_team_full", "away_team_full"])
     odds_df["outcome"] = odds_df["outcome"].astype(str).str.lower()
     odds_df = odds_df.merge(mapping, how="left", left_on="db_game_id", right_on="db_game_id")
     odds_df = odds_df.rename(columns={"prediction_game_id": "forward_game_id"})
     odds_df = odds_df.dropna(subset=["forward_game_id"])
-    return odds_df[["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc"]]
+    return odds_df[["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc", "home_team_full", "away_team_full"]]
 
 
 __all__ = [
