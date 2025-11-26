@@ -314,6 +314,21 @@ def load_schedules(
 
             status = "final" if (_normalize_score(row.get("home_score")) is not None and _normalize_score(row.get("away_score")) is not None) else "scheduled"
 
+            # Check if game already exists by details (to prevent duplicates from different source IDs)
+            existing_id = _find_game_by_details(
+                conn,
+                sport_id=sport_id,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                start_iso=start_time,
+                odds_api_id=None
+            )
+            
+            if existing_id:
+                # If game exists, use the existing ID to update it instead of creating a new one
+                game_id = existing_id
+                LOGGER.debug("Matched existing game %s for %s vs %s", game_id, home_raw, away_raw)
+
             conn.execute(
                 """
                 INSERT INTO games (
@@ -854,8 +869,8 @@ def _find_game_by_details(
     if odds_api_id:
         # First try exact odds_api_id match
         row = conn.execute(
-            "SELECT game_id FROM games WHERE odds_api_id = ?",
-            (odds_api_id,),
+            "SELECT game_id FROM games WHERE odds_api_id = ? AND sport_id = ?",
+            (odds_api_id, sport_id),
         ).fetchone()
         if row:
             return row[0]
@@ -873,8 +888,8 @@ def _find_game_by_details(
         for league_prefix in ["NBA_", "NFL_"]:
             potential_game_id = f"{league_prefix}{odds_api_id}"
             row = conn.execute(
-                "SELECT game_id FROM games WHERE game_id = ?",
-                (potential_game_id,),
+                "SELECT game_id FROM games WHERE game_id = ? AND sport_id = ?",
+                (potential_game_id, sport_id),
             ).fetchone()
             if row:
                 return row[0]
@@ -890,17 +905,37 @@ def _find_game_by_details(
         if row:
             return row[0]
 
-    row = conn.execute(
-        """
-        SELECT game_id FROM games
-        WHERE sport_id = ? AND home_team_id = ? AND away_team_id = ?
-        ORDER BY start_time_utc DESC
-        LIMIT 1
-        """,
-        (sport_id, home_team_id, away_team_id),
-    ).fetchone()
-    if row:
-        return row[0]
+    # Fallback: match by teams, but ONLY if within 24 hours (to handle slight schedule shifts)
+    # Otherwise, treat as a new game (e.g. next season's matchup)
+    if start_iso:
+        row = conn.execute(
+            """
+            SELECT game_id FROM games
+            WHERE sport_id = ? 
+              AND home_team_id = ? 
+              AND away_team_id = ?
+              AND ABS(strftime('%s', start_time_utc) - strftime('%s', ?)) < 86400
+            ORDER BY start_time_utc DESC
+            LIMIT 1
+            """,
+            (sport_id, home_team_id, away_team_id, start_iso),
+        ).fetchone()
+        if row:
+            return row[0]
+    else:
+        # If no start time provided (rare), just take the latest
+        row = conn.execute(
+            """
+            SELECT game_id FROM games
+            WHERE sport_id = ? AND home_team_id = ? AND away_team_id = ?
+            ORDER BY start_time_utc DESC
+            LIMIT 1
+            """,
+            (sport_id, home_team_id, away_team_id),
+        ).fetchone()
+        if row:
+            return row[0]
+
     return None
 
 
@@ -908,6 +943,8 @@ SPORT_CONFIG = {
     "americanfootball_nfl": {"league": "NFL", "sport_name": "Football", "default_market": "moneyline"},
     "americanfootball_ncaaf": {"league": "CFB", "sport_name": "Football", "default_market": "moneyline"},
     "basketball_nba": {"league": "NBA", "sport_name": "Basketball", "default_market": "moneyline"},
+    "basketball_ncaab": {"league": "NCAAB", "sport_name": "Basketball", "default_market": "moneyline"},
+    "icehockey_nhl": {"league": "NHL", "sport_name": "Ice Hockey", "default_market": "moneyline"},
     "baseball_mlb": {"league": "MLB", "sport_name": "Baseball", "default_market": "moneyline"},
     "soccer_epl": {"league": "EPL", "sport_name": "Soccer", "default_market": "moneyline"},
     "soccer_spain_la_liga": {"league": "LALIGA", "sport_name": "Soccer", "default_market": "moneyline"},
@@ -983,6 +1020,7 @@ def load_odds_snapshot(
             if not game_id:
                 base_id = event.get("id") or uuid.uuid4().hex
                 game_id = f"{config['league']}_{base_id}" if not base_id.upper().startswith(config["league"]) else base_id
+                print(f"DEBUG: Creating new game {game_id}")
                 season = commence_iso and datetime.fromisoformat(commence_iso).year
                 conn.execute(
                     """
@@ -1010,8 +1048,14 @@ def load_odds_snapshot(
                 )
             else:
                 conn.execute(
-                    "UPDATE games SET odds_api_id = COALESCE(?, odds_api_id) WHERE game_id = ?",
-                    (event.get("id"), game_id),
+                    """
+                    UPDATE games 
+                    SET odds_api_id = COALESCE(?, odds_api_id),
+                        start_time_utc = COALESCE(?, start_time_utc),
+                        status = 'scheduled'
+                    WHERE game_id = ?
+                    """,
+                    (event.get("id"), commence_iso, game_id),
                 )
             
             # Extract moneylines from first bookmaker to update game_results

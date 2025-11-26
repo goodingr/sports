@@ -72,7 +72,7 @@ def get_totals_data(model_type: str = "ensemble") -> pd.DataFrame:
                     # Merge sportsbook data back to main dataframe
                     # Match on game_id and side
                     df = df.merge(
-                        best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line']],
+                        best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line', 'home_team_full', 'away_team_full']],
                         left_on=['game_id', 'side'],
                         right_on=['forward_game_id', 'outcome'],
                         how='left',
@@ -103,12 +103,19 @@ def get_totals_data(model_type: str = "ensemble") -> pd.DataFrame:
                                 lambda row: f"{row['side'].title()} {row['total_line']:.1f}" if pd.notna(row['total_line']) else row['side'].title(),
                                 axis=1
                             )
+                            
+                    # Update team names with full names from odds data if available
+                    if 'home_team_full' in df.columns:
+                        df.loc[has_sportsbook_data, 'home_team'] = df.loc[has_sportsbook_data, 'home_team_full'].fillna(df.loc[has_sportsbook_data, 'home_team'])
+                    
+                    if 'away_team_full' in df.columns:
+                        df.loc[has_sportsbook_data, 'away_team'] = df.loc[has_sportsbook_data, 'away_team_full'].fillna(df.loc[has_sportsbook_data, 'away_team'])
                     
                     # Add sportsbook URL
                     df['book_url'] = df['book'].apply(lambda x: get_sportsbook_url(x) if pd.notna(x) and x != "" else "")
                     
                     # Clean up merge columns
-                    df = df.drop(columns=['forward_game_id', 'outcome', 'book_sportsbook', 'moneyline_sportsbook', line_col], errors='ignore')
+                    df = df.drop(columns=['forward_game_id', 'outcome', 'book_sportsbook', 'moneyline_sportsbook', line_col, 'home_team_full', 'away_team_full'], errors='ignore')
                     
                     matched_count = df[df['book'] != ""].shape[0]
                     unmatched = df[(df['status'] == 'Pending') & (df['book'] == "")]
@@ -222,8 +229,11 @@ async def get_upcoming(model_type: str = "ensemble"):
     # Filter for pending/upcoming
     # We can use the status column we created
     upcoming = df[df["status"] == "Pending"].copy()
-        
+    
+    # Filter out past games to ensure we only show truly upcoming bets
+    now = pd.Timestamp.now(tz="UTC")
     if "commence_time" in upcoming.columns:
+        upcoming = upcoming[upcoming["commence_time"] > now]
         upcoming = upcoming.sort_values("commence_time", ascending=True)
     
     records = upcoming.fillna("").to_dict(orient="records")

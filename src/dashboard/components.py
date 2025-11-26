@@ -873,6 +873,7 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
     ]
 
     return dash_table.DataTable(
+        id="overunder-completed-table-datatable",
         columns=columns,
         data=df.to_dict("records"),
         sort_action="native",

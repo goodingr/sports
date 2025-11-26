@@ -30,7 +30,13 @@ This script:
 python scripts/safe_remove_abbreviations.py
 ```
 
-### 3. Manual Backup Locations
+### 4. Git Version Control
+✅ Prediction master files are now tracked in git:
+- `.gitignore` updated with exception for `data/forward_test/*/predictions_master.parquet`
+- All three model types committed to version control
+- Can restore from git history using: `git checkout HEAD~1 -- data/forward_test/ensemble/predictions_master.parquet`
+
+### 5. What's NOT in Git (Previously)
 Backups are automatically created at:
 - `data/backups/predictions/predictions_master_{model_type}_{timestamp}.parquet`
 

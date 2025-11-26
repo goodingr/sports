@@ -92,21 +92,30 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                     ) : (
                         // Non-clickable display for completed bets or bets without sportsbook
                         <div className="flex flex-col items-center gap-1">
+                            {/* 1. Prediction (Line) */}
                             <div className="text-sm font-black text-primary uppercase tracking-tight text-center leading-tight">
                                 {bet.prediction}
                             </div>
+
+                            {/* 2. Final Score (Badge) */}
+                            {isCompleted && (
+                                <div>
+                                    <Badge
+                                        status={bet.status}
+                                        result={bet.result}
+                                        compact
+                                        actualTotal={(bet.home_score || 0) + (bet.away_score || 0)}
+                                    />
+                                </div>
+                            )}
+
+                            {/* 3. Profit/Odds */}
                             <div className={`text-xs font-medium ${isCompleted
                                 ? (bet.profit && bet.profit > 0 ? 'text-success' : 'text-danger')
                                 : 'text-muted-foreground'
                                 }`}>
                                 {isCompleted ? formatMoney(bet.profit || 0) : (bet.odds > 0 ? `+${bet.odds}` : str(bet.odds))}
                             </div>
-                            {/* Only show badge for completed bets */}
-                            {isCompleted && (
-                                <div className="mt-1">
-                                    <Badge status={bet.status} result={bet.result} compact />
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
@@ -132,7 +141,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
     );
 }
 
-function Badge({ status, result, compact }: { status: string, result?: string, compact?: boolean }) {
+function Badge({ status, result, compact, actualTotal }: { status: string, result?: string, compact?: boolean, actualTotal?: number }) {
     const baseClasses = "inline-flex items-center gap-1 rounded-full font-medium";
     const sizeClasses = compact ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs";
 
@@ -156,6 +165,15 @@ function Badge({ status, result, compact }: { status: string, result?: string, c
         return (
             <span className={`${baseClasses} ${sizeClasses} bg-danger/10 text-danger`}>
                 <XCircle className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} /> {compact ? "Loss" : "Loss"}
+            </span>
+        );
+    }
+
+    // If completed, show actual total instead of "Completed" text
+    if (status === 'Completed' && actualTotal !== undefined && actualTotal > 0) {
+        return (
+            <span className="text-xs font-medium text-muted-foreground">
+                {actualTotal}
             </span>
         );
     }

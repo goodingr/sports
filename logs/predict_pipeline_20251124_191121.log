@@ -1,0 +1,18 @@
+[2025-11-24 19:11:21] DEBUG: SoccerOnly=False, SkipOdds=True
+[2025-11-24 19:11:21] =========================================
+[2025-11-24 19:11:21] Starting PREDICTION pipeline
+[2025-11-24 19:11:21] =========================================
+[2025-11-24 19:11:21] Processing leagues: NFL, NBA, CFB, NCAAB, NHL, EPL, LALIGA, BUNDESLIGA, SERIEA, LIGUE1
+[2025-11-24 19:11:21] Step 1: Fetching The Odds API snapshots...
+[2025-11-24 19:11:21] Skipping Odds API snapshot for NFL (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for NBA (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for CFB (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for NCAAB (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for NHL (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for EPL (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for LALIGA (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for BUNDESLIGA (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for SERIEA (SkipOdds enabled)
+[2025-11-24 19:11:21] Skipping Odds API snapshot for LIGUE1 (SkipOdds enabled)
+[2025-11-24 19:11:21] Fetching TeamRankings over/under picks for leagues: NFL,NBA,CFB...
+[2025-11-24 19:11:59] Updating TeamRankings picks for leagues: NFL,NBA,CFB...

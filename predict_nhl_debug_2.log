@@ -1,0 +1,18 @@
+INFO:__main__:=== Running forward test for NHL ===
+INFO:__main__:Loading model from models\nhl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Loading NHL games from database...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Bobby\Desktop\sports\src\models\forward_test.py", line 1965, in <module>
+    main()
+  File "C:\Users\Bobby\Desktop\sports\src\models\forward_test.py", line 1896, in main
+    games = fetch_live_games(league=league, dotenv_path=args.dotenv, use_db_odds=args.use_db_odds)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bobby\Desktop\sports\src\models\forward_test.py", line 365, in fetch_live_games
+    return load_games_from_database(league_upper)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Bobby\Desktop\sports\src\models\forward_test.py", line 282, in load_games_from_database
+    LOGGER.info("Found %d games in database", len(game_rows))
+                                                  ^^^^^^^^^
+NameError: name 'game_rows' is not defined. Did you mean: 'game_row'?

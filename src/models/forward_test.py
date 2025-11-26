@@ -241,12 +241,157 @@ def load_totals_model(league: str) -> Optional[dict]:
         return None
 
 
-def fetch_live_games(league: str = "NBA", dotenv_path: Optional[Path] = None) -> List[Dict]:
-    """Fetch current/upcoming games with odds for the specified league."""
+def load_games_from_database(league: str = "NBA") -> List[Dict]:
+    """Load upcoming games with odds from the database (avoids API calls)."""
     league_upper = league.upper()
     sport_key = _get_sport_key(league_upper)
     
-    LOGGER.info("Fetching live %s games with odds...", league_upper)
+    LOGGER.info("Loading %s games from database...", league_upper)
+    
+    # Get the most recent odds snapshot from database
+    with connect() as conn:
+        # First get the sport_id for this league
+        sport_row = conn.execute(
+            "SELECT sport_id FROM sports WHERE league = ?", 
+            (league_upper,)
+        ).fetchone()
+        
+        if not sport_row:
+            LOGGER.warning("League %s not found in database", league_upper)
+            return []
+            
+        sport_id = sport_row[0]
+
+        # Find the most recent snapshot for this sport
+        snapshot_row = conn.execute(
+            """
+            SELECT snapshot_id, fetched_at_utc
+            FROM odds_snapshots
+            WHERE sport_id = ?
+            ORDER BY fetched_at_utc DESC
+            LIMIT 1
+            """,
+            (sport_id,)
+        ).fetchone()
+        
+        if not snapshot_row:
+            LOGGER.warning("No odds snapshots found in database for %s", league_upper)
+            return []
+        snapshot_id = snapshot_row[0]
+        fetched_at = snapshot_row[1]
+        LOGGER.info("Using snapshot %s from %s", snapshot_id, fetched_at)
+        
+        # Get all games from this snapshot
+        game_rows = conn.execute(
+            """
+            SELECT DISTINCT g.game_id, g.odds_api_id, g.start_time_utc,
+                   ht.name as home_team, at.name as away_team
+            FROM games g
+            JOIN teams ht ON g.home_team_id = ht.team_id
+            JOIN teams at ON g.away_team_id = at.team_id
+            WHERE g.sport_id = ?
+            AND g.start_time_utc > datetime('now')
+            AND g.start_time_utc < datetime('now', '+7 days')
+            AND EXISTS (
+                SELECT 1 FROM odds o
+                WHERE o.game_id = g.game_id
+                AND o.snapshot_id = ?
+            )
+            ORDER BY g.start_time_utc
+            """,
+            (sport_id, snapshot_id)
+        ).fetchall()
+        
+        if not game_rows:
+            LOGGER.warning("No upcoming games found in database for %s", league_upper)
+            return []
+        
+        LOGGER.info("Found %d games in database", len(game_rows))
+        
+        # Build game payloads in Odds API format
+        results = []
+        for game_row in game_rows:
+            game_id, odds_api_id, start_time, home_team, away_team = game_row
+            
+            # Get odds for this game
+            odds_rows = conn.execute(
+                """
+                SELECT b.name as book, o.market, o.outcome, o.line, o.price_american as moneyline
+                FROM odds o
+                JOIN books b ON o.book_id = b.book_id
+                WHERE o.game_id = ? AND o.snapshot_id = ?
+                """,
+                (game_id, snapshot_id)
+            ).fetchall()
+            
+            # Group odds by bookmaker
+            bookmakers_dict = {}
+            for book, market, outcome, line, moneyline in odds_rows:
+                if book not in bookmakers_dict:
+                    bookmakers_dict[book] = {
+                        "key": book.lower().replace(" ", "_"),
+                        "title": book,
+                        "markets": {}
+                    }
+                
+                market_key = market.lower()
+                if market_key not in bookmakers_dict[book]["markets"]:
+                    bookmakers_dict[book]["markets"][market_key] = {
+                        "key": market_key,
+                        "outcomes": []
+                    }
+                
+                outcome_name = outcome
+                if outcome == "home":
+                    outcome_name = home_team
+                elif outcome == "away":
+                    outcome_name = away_team
+
+                outcome_data = {
+                    "name": outcome_name,
+                    "price": moneyline
+                }
+                if line is not None:
+                    outcome_data["point"] = line
+                
+                bookmakers_dict[book]["markets"][market_key]["outcomes"].append(outcome_data)
+            
+            # Convert markets dict to list
+            for book_data in bookmakers_dict.values():
+                book_data["markets"] = list(book_data["markets"].values())
+            
+            game_payload = {
+                "id": odds_api_id or game_id,
+                "sport_key": sport_key,
+                "commence_time": start_time,
+                "home_team": home_team,
+                "away_team": away_team,
+                "bookmakers": list(bookmakers_dict.values())
+            }
+            results.append(game_payload)
+    
+    LOGGER.info("Loaded %d games from database", len(results))
+    return results
+
+
+def fetch_live_games(league: str = "NBA", dotenv_path: Optional[Path] = None, use_db_odds: bool = False) -> List[Dict]:
+    """Fetch current/upcoming games with odds for the specified league.
+    
+    Args:
+        league: League to fetch games for
+        dotenv_path: Path to .env file for API credentials
+        use_db_odds: If True, load odds from database instead of making API call
+    """
+    league_upper = league.upper()
+    
+    # Use database odds if requested
+    if use_db_odds:
+        return load_games_from_database(league_upper)
+    
+    # Otherwise, fetch from API
+    sport_key = _get_sport_key(league_upper)
+    
+    LOGGER.info("Fetching live %s games with odds from API...", league_upper)
     try:
         settings = OddsAPISettings.from_env(dotenv_path)
     except RuntimeError as e:
@@ -692,8 +837,12 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
     for game in games:
         try:
             game_id = game.get("id", f"{league_upper}_{game.get('commence_time', 'unknown')}")
-            home_team = normalize_team_code(league_upper, game.get("home_team", ""))
-            away_team = normalize_team_code(league_upper, game.get("away_team", ""))
+            # Store original team names from Odds API
+            home_team_original = game.get("home_team", "")
+            away_team_original = game.get("away_team", "")
+            # Also keep normalized codes for internal use
+            home_team = normalize_team_code(league_upper, home_team_original)
+            away_team = normalize_team_code(league_upper, away_team_original)
             commence_time = game.get("commence_time", "")
             season_year = datetime.now().year
             commence_dt = None
@@ -899,8 +1048,10 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 "league": league_upper,
                 "game_id": game_id,
                 "commence_time": commence_time,
-                "home_team": home_team,
-                "away_team": away_team,
+                "home_team": home_team_original,  # Use original full name
+                "away_team": away_team_original,  # Use original full name
+                "home_team_code": home_team,  # Keep normalized code for reference
+                "away_team_code": away_team,  # Keep normalized code for reference
                 "home_moneyline": home_ml,
                 "away_moneyline": away_ml,
                 "draw_moneyline": draw_ml if is_soccer else None,
@@ -924,6 +1075,7 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 "over_edge": over_edge_pred,
                 "under_edge": under_edge_pred,
                 "predicted_at": datetime.now(timezone.utc).isoformat(),
+                "version": "v0.3" if commence_time >= pd.Timestamp("2025-11-21", tz="UTC") else ("v0.2" if commence_time >= pd.Timestamp("2025-11-14", tz="UTC") else ("v0.1" if commence_time >= pd.Timestamp("2025-11-03", tz="UTC") else "pre-v0.1")),
                 "result": None,  # Will be filled when game completes
                 "home_score": None,
                 "away_score": None,
@@ -953,7 +1105,12 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 "home_edge",
                 "away_edge",
                 "draw_edge",
+                "over_predicted_prob",
+                "under_predicted_prob",
+                "over_edge",
+                "under_edge",
                 "predicted_at",
+                "version",
                 "result",
                 "home_score",
                 "away_score",
@@ -1753,6 +1910,11 @@ def main() -> None:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    parser.add_argument(
+        "--use-db-odds",
+        action="store_true",
+        help="Load odds from database instead of making API calls (avoids redundant API usage)",
+    )
     args = parser.parse_args()
     
     logging.basicConfig(level=getattr(logging, args.log_level))
@@ -1767,7 +1929,7 @@ def main() -> None:
                 LOGGER.warning("Skipping %s: %s", league, exc)
                 continue
 
-            games = fetch_live_games(league=league, dotenv_path=args.dotenv)
+            games = fetch_live_games(league=league, dotenv_path=args.dotenv, use_db_odds=args.use_db_odds)
             if not games:
                 LOGGER.info("No live games found for %s", league)
                 continue

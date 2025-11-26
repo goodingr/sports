@@ -330,11 +330,13 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                                 html.Label("Edge Threshold", htmlFor="edge-threshold-slider"),
                                 dcc.Slider(
                                     id="edge-threshold-slider",
-                                    min=0.0,
+                                    min=-0.2,
                                     max=0.2,
                                     step=0.005,
-                                    value=DEFAULT_EDGE_THRESHOLD,
+                                    value=0.0,
                                     marks={
+                                        -0.2: "-20%",
+                                        -0.1: "-10%",
                                         0.0: "0%",
                                         0.05: "5%",
                                         0.1: "10%",
@@ -653,11 +655,19 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                                 html.Label("Edge Threshold", htmlFor="ou-edge-slider"),
                                 dcc.Slider(
                                     id="ou-edge-slider",
-                                    min=0.0,
+                                    min=-0.2,
                                     max=0.2,
                                     step=0.005,
-                                    value=DEFAULT_EDGE_THRESHOLD,
-                                    marks={0.0: "0%", 0.05: "5%", 0.1: "10%", 0.15: "15%", 0.2: "20%"},
+                                    value=0.0,
+                                    marks={
+                                        -0.2: "-20%",
+                                        -0.1: "-10%",
+                                        0.0: "0%",
+                                        0.05: "5%",
+                                        0.1: "10%",
+                                        0.15: "15%",
+                                        0.2: "20%",
+                                    },
                                     tooltip={"placement": "bottom", "always_visible": False},
                                 ),
                             ]
@@ -719,6 +729,18 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                         value="ou-completed",
                         children=[
                             dcc.Loading(html.Div(id="overunder-completed-table"), type="circle"),
+                            dbc.Modal(
+                                [
+                                    dbc.ModalHeader(dbc.ModalTitle(id="ou-completed-odds-modal-title")),
+                                    dbc.ModalBody(html.Div(id="ou-completed-odds-modal-content")),
+                                    dbc.ModalFooter(
+                                        dbc.Button("Close", id="ou-completed-odds-modal-close", color="secondary", className="ms-auto")
+                                    ),
+                                ],
+                                id="ou-completed-odds-modal",
+                                is_open=False,
+                                size="lg",
+                            ),
                         ],
                     ),
                     dcc.Tab(
@@ -1109,7 +1131,7 @@ def update_overunder_page(
         best_odds = totals_odds_df.loc[totals_odds_df.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
         
         recommended = recommended.merge(
-            best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line']],
+            best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line', 'home_team_full', 'away_team_full']],
             left_on=['game_id', 'side'],
             right_on=['forward_game_id', 'outcome'],
             how='left',
@@ -1152,6 +1174,13 @@ def update_overunder_page(
                     axis=1
                 )
             
+            # Update team names with full names from odds data if available
+            if 'home_team_full' in recommended.columns:
+                recommended.loc[has_sportsbook_data, 'home_team'] = recommended.loc[has_sportsbook_data, 'home_team_full'].fillna(recommended.loc[has_sportsbook_data, 'home_team'])
+            
+            if 'away_team_full' in recommended.columns:
+                recommended.loc[has_sportsbook_data, 'away_team'] = recommended.loc[has_sportsbook_data, 'away_team_full'].fillna(recommended.loc[has_sportsbook_data, 'away_team'])
+            
             # For rows WITHOUT sportsbook data, show N/A instead of predicted values
             no_sportsbook_data = ~has_sportsbook_data
             if no_sportsbook_data.any():
@@ -1169,10 +1198,133 @@ def update_overunder_page(
                     recommended.loc[no_sportsbook_data, 'edge'] = pd.NA
             
             # Drop the line column after using it
-            recommended = recommended.drop(columns=[line_col], errors='ignore')
+            recommended = recommended.drop(columns=[line_col, 'home_team_full', 'away_team_full'], errors='ignore')
         
         # Clean up merge columns
         recommended = recommended.drop(columns=['forward_game_id', 'outcome'], errors='ignore')
+
+    # Logic to update completed bets with best sportsbook odds
+    completed_odds_df = get_totals_odds_for_recommended(completed)
+    if not completed_odds_df.empty:
+        # Ensure line is numeric
+        if "line" in completed_odds_df.columns:
+            completed_odds_df["line"] = pd.to_numeric(completed_odds_df["line"], errors="coerce")
+            
+        # Filter for rows with valid lines - for totals, the line is essential
+        valid_odds = completed_odds_df.dropna(subset=["line"])
+        
+        if not valid_odds.empty:
+            # Select the BEST odds (highest moneyline) for each game/side
+            best_completed_odds = valid_odds.loc[valid_odds.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
+            
+            completed = completed.merge(
+                best_completed_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line', 'home_team_full', 'away_team_full']],
+                left_on=['game_id', 'side'],
+                right_on=['forward_game_id', 'outcome'],
+                how='left',
+                suffixes=('', '_sportsbook')
+            )
+            
+            # Handle book column
+            if 'book' not in completed.columns:
+                completed['book'] = ""
+            if 'book_sportsbook' in completed.columns:
+                completed['book'] = completed['book_sportsbook'].fillna(completed['book'])
+                completed = completed.drop(columns=['book_sportsbook'], errors='ignore')
+
+            # Handle moneyline column
+            if 'moneyline_sportsbook' in completed.columns:
+                completed['moneyline'] = completed['moneyline_sportsbook'].fillna(completed['moneyline'])
+                completed = completed.drop(columns=['moneyline_sportsbook'], errors='ignore')
+
+            # Handle line column
+            line_col = 'line_sportsbook' if 'line_sportsbook' in completed.columns else 'line'
+            if line_col in completed.columns:
+                # Ensure the source column is numeric too
+                completed[line_col] = pd.to_numeric(completed[line_col], errors="coerce")
+                
+                has_sportsbook_data = completed[line_col].notna()
+                completed.loc[has_sportsbook_data, 'total_line'] = completed.loc[has_sportsbook_data, line_col]
+                
+                # Regenerate description
+                if 'description' in completed.columns and 'side' in completed.columns:
+                    completed.loc[has_sportsbook_data, 'description'] = completed.loc[has_sportsbook_data].apply(
+                        lambda row: f"{row['side'].title()} {row['total_line']:.1f}" if pd.notna(row['total_line']) else row['side'].title(),
+                        axis=1
+                    )
+                
+                # Update team names
+                if 'home_team_full' in completed.columns:
+                    completed.loc[has_sportsbook_data, 'home_team'] = completed.loc[has_sportsbook_data, 'home_team_full'].fillna(completed.loc[has_sportsbook_data, 'home_team'])
+                if 'away_team_full' in completed.columns:
+                    completed.loc[has_sportsbook_data, 'away_team'] = completed.loc[has_sportsbook_data, 'away_team_full'].fillna(completed.loc[has_sportsbook_data, 'away_team'])
+
+                # Drop the line column after using it
+                completed = completed.drop(columns=[line_col, 'home_team_full', 'away_team_full'], errors='ignore')
+            
+            # RE-CALCULATE WON and PROFIT based on new line and moneyline
+            # We need to do this because the line might have changed from the predicted line
+            # and the result (Win/Loss) depends on the line.
+            
+            # Helper for profit calculation
+            def calculate_profit(row):
+                if pd.isna(row.get('won')) or row.get('won') is None:
+                    return 0.0
+                
+                stake = DEFAULT_STAKE
+                ml = row.get('moneyline')
+                
+                if pd.isna(ml):
+                    return 0.0
+                    
+                if row['won']:
+                    if ml > 0:
+                        return stake * (ml / 100.0)
+                    else:
+                        return stake * (100.0 / abs(ml))
+                else:
+                    return -stake
+
+            # Only recalculate for rows where we have scores
+            has_scores = completed['total_points'].notna()
+            
+            if has_scores.any():
+                # Recalculate 'won'
+                # If Over: total > line -> Win
+                # If Under: total < line -> Win
+                # If total == line -> Push (won = None or False? usually Push is not a win, profit 0)
+                
+                # We need to handle 'side' being 'over' or 'under' (case insensitive)
+                is_over = completed['side'].str.lower() == 'over'
+                is_under = completed['side'].str.lower() == 'under'
+                
+                # Initialize won as None
+                completed.loc[has_scores, 'won'] = None
+                
+                # Over wins
+                over_wins = is_over & (completed['total_points'] > completed['total_line'])
+                completed.loc[has_scores & over_wins, 'won'] = True
+                
+                # Over losses
+                over_losses = is_over & (completed['total_points'] < completed['total_line'])
+                completed.loc[has_scores & over_losses, 'won'] = False
+                
+                # Under wins
+                under_wins = is_under & (completed['total_points'] < completed['total_line'])
+                completed.loc[has_scores & under_wins, 'won'] = True
+                
+                # Under losses
+                under_losses = is_under & (completed['total_points'] > completed['total_line'])
+                completed.loc[has_scores & under_losses, 'won'] = False
+                
+                # Pushes (total == line) remain None (or we can set explicitly if needed)
+                # If won is None, profit should be 0 (Push)
+                
+                # Recalculate profit
+                completed['profit'] = completed.apply(calculate_profit, axis=1)
+            
+            # Clean up merge columns
+            completed = completed.drop(columns=['forward_game_id', 'outcome'], errors='ignore')
 
     recommended_table = components.overunder_recommended_table(recommended)
     completed_table = components.overunder_completed_table(completed)
@@ -1284,44 +1436,8 @@ def toggle_moneyline_modal(active_cell, close_clicks, table_data, book_odds_json
             away_team = row.get("team")
 
     if matchup_df.empty:
-        # Fallback to the stored moneyline on the recommendation itself (if available)
-        def _parse_moneyline(value):
-            if value is None or (isinstance(value, float) and pd.isna(value)):
-                return None
-            if isinstance(value, (int, float)):
-                return float(value)
-            try:
-                return float(str(value).replace("+", "").strip())
-            except (ValueError, TypeError):
-                return None
-
-        fallback_value = row.get("moneyline_value")
-        fallback_ml = _parse_moneyline(fallback_value)
-        if fallback_ml is None:
-            fallback_ml = _parse_moneyline(row.get("moneyline"))
-
-        fallback_side = (row.get("side") or "").lower() if isinstance(row.get("side"), str) else ""
-        if not fallback_side:
-            team_name = (row.get("team") or "").upper()
-            if team_name and home_team and team_name == str(home_team).upper():
-                fallback_side = "home"
-            elif team_name and away_team and team_name == str(away_team).upper():
-                fallback_side = "away"
-
-        if fallback_ml is not None:
-            fallback_book = row.get("moneyline_book") or "Forward Test"
-            fallback_rows = pd.DataFrame(
-                [
-                    {
-                        "book": fallback_book,
-                        "outcome": fallback_side or "home",
-                        "moneyline": fallback_ml,
-                    }
-                ]
-            )
-            content = components.moneyline_detail_table(fallback_rows, home_team=home_team, away_team=away_team)
-        else:
-            content = components.empty_state("No sportsbook moneylines available for this matchup.")
+        # Fallback to empty state if no sportsbook odds
+        content = components.empty_state("No sportsbook moneylines available for this matchup.")
     else:
         content = components.moneyline_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 
@@ -1392,6 +1508,109 @@ def toggle_overunder_modal(active_cell, close_clicks, table_data, book_odds_json
                 [
                     {
                         "book": row.get("moneyline_book") or "Forward Test",
+                        "outcome": fallback_outcome,
+                        "moneyline": fallback_ml,
+                        "line": fallback_line,
+                    }
+                ]
+            )
+            content = components.totals_detail_table(fallback_rows, home_team=home_team, away_team=away_team)
+        else:
+            content = components.empty_state("No sportsbook totals available for this matchup.")
+    else:
+        content = components.totals_detail_table(matchup_df, home_team=home_team, away_team=away_team)
+
+    return True, title, content
+
+
+@app.callback(
+    Output("ou-completed-odds-modal", "is_open"),
+    Output("ou-completed-odds-modal-title", "children"),
+    Output("ou-completed-odds-modal-content", "children"),
+    Input("overunder-completed-table-datatable", "active_cell"),
+    Input("ou-completed-odds-modal-close", "n_clicks"),
+    State("overunder-completed-table-datatable", "data"),
+    State("ou-book-odds-store", "data"),
+    prevent_initial_call=True,
+)
+def toggle_overunder_completed_modal(active_cell, close_clicks, table_data, book_odds_json):
+    trigger = ctx.triggered_id if hasattr(ctx, "triggered_id") else None
+    if trigger == "ou-completed-odds-modal-close":
+        return False, no_update, no_update
+    if trigger != "overunder-completed-table-datatable":
+        raise PreventUpdate
+    if not active_cell or active_cell.get("column_id") != "moneyline":
+        raise PreventUpdate
+    if not table_data:
+        raise PreventUpdate
+
+    row_index = active_cell.get("row")
+    if row_index is None or row_index >= len(table_data):
+        raise PreventUpdate
+
+    row = table_data[row_index]
+    game_id = row.get("game_id")
+    if not game_id:
+        raise PreventUpdate
+
+    odds_df = pd.DataFrame()
+    if book_odds_json:
+        try:
+            odds_df = pd.read_json(StringIO(book_odds_json), orient="records")
+        except ValueError:
+            odds_df = pd.DataFrame()
+
+    matchup_df = pd.DataFrame()
+    if not odds_df.empty:
+        matchup_df = odds_df[odds_df["forward_game_id"] == game_id]
+
+    # If no odds found in the store (common for completed bets), try fetching from DB
+    if matchup_df.empty:
+        # Construct a DataFrame from the single row to pass to the helper
+        # We need to ensure the keys match what get_totals_odds_for_recommended expects
+        row_data = row.copy()
+        # Ensure commence_time is a timestamp if possible, though the helper handles strings
+        row_df = pd.DataFrame([row_data])
+        
+        try:
+            fetched_odds = get_totals_odds_for_recommended(row_df)
+            if not fetched_odds.empty:
+                matchup_df = fetched_odds
+        except Exception:
+            # If DB fetch fails, we'll fall back to the "Recorded" logic
+            pass
+
+    home_team = row.get("home_team") or "Home"
+    away_team = row.get("away_team") or "Away"
+    title = f"Totals for {home_team} vs. {away_team}"
+
+    def _parse_price(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(str(value).replace("+", "").strip())
+        except (ValueError, TypeError):
+            return None
+
+    if matchup_df.empty:
+        fallback_ml = _parse_price(row.get("moneyline"))
+        fallback_line = row.get("total_line")
+        try:
+             if isinstance(fallback_line, str):
+                 fallback_line = float(fallback_line)
+        except:
+            pass
+            
+        description = row.get("description") or ""
+        fallback_outcome = "Over" if "Over" in description else "Under" if "Under" in description else ""
+        
+        if fallback_ml is not None or fallback_line is not None:
+            fallback_rows = pd.DataFrame(
+                [
+                    {
+                        "book": "Recorded",
                         "outcome": fallback_outcome,
                         "moneyline": fallback_ml,
                         "line": fallback_line,

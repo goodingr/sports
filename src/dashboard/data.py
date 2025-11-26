@@ -15,6 +15,9 @@ except ImportError:  # pragma: no cover - fallback for Python <3.9
 import numpy as np
 import pandas as pd
 import yaml
+import logging
+
+LOGGER = logging.getLogger(__name__)
 
 from src.data.team_mappings import normalize_team_code, get_full_team_name
 from src.db.core import connect
@@ -77,6 +80,15 @@ def _convert_to_display_timezone(series: pd.Series) -> pd.Series:
     if tz is None:
         return series.dt.tz_localize(DISPLAY_TIMEZONE)
     return series.dt.tz_convert(DISPLAY_TIMEZONE)
+
+
+def _ensure_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Ensure a timestamp is timezone-aware UTC."""
+    if pd.isna(ts):
+        return ts
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
 
 
 @lru_cache(maxsize=1)
@@ -442,8 +454,8 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
                 edge = row.get(edge_col)
                 result = row.get("result")
                 
-                # Draw wins if result is "tie"
-                if result == "tie":
+                # Draw wins if result is "tie" or "draw"
+                if result in ("tie", "draw"):
                     won = True
                 elif result in ("home", "away"):
                     won = False
@@ -469,7 +481,7 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
                 edge = row.get(edge_col)
                 result = row.get("result")
 
-                if result == "tie":
+                if result in ("tie", "draw"):
                     won = False
                 elif result in ("home", "away"):
                     won = result == side
@@ -525,7 +537,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
         "game_id",
         "league",
         "commence_time",
-        "predicted_at",
+
         "total_line",
         "over_moneyline",
         "under_moneyline",
@@ -896,15 +908,64 @@ def get_recent_predictions(
         return pd.DataFrame()
 
     bets = _expand_predictions(df)
+    
     # Filter out finished games (only show games where won is None/NaN)
     bets = bets[bets["won"].isna()]
+
+    # 1. Filter for upcoming games
+    # Use the _ensure_utc helper to safely compare times
+    now = datetime.now(timezone.utc)
     
-    # Convert to datetime and sort BEFORE timezone conversion to ensure proper sorting
+    # Create a mask for future games
+    # We need to handle the case where commence_time might be a string or datetime
+    # So we'll convert the column to UTC datetime first if it isn't already
     if "commence_time" in bets.columns:
-        # Convert to datetime if not already
-        if not pd.api.types.is_datetime64_any_dtype(bets["commence_time"]):
-            bets["commence_time"] = _to_datetime(bets["commence_time"])
-        # Sort by datetime value (ascending - nearest upcoming first)
+        if not pd.api.types.is_datetime64_any_dtype(bets['commence_time']):
+            bets['commence_time'] = pd.to_datetime(bets['commence_time'], utc=True, errors='coerce')
+        
+        # Ensure column is tz-aware (UTC)
+        if bets['commence_time'].dt.tz is None:
+            bets['commence_time'] = bets['commence_time'].dt.tz_localize('UTC')
+        else:
+            bets['commence_time'] = bets['commence_time'].dt.tz_convert('UTC')
+            
+        bets = bets[bets["commence_time"] > now].copy()
+    else:
+        # If no commence_time, we can't filter by future, so we proceed with all pending bets
+        pass
+
+    # --- MATCHUP-LEVEL DEDUPLICATION ---
+    # Ensure we only have ONE game_id per matchup (Teams + Time) to prevent inconsistent predictions
+    dedupe_cols = ["league", "commence_time", "home_team", "away_team"]
+    available_cols = [c for c in dedupe_cols if c in bets.columns]
+    
+    if len(available_cols) == 4:
+        # 1. Identify the "best" game_id for each matchup
+        # Create a view of unique games with their timestamp
+        unique_games = bets[["game_id"] + available_cols].drop_duplicates("game_id")
+        
+        if "predicted_at" in bets.columns:
+            # Add predicted_at for sorting
+            unique_games = unique_games.merge(
+                bets[["game_id", "predicted_at"]].drop_duplicates("game_id"), 
+                on="game_id", 
+                how="left"
+            )
+            unique_games = unique_games.sort_values("predicted_at", ascending=False)
+        
+        # Keep the first game_id per matchup
+        best_games = unique_games.drop_duplicates(subset=available_cols, keep="first")
+        valid_game_ids = set(best_games["game_id"])
+        
+        # 2. Filter the original bets dataframe to keep ONLY the valid game_ids
+        bets = bets[bets["game_id"].isin(valid_game_ids)].copy()
+    # -----------------------------------
+
+    if bets.empty:
+        return pd.DataFrame()
+
+    # Sort by datetime value (ascending - nearest upcoming first)
+    if "commence_time" in bets.columns:
         bets = bets.sort_values("commence_time", ascending=True, na_position='last')
         # Now convert to display timezone AFTER sorting
         bets["commence_time"] = _convert_to_display_timezone(bets["commence_time"])
@@ -927,23 +988,30 @@ def get_recommended_bets(
         return pd.DataFrame()
 
     upcoming = bets[bets["won"].isna()]
+    
+    # Filter out past games
+    now = pd.Timestamp.now(tz="UTC")
+    if "commence_time" in upcoming.columns:
+        # Ensure commence_time is UTC for comparison
+        upcoming["commence_time_utc"] = upcoming["commence_time"].apply(_ensure_utc)
+        upcoming = upcoming[upcoming["commence_time_utc"] > now]
+        # Drop temp column
+        upcoming = upcoming.drop(columns=["commence_time_utc"])
+
     upcoming = upcoming[upcoming["edge"].notna() & (upcoming["edge"] >= edge_threshold)]
 
     if upcoming.empty:
         return pd.DataFrame()
 
     # Prefer the strongest edge per game_id to avoid duplicate rows (e.g., both sides recommended)
-    # UPDATE: User wants to see more games, and if both sides have edge (arb?), show both.
-    # upcoming = upcoming.sort_values(
-    #     by=["edge", "commence_time"], ascending=[False, True], na_position="last"
-    # )
-
-    # if "game_id" in upcoming.columns:
-    #     upcoming = upcoming.drop_duplicates(subset=["game_id"], keep="first")
-    # else:
-    #     dedupe_cols = [col for col in ["league", "commence_time", "team", "opponent"] if col in upcoming.columns]
-    #     if dedupe_cols:
-    #         upcoming = upcoming.drop_duplicates(subset=dedupe_cols, keep="first")
+    # Deduplicate by game_id and side to ensure we don't show the same bet twice
+    if "game_id" in upcoming.columns and "side" in upcoming.columns:
+        upcoming = upcoming.drop_duplicates(subset=["game_id", "side"], keep="first")
+        
+    # Also deduplicate by team/time/side to catch cases where game_ids differ for same match
+    dedupe_cols = [col for col in ["league", "commence_time", "home_team", "away_team", "side"] if col in upcoming.columns]
+    if len(dedupe_cols) >= 4:  # Ensure we have enough columns to safely dedupe
+        upcoming = upcoming.drop_duplicates(subset=dedupe_cols, keep="first")
 
     return upcoming.sort_values("commence_time", ascending=True, na_position="last")
 
@@ -1202,6 +1270,12 @@ def get_upcoming_calendar(
         return pd.DataFrame(columns=["date", "team", "opponent", "edge", "commence_time"])
 
     bets = bets.copy()
+    
+    # Filter out past games
+    now = pd.Timestamp.now(tz="UTC")
+    if "commence_time" in bets.columns:
+        bets = bets[bets["commence_time"] > now]
+        
     bets["date"] = bets["commence_time"].dt.date
     return bets[["date", "team", "opponent", "edge", "commence_time", "moneyline"]]
 
@@ -1216,11 +1290,53 @@ def get_overunder_recommendations(
         return pd.DataFrame()
 
     upcoming = totals[totals["won"].isna()]
+    
+    # Filter out past games
+    now = pd.Timestamp.now(tz="UTC")
+    if "commence_time" in upcoming.columns:
+        # Ensure commence_time is UTC for comparison
+        upcoming["commence_time_utc"] = upcoming["commence_time"].apply(_ensure_utc)
+        upcoming = upcoming[upcoming["commence_time_utc"] > now]
+        # Drop temp column
+        upcoming = upcoming.drop(columns=["commence_time_utc"])
+
     upcoming = upcoming[upcoming["edge"].notna() & (upcoming["edge"] >= edge_threshold)]
     if upcoming.empty:
         return pd.DataFrame()
 
     upcoming = upcoming.sort_values(by=["edge", "commence_time"], ascending=[False, True], na_position="last")
+    
+    # Deduplicate by game_id and side
+    if "game_id" in upcoming.columns and "side" in upcoming.columns:
+        upcoming = upcoming.drop_duplicates(subset=["game_id", "side"], keep="first")
+        
+    # --- MATCHUP-LEVEL DEDUPLICATION ---
+    # Ensure we only have ONE game_id per matchup (Teams + Time) to prevent inconsistent predictions
+    dedupe_cols = ["league", "commence_time", "home_team", "away_team"]
+    available_cols = [c for c in dedupe_cols if c in upcoming.columns]
+    
+    if len(available_cols) == 4:
+        # 1. Identify the "best" game_id for each matchup
+        # Create a view of unique games with their timestamp
+        unique_games = upcoming[["game_id"] + available_cols].drop_duplicates("game_id")
+        
+        if "predicted_at" in upcoming.columns:
+            # Add predicted_at for sorting
+            unique_games = unique_games.merge(
+                upcoming[["game_id", "predicted_at"]].drop_duplicates("game_id"), 
+                on="game_id", 
+                how="left"
+            )
+            unique_games = unique_games.sort_values("predicted_at", ascending=False)
+        
+        # Keep the first game_id per matchup
+        best_games = unique_games.drop_duplicates(subset=available_cols, keep="first")
+        valid_game_ids = set(best_games["game_id"])
+        
+        # 2. Filter the original bets dataframe to keep ONLY the valid game_ids
+        upcoming = upcoming[upcoming["game_id"].isin(valid_game_ids)].copy()
+    # -----------------------------------
+        
     return upcoming
 
 

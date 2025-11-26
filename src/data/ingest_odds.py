@@ -37,12 +37,21 @@ def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
     """Call The Odds API for the configured sport/market."""
 
     url = f"{settings.base_url}/sports/{settings.sport}/odds"
+    
+    # Fetch games from 12 hours ago through the next 14 days
+    # This ensures we capture games that recently started or are upcoming
+    now = datetime.now(timezone.utc)
+    time_from = (now - timedelta(hours=12)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    time_to = (now + timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    
     params = {
         "apiKey": settings.api_key,
         "regions": settings.region,
         "markets": settings.market,
         "oddsFormat": "american",
         "dateFormat": "iso",
+        "commenceTimeFrom": time_from,
+        "commenceTimeTo": time_to,
     }
 
     response = requests.get(url, params=params, timeout=10)
