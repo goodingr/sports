@@ -301,6 +301,109 @@ def cumulative_profit_by_league_chart(
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
 
+def accuracy_by_league_chart(accuracy_df: pd.DataFrame) -> dcc.Graph:
+    """
+    Create cumulative accuracy chart with separate lines for each league.
+    
+    Args:
+        accuracy_df: DataFrame with 'commence_time', 'league', and 'accuracy' columns
+    """
+    fig = go.Figure()
+    
+    if not accuracy_df.empty:
+        # Get unique leagues
+        leagues = accuracy_df["league"].unique()
+        
+        for league in leagues:
+            league_df = accuracy_df[accuracy_df["league"] == league]
+            fig.add_trace(
+                go.Scatter(
+                    x=league_df["commence_time"],
+                    y=league_df["accuracy"],
+                    mode="lines+markers",
+                    name=league,
+                    line=dict(width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate="Date: %{x}<br>Accuracy: %{y:.1%}<extra></extra>",
+                )
+            )
+    
+    fig.update_layout(
+        title="Cumulative Accuracy by League",
+        xaxis_title="Date",
+        yaxis_title="Accuracy",
+        yaxis=dict(tickformat=".0%"),
+        template="plotly_white",
+        height=400,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def accuracy_difference_by_league_chart(diff_df: pd.DataFrame) -> dcc.Graph:
+    """
+    Create cumulative accuracy difference chart (Our - Book) with separate lines for each league.
+    
+    Args:
+        diff_df: DataFrame with 'commence_time', 'league', and 'accuracy_diff' columns
+    """
+    fig = go.Figure()
+    
+    if not diff_df.empty:
+        # Get unique leagues
+        leagues = diff_df["league"].unique()
+        
+        for league in leagues:
+            league_df = diff_df[diff_df["league"] == league]
+            fig.add_trace(
+                go.Scatter(
+                    x=league_df["commence_time"],
+                    y=league_df["accuracy_diff"],
+                    mode="lines+markers",
+                    name=league,
+                    line=dict(width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate="Date: %{x}<br>Advantage: %{y:+.1%}<extra></extra>",
+                )
+            )
+            
+        # Add zero line to indicate parity
+        fig.add_hline(
+            y=0, 
+            line_dash="dash", 
+            line_color="gray",
+            annotation_text="Parity (0%)",
+            annotation_position="bottom right"
+        )
+    
+    fig.update_layout(
+        title="Accuracy Advantage vs Books (Cumulative)",
+        xaxis_title="Date",
+        yaxis_title="Accuracy Difference",
+        yaxis=dict(tickformat="+.0%"),
+        template="plotly_white",
+        height=400,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
 def roi_by_league_chart(
     performance_by_league: dict[str, pd.DataFrame]
 ) -> dcc.Graph:

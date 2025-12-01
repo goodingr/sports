@@ -1,0 +1,8 @@
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB
+DEBUG: update_results called for league=CFB

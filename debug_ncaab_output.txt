@@ -1,0 +1,26 @@
+Checking NCAAB data in database...
+
+Recent NCAAB Snapshots:
+                        snapshot_id                    fetched_at_utc
+0  479a3a639a8947818ceca7587731a649  2025-12-01T00:07:34.765922+00:00
+1  d967c9c9c7a14262a7c8d5eef55c31ca  2025-11-26T14:32:17.670865+00:00
+2  b4ec89dda82e4006972a89b859677a19  2025-11-26T02:36:47.793316+00:00
+3  4871b1444b704e1d8033d3c5d6941ac1  2025-11-25T23:39:16.624380+00:00
+4  d2f09dbd10264e5ebb499306d9829121  2025-11-25T05:25:33.126999+00:00
+
+Checking upcoming NCAAB games in DB (raw query):
+                                  game_id             start_time_utc
+0  NCAAB_e67d5f931079f5719ea0556de5c4ee4e  2025-11-30T23:04:59+00:00
+1  NCAAB_606e4089775742fd5cfc8595046673d2  2025-11-30T23:05:00+00:00
+2  NCAAB_f0898342c39ee288f8b5a34286a31987  2025-12-01T17:00:00+00:00
+3  NCAAB_b6be0a1ef5f8d1c16a1d6c96e3092e11  2025-12-01T23:30:00+00:00
+4  NCAAB_b8d824b2610f4d8cb1561a7212912366  2025-12-02T00:00:00+00:00
+5  NCAAB_26fb9a1a0897783a6e65a8c796e1a025  2025-12-02T00:00:00+00:00
+6  NCAAB_0d0dd22b679c484fa2ea1997c20e90ea  2025-12-02T00:00:00+00:00
+7  NCAAB_c98b3c690645457e9f36e6ff72390393  2025-12-02T00:00:00+00:00
+8  NCAAB_2824b0eee01ab1fc4155185a69980d39  2025-12-02T00:00:00+00:00
+9  NCAAB_dfa14435c548538aa49edf0bc0389cd2  2025-12-02T00:30:00+00:00
+
+Testing load_games_from_database('NCAAB'):
+Found 19 games via load_games_from_database
+First game sample: {'id': 'f0898342c39ee288f8b5a34286a31987', 'sport_key': 'basketball_ncaab', 'commence_time': '2025-12-01T17:00:00+00:00', 'home_team': 'Chicago St Cougars', 'away_team': 'South Carolina St Bulldogs', 'bookmakers': [{'key': 'fanduel', 'title': 'FanDuel', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Chicago St Cougars', 'price': -162.0}, {'name': 'South Carolina St Bulldogs', 'price': 134.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -115.0, 'point': 150.5}, {'name': 'Under', 'price': -105.0, 'point': 150.5}]}]}, {'key': 'draftkings', 'title': 'DraftKings', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Chicago St Cougars', 'price': -155.0}, {'name': 'South Carolina St Bulldogs', 'price': 130.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -110.0, 'point': 151.5}, {'name': 'Under', 'price': -110.0, 'point': 151.5}]}]}, {'key': 'betmgm', 'title': 'BetMGM', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Chicago St Cougars', 'price': -155.0}, {'name': 'South Carolina St Bulldogs', 'price': 125.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -110.0, 'point': 151.5}, {'name': 'Under', 'price': -110.0, 'point': 151.5}]}]}, {'key': 'betrivers', 'title': 'BetRivers', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Chicago St Cougars', 'price': -157.0}, {'name': 'South Carolina St Bulldogs', 'price': 123.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -109.0, 'point': 151.5}, {'name': 'Under', 'price': -117.0, 'point': 151.5}]}]}, {'key': 'betonline.ag', 'title': 'BetOnline.ag', 'markets': [{'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -115.0, 'point': 151.0}, {'name': 'Under', 'price': -105.0, 'point': 151.0}]}]}, {'key': 'lowvig.ag', 'title': 'LowVig.ag', 'markets': [{'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -113.0, 'point': 151.0}, {'name': 'Under', 'price': -103.0, 'point': 151.0}]}]}]}

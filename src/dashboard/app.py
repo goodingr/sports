@@ -39,6 +39,8 @@ from .data import (
     load_forward_test_data,
     summarize_prediction_comparison,
     compare_model_predictions,
+    get_accuracy_over_time_by_league,
+    get_accuracy_difference_over_time_by_league,
 )
 from .components import (
     bankroll_cards,
@@ -63,7 +65,11 @@ from .components import (
     summary_cards,
     totals_detail_table,
     win_rate_over_time_chart,
+    win_rate_over_time_chart,
     model_comparison_table,
+    model_comparison_table,
+    accuracy_by_league_chart,
+    accuracy_difference_by_league_chart,
 )
 
 EXTERNAL_STYLESHEETS = [dbc.themes.FLATLY]
@@ -501,6 +507,10 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
                 className="g-3 mb-4",
             ),
             dcc.Loading(html.Div(id="prediction-summary-cards"), type="circle"),
+            html.Br(),
+            dcc.Loading(html.Div(id="accuracy-by-league-chart"), type="circle"),
+            html.Br(),
+            dcc.Loading(html.Div(id="accuracy-diff-by-league-chart"), type="circle"),
             html.Br(),
             dcc.Loading(html.Div(id="prediction-table"), type="circle"),
         ],
@@ -1013,6 +1023,8 @@ def update_dashboard(
 
 @app.callback(
     Output("prediction-summary-cards", "children"),
+    Output("accuracy-by-league-chart", "children"),
+    Output("accuracy-diff-by-league-chart", "children"),
     Output("prediction-table", "children"),
     Input("forward-data-store", "data"),
     Input("predictions-league-select", "value"),
@@ -1041,9 +1053,13 @@ def update_predictions_page(
         comparison_df = comparison_df.sort_values("commence_time", ascending=False)
 
     stats = summarize_prediction_comparison(comparison_df)
+    accuracy_df = get_accuracy_over_time_by_league(comparison_df)
+    accuracy_diff_df = get_accuracy_difference_over_time_by_league(comparison_df)
 
     return (
         components.prediction_summary(stats),
+        components.accuracy_by_league_chart(accuracy_df),
+        components.accuracy_difference_by_league_chart(accuracy_diff_df),
         components.prediction_comparison_table(comparison_df),
     )
 

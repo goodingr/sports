@@ -2045,6 +2045,116 @@ def get_game_odds(game_id: str) -> pd.DataFrame:
     return df
 
 
+def get_accuracy_over_time_by_league(comparison_df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate cumulative accuracy over time for each league, aggregated by day."""
+    if comparison_df.empty or "actual_winner_side" not in comparison_df.columns:
+        return pd.DataFrame()
+
+    # Filter to completed games
+    completed = comparison_df[comparison_df["actual_winner_side"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame()
+
+    # Ensure sorted by time
+    if "commence_time" in completed.columns:
+        completed = completed.sort_values("commence_time")
+        # Create a date column for aggregation
+        completed["date"] = pd.to_datetime(completed["commence_time"]).dt.date
+
+    # Calculate cumulative accuracy per league
+    results = []
+    
+    # Get all unique leagues
+    leagues = completed["league"].unique()
+    
+    for league in leagues:
+        league_df = completed[completed["league"] == league].copy()
+        if league_df.empty:
+            continue
+            
+        # Group by date and calculate daily stats
+        league_df["is_correct"] = league_df["our_correct"].astype(float)
+        
+        daily_stats = league_df.groupby("date").agg(
+            daily_wins=("is_correct", "sum"),
+            daily_total=("is_correct", "count")
+        ).reset_index()
+        
+        # Calculate cumulative stats
+        daily_stats["cumulative_wins"] = daily_stats["daily_wins"].cumsum()
+        daily_stats["cumulative_total"] = daily_stats["daily_total"].cumsum()
+        daily_stats["accuracy"] = daily_stats["cumulative_wins"] / daily_stats["cumulative_total"]
+        
+        # Add league column and rename date to commence_time for compatibility with chart
+        daily_stats["league"] = league
+        daily_stats["commence_time"] = pd.to_datetime(daily_stats["date"])
+        
+        results.append(daily_stats[["commence_time", "league", "accuracy"]])
+
+    if not results:
+        return pd.DataFrame()
+
+    return pd.concat(results, ignore_index=True)
+
+
+def get_accuracy_difference_over_time_by_league(comparison_df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate cumulative accuracy difference (Our - Book) over time for each league, aggregated by day."""
+    if comparison_df.empty or "actual_winner_side" not in comparison_df.columns:
+        return pd.DataFrame()
+
+    # Filter to completed games
+    completed = comparison_df[comparison_df["actual_winner_side"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame()
+
+    # Ensure sorted by time
+    if "commence_time" in completed.columns:
+        completed = completed.sort_values("commence_time")
+        # Create a date column for aggregation
+        completed["date"] = pd.to_datetime(completed["commence_time"]).dt.date
+
+    # Calculate cumulative accuracy difference per league
+    results = []
+    
+    # Get all unique leagues
+    leagues = completed["league"].unique()
+    
+    for league in leagues:
+        league_df = completed[completed["league"] == league].copy()
+        if league_df.empty:
+            continue
+            
+        # Group by date and calculate daily stats
+        league_df["our_correct_float"] = league_df["our_correct"].astype(float)
+        league_df["book_correct_float"] = league_df["book_correct"].astype(float)
+        
+        daily_stats = league_df.groupby("date").agg(
+            daily_our_wins=("our_correct_float", "sum"),
+            daily_book_wins=("book_correct_float", "sum"),
+            daily_total=("our_correct_float", "count")
+        ).reset_index()
+        
+        # Calculate cumulative stats
+        daily_stats["cumulative_our_wins"] = daily_stats["daily_our_wins"].cumsum()
+        daily_stats["cumulative_book_wins"] = daily_stats["daily_book_wins"].cumsum()
+        daily_stats["cumulative_total"] = daily_stats["daily_total"].cumsum()
+        
+        daily_stats["our_accuracy"] = daily_stats["cumulative_our_wins"] / daily_stats["cumulative_total"]
+        daily_stats["book_accuracy"] = daily_stats["cumulative_book_wins"] / daily_stats["cumulative_total"]
+        daily_stats["accuracy_diff"] = daily_stats["our_accuracy"] - daily_stats["book_accuracy"]
+        
+        # Add league column and rename date to commence_time for compatibility with chart
+        daily_stats["league"] = league
+        daily_stats["commence_time"] = pd.to_datetime(daily_stats["date"])
+        
+        results.append(daily_stats[["commence_time", "league", "accuracy_diff"]])
+
+    if not results:
+        return pd.DataFrame()
+
+    return pd.concat(results, ignore_index=True)
+
+
 __all__ = [
     "SummaryMetrics",
     "PredictionComparisonStats",
@@ -2067,6 +2177,8 @@ __all__ = [
     "get_overunder_completed",
     "build_prediction_comparison",
     "summarize_prediction_comparison",
+    "get_accuracy_over_time_by_league",
+    "get_accuracy_difference_over_time_by_league",
     "get_moneylines_for_recommended",
     "get_totals_odds_for_recommended",
     "get_game_odds",
