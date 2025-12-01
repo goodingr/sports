@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 import numpy as np
 
-from src.dashboard.data import load_forward_test_data, _expand_totals, get_totals_odds_for_recommended
+from src.dashboard.data import load_forward_test_data, _expand_totals, get_totals_odds_for_recommended, get_game_odds
 from src.data.team_mappings import get_full_team_name
 from src.data.sportsbook_urls import get_sportsbook_url
 
@@ -46,6 +46,18 @@ def get_totals_data(model_type: str = "ensemble") -> pd.DataFrame:
             
         df["home_team"] = df.apply(lambda row: fix_team_name(row, "home_team"), axis=1)
         df["away_team"] = df.apply(lambda row: fix_team_name(row, "away_team"), axis=1)
+    
+    # Deduplicate by physical game (same matchup + time = same game)
+    # This prevents games with both game_id and odds_api_id from appearing twice
+    if not df.empty and all(col in df.columns for col in ['home_team', 'away_team', 'commence_time', 'league']):
+        before_count = len(df)
+        df = df.drop_duplicates(
+            subset=['home_team', 'away_team', 'commence_time', 'league', 'side'],
+            keep='first'  # Keep the first occurrence
+        )
+        after_count = len(df)
+        if before_count > after_count:
+            print(f"DEBUG: Removed {before_count - after_count} duplicate game records")
     
     # Add sportsbook information for pending bets
     # Initialize columns for all rows
@@ -241,4 +253,24 @@ async def get_upcoming(model_type: str = "ensemble"):
     return {
         "data": records,
         "count": len(upcoming)
+    }
+
+@router.get("/game/{game_id}/odds")
+async def get_odds_for_game(game_id: str):
+    """Get all sportsbook odds for a specific game."""
+    df = get_game_odds(game_id)
+    
+    if df.empty:
+        return {
+            "data": [],
+            "count": 0
+        }
+        
+    # Convert to list of dicts
+    # Handle NaN values
+    records = df.fillna("").to_dict(orient="records")
+    
+    return {
+        "data": records,
+        "count": len(df)
     }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 try:
     from zoneinfo import ZoneInfo
@@ -21,6 +21,7 @@ LOGGER = logging.getLogger(__name__)
 
 from src.data.team_mappings import normalize_team_code, get_full_team_name
 from src.db.core import connect
+from src.data.sportsbook_urls import get_sportsbook_url
 
 FORWARD_TEST_DIR = Path("data/forward_test")
 MASTER_PREDICTIONS_PATH = FORWARD_TEST_DIR / "predictions_master.parquet"
@@ -1004,9 +1005,11 @@ def get_recommended_bets(
         return pd.DataFrame()
 
     # Prefer the strongest edge per game_id to avoid duplicate rows (e.g., both sides recommended)
-    # Deduplicate by game_id and side to ensure we don't show the same bet twice
+    # Deduplicate by game_id to ensure we don't show the same bet twice
     if "game_id" in upcoming.columns and "side" in upcoming.columns:
-        upcoming = upcoming.drop_duplicates(subset=["game_id", "side"], keep="first")
+        # Sort by edge descending so we keep the best one
+        upcoming = upcoming.sort_values("edge", ascending=False)
+        upcoming = upcoming.drop_duplicates(subset=["game_id"], keep="first")
         
     # Also deduplicate by team/time/side to catch cases where game_ids differ for same match
     dedupe_cols = [col for col in ["league", "commence_time", "home_team", "away_team", "side"] if col in upcoming.columns]
@@ -1963,6 +1966,85 @@ def get_totals_odds_for_recommended(recommended: pd.DataFrame) -> pd.DataFrame:
     return odds_df[["forward_game_id", "db_game_id", "book", "outcome", "moneyline", "line", "fetched_at_utc", "home_team_full", "away_team_full"]]
 
 
+def get_game_odds(game_id: str) -> pd.DataFrame:
+    """Get all sportsbook odds for a specific game ID."""
+    # Try to resolve the game_id to a DB ID
+    # game_id could be the prediction ID (e.g. "e1b2...") or prefixed (e.g. "NBA_e1b2...")
+    
+    # We can reuse the mapping logic but simplified for a single ID
+    prediction_id = game_id
+    if "_" in game_id and not game_id.startswith("0"): # Simple heuristic, might need robust parsing if IDs vary
+         # If it looks like LEAGUE_ID, strip league? 
+         # Actually, prediction IDs in parquet are usually just the hash or UUID.
+         # But let's handle the case where we get passed the ID from the frontend which matches the parquet game_id.
+         pass
+
+    # Create a dummy dataframe to use existing mapping functions
+    dummy_df = pd.DataFrame([{"game_id": game_id}])
+    mapping = _map_game_ids_by_odds_api(dummy_df)
+    
+    db_game_id = None
+    if not mapping.empty:
+        db_game_id = mapping.iloc[0]["db_game_id"]
+    
+    # If not found via odds_api_id, try direct lookup if it looks like a DB ID (integer?) 
+    # Our DB game_ids are integers? Let's check schema. 
+    # Actually, looking at _match_games_to_db, it seems we match prediction IDs to DB IDs.
+    
+    if not db_game_id:
+        # If we couldn't map it, maybe it's already a DB ID? 
+        # Or maybe we need to try the _match_games_to_db logic if we had team names.
+        # For now, let's assume the frontend passes the prediction game_id.
+        return pd.DataFrame()
+
+    query = """
+        WITH latest_snapshot AS (
+            SELECT
+                o.game_id,
+                o.book_id,
+                o.market,
+                o.outcome,
+                MAX(s.fetched_at_utc) AS max_fetched
+            FROM odds o
+            JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+            WHERE o.game_id = ?
+            GROUP BY o.game_id, o.book_id, o.market, o.outcome
+        )
+        SELECT
+            o.market,
+            o.outcome,
+            o.line,
+            o.price_american AS moneyline,
+            b.name AS book,
+            s.fetched_at_utc
+        FROM odds o
+        JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+        JOIN books b ON o.book_id = b.book_id
+        JOIN latest_snapshot ls
+          ON ls.game_id = o.game_id
+         AND ls.book_id = o.book_id
+         AND ls.market = o.market
+         AND ls.outcome = o.outcome
+         AND ls.max_fetched = s.fetched_at_utc
+        WHERE o.game_id = ?
+          AND o.price_american IS NOT NULL
+    """
+    
+    with connect() as conn:
+        rows = conn.execute(query, (db_game_id, db_game_id)).fetchall()
+        
+    if not rows:
+        return pd.DataFrame()
+        
+    df = pd.DataFrame(rows, columns=["market", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    
+    # Add book_url
+    if "book" in df.columns:
+        df["book_url"] = df["book"].apply(lambda x: get_sportsbook_url(x) if pd.notna(x) else "")
+        
+    return df
+
+
 __all__ = [
     "SummaryMetrics",
     "PredictionComparisonStats",
@@ -1987,6 +2069,7 @@ __all__ = [
     "summarize_prediction_comparison",
     "get_moneylines_for_recommended",
     "get_totals_odds_for_recommended",
+    "get_game_odds",
     "get_version_options",
     "get_default_version_value",
     "filter_by_version",

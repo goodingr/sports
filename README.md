@@ -218,10 +218,13 @@ The dashboard reads from `data/forward_test/{model_type}/predictions_master.parq
 3. Update docs (`docs/`, `README.md`) when adding sources or automation.
 4. Use descriptive commit messages summarizing ingestion + modeling impacts.
 
+
 For detailed source documentation, see:
+- `docs/database-schema.md` (database tables, relationships, and common queries)
 - `docs/data-sources.md`
 - `docs/storage-layout.md`
 - `docs/dashboard.md`
 - `docs/scraping_blockages.md` (rate-limit notes)
+
 
 Happy modeling!

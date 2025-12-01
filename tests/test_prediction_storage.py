@@ -35,7 +35,7 @@ def test_save_predictions_overwrites_existing(monkeypatch, tmp_path):
     })
     forward_test.save_predictions(df2, timestamp='20250101_010000')
 
-    master = pd.read_parquet(forward_dir / 'predictions_master.parquet')
+    master = pd.read_parquet(forward_dir / 'ensemble' / 'predictions_master.parquet')
     assert len(master) == 1
     assert master.iloc[0]['home_predicted_prob'] == 0.7
     assert master.iloc[0]['predicted_at'] == pd.Timestamp('2025-11-08T15:00:00Z', tz='UTC')

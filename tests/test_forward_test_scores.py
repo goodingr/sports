@@ -85,15 +85,17 @@ def test_update_results_uses_espn_cfb_scores(monkeypatch, tmp_path):
             "commence_time": [pd.Timestamp("2025-11-04T18:00:00Z")],
             "home_edge": [0.1],
             "away_edge": [0.05],
-            "result": [pd.NA],
-            "home_score": [pd.NA],
-            "away_score": [pd.NA],
+            "result": [None],
+            "home_score": [None],
+            "away_score": [None],
         }
     )
 
     forward_test_dir = tmp_path / "forward_test"
     forward_test_dir.mkdir()
-    master_path = forward_test_dir / "predictions_master.parquet"
+    model_dir = forward_test_dir / "ensemble"
+    model_dir.mkdir()
+    master_path = model_dir / "predictions_master.parquet"
     df.to_parquet(master_path, index=False)
 
     monkeypatch.setattr(forward_test, "FORWARD_TEST_DIR", forward_test_dir)
@@ -111,6 +113,14 @@ def test_update_results_uses_espn_cfb_scores(monkeypatch, tmp_path):
                     return []
 
             return Cursor()
+
+    class MockDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            from datetime import datetime, timezone
+            return datetime(2025, 12, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(forward_test, "datetime", MockDatetime)
 
     monkeypatch.setattr(forward_test, "connect", lambda: StubConn())
     monkeypatch.setattr(forward_test, "_fetch_recent_scores", lambda *_, **__: {})

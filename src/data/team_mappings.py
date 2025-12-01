@@ -1316,6 +1316,9 @@ def get_full_team_name(league: str, code: str) -> str:
     if not code:
         return ""
     
+    if not league:
+        return code
+
     # Check NCAAB first if applicable
     if league.upper() in ("NCAAB", "NCAABB"):
         # 1. Try manual overrides for known problematic codes (School[0] + Nickname[0:2])

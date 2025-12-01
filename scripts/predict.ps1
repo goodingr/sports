@@ -50,6 +50,19 @@ if ($SoccerOnly) {
     Write-Log ("Processing leagues: " + ($targetLeagues -join ", "))
 }
 
+# Step 0: Backups
+Write-Log "Step 0: Creating backups..."
+try {
+    Write-Log "Backing up database..."
+    & poetry run python scripts/backup_db.py
+    
+    Write-Log "Backing up prediction files..."
+    & poetry run python scripts/backup_predictions.py
+} catch {
+    Write-Log "WARNING: Backup step failed: $_"
+    # Continue anyway as this is not critical for prediction generation
+}
+
 # Step 1: Fetch Odds API snapshots
 Write-Log "Step 1: Fetching The Odds API snapshots..."
 $theOddsLeagues = @("NFL", "NBA", "CFB", "NCAAB", "NHL", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")

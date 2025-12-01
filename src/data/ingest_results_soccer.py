@@ -188,6 +188,8 @@ def fetch_from_espn(
                     )
                     response.raise_for_status()
                     payload = response.json()
+                    if not payload:
+                        continue
                 except requests.RequestException as exc:
                     LOGGER.warning("Failed to fetch ESPN data for %s on %s: %s", league_upper, date_str, exc)
                     continue
@@ -245,9 +247,15 @@ def fetch_from_espn(
                     home_ml = None
                     away_ml = None
                     if odds_list:
-                        moneyline = odds_list[0].get("moneyline", {})
-                        home_ml = moneyline.get("home")
-                        away_ml = moneyline.get("away")
+                        first_odd = odds_list[0]
+                        if first_odd:
+                            moneyline = first_odd.get("moneyline", {})
+                            home_ml = moneyline.get("home")
+                            away_ml = moneyline.get("away")
+                        else:
+                            moneyline = {}
+                            home_ml = None
+                            away_ml = None
                         if isinstance(home_ml, dict):
                             home_ml = home_ml.get("price") or home_ml.get("odds")
                         if isinstance(away_ml, dict):

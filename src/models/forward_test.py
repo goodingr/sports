@@ -91,7 +91,8 @@ def _get_sport_key(league: str) -> str:
 def _estimate_rest_days(commence_time: Optional[str], *, travel_penalty: float = 0.0) -> float:
     try:
         if commence_time:
-            datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+            # Parse and assign back to commence_time so it's used
+            commence_time = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
     except Exception:
         pass
     return max(1.0, DEFAULT_REST_DAYS - travel_penalty)
@@ -1075,7 +1076,7 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 "over_edge": over_edge_pred,
                 "under_edge": under_edge_pred,
                 "predicted_at": datetime.now(timezone.utc).isoformat(),
-                "version": "v0.3" if commence_time >= pd.Timestamp("2025-11-21", tz="UTC") else ("v0.2" if commence_time >= pd.Timestamp("2025-11-14", tz="UTC") else ("v0.1" if commence_time >= pd.Timestamp("2025-11-03", tz="UTC") else "pre-v0.1")),
+                "version": "v0.3" if commence_dt and commence_dt >= pd.Timestamp("2025-11-21", tz="UTC") else ("v0.2" if commence_dt and commence_dt >= pd.Timestamp("2025-11-14", tz="UTC") else ("v0.1" if commence_dt and commence_dt >= pd.Timestamp("2025-11-03", tz="UTC") else "pre-v0.1")),
                 "result": None,  # Will be filled when game completes
                 "home_score": None,
                 "away_score": None,
@@ -1381,6 +1382,8 @@ def update_results(
     model_type: str = "ensemble",
 ) -> None:
     """Update forward test predictions with actual game results."""
+    with open("debug_log.txt", "a") as f:
+        f.write(f"DEBUG: update_results called for league={league}\n")
     model_dir = FORWARD_TEST_DIR / model_type
     master_path = model_dir / "predictions_master.parquet"
     

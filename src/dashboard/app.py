@@ -330,13 +330,11 @@ def _dashboard_layout(pathname: Optional[str]) -> dbc.Container:
                                 html.Label("Edge Threshold", htmlFor="edge-threshold-slider"),
                                 dcc.Slider(
                                     id="edge-threshold-slider",
-                                    min=-0.2,
+                                    min=0.0,
                                     max=0.2,
                                     step=0.005,
-                                    value=0.0,
+                                    value=0.06,
                                     marks={
-                                        -0.2: "-20%",
-                                        -0.1: "-10%",
                                         0.0: "0%",
                                         0.05: "5%",
                                         0.1: "10%",
@@ -655,13 +653,11 @@ def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
                                 html.Label("Edge Threshold", htmlFor="ou-edge-slider"),
                                 dcc.Slider(
                                     id="ou-edge-slider",
-                                    min=-0.2,
+                                    min=0.0,
                                     max=0.2,
                                     step=0.005,
-                                    value=0.0,
+                                    value=0.06,
                                     marks={
-                                        -0.2: "-20%",
-                                        -0.1: "-10%",
                                         0.0: "0%",
                                         0.05: "5%",
                                         0.1: "10%",

@@ -102,7 +102,7 @@ def test_get_recommended_bets_deduplicates_by_game(monkeypatch):
     df = pd.DataFrame(
         {
             'game_id': ['G1'],
-            'commence_time': [pd.Timestamp('2025-11-08T12:30:00Z')],
+            'commence_time': [pd.Timestamp('2026-11-08T12:30:00Z')],
             'predicted_at': [pd.Timestamp('2025-11-07T10:00:00Z')],
             'home_team': ['SUN'],
             'away_team': ['ARS'],
