@@ -9,12 +9,7 @@ export default function Home() {
 
       <Container className="mt-12">
         <div className="max-w-3xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-2xl font-bold text-foreground">Latest Recommendations</h2>
-            <div className="text-sm text-muted-foreground">
-              Showing Over/Under bets
-            </div>
-          </div>
+
 
           {/* Feed */}
           <BetFeed />

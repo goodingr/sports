@@ -1,4 +1,4 @@
-"""Train gradient boosting models to predict game totals for over/under markets."""
+"""Train regression models to predict game totals for over/under markets."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from src.db.core import DB_PATH, connect
@@ -273,7 +273,7 @@ def _load_totals_dataframe(league: str) -> pd.DataFrame:
     return combined
 
 
-def train_totals_model(league: str) -> TotalsTrainingArtifacts:
+def train_totals_model(league: str, model_type: str = "gradient_boosting") -> TotalsTrainingArtifacts:
     df = _load_totals_dataframe(league)
     df = df.sort_values("start_time_utc")
     feature_cols = ["total_close", "spread_close", "home_moneyline_close", "away_moneyline_close"]
@@ -288,7 +288,18 @@ def train_totals_model(league: str) -> TotalsTrainingArtifacts:
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    model = GradientBoostingRegressor(random_state=42)
+    if model_type == "random_forest":
+        model = RandomForestRegressor(
+            n_estimators=200,
+            max_depth=10,
+            min_samples_leaf=4,
+            random_state=42,
+            n_jobs=-1
+        )
+    else:
+        # Default to gradient boosting
+        model = GradientBoostingRegressor(random_state=42)
+        
     model.fit(X_train, y_train)
 
     preds = model.predict(X_test)
@@ -312,18 +323,20 @@ def train_totals_model(league: str) -> TotalsTrainingArtifacts:
         "regressor": model,
         "residual_std": residual_std,
         "feature_names": feature_cols,
+        "model_type": model_type,
     }
 
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
-    model_path = models_dir / f"{league.lower()}_totals_gradient_boosting.pkl"
+    model_path = models_dir / f"{league.lower()}_totals_{model_type}.pkl"
     joblib.dump(model_bundle, model_path)
 
     metrics_dir = Path("reports") / "backtests"
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = metrics_dir / f"{league.lower()}_totals_metrics.json"
+    metrics_path = metrics_dir / f"{league.lower()}_totals_{model_type}_metrics.json"
     metrics = {
         "league": league.upper(),
+        "model_type": model_type,
         "samples": len(df),
         "train_samples": len(X_train),
         "test_samples": len(X_test),
@@ -347,6 +360,12 @@ def _parse_args() -> argparse.Namespace:
         help="League code (e.g., NBA, NFL, CFB, EPL).",
     )
     parser.add_argument(
+        "--model-type",
+        default="gradient_boosting",
+        choices=["gradient_boosting", "random_forest"],
+        help="Type of model to train.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -358,7 +377,7 @@ def main() -> None:
     args = _parse_args()
     logging_config = getattr(__import__("logging"), "basicConfig")
     logging_config(level=getattr(__import__("logging"), args.log_level))
-    artifacts = train_totals_model(args.league)
+    artifacts = train_totals_model(args.league, model_type=args.model_type)
     print(f"Totals model saved to {artifacts.model_path}")
     print(f"Metrics written to {artifacts.metrics_path}")
 

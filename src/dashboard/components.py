@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 from dash import dash_table, dcc, html
 
 from .data import DISPLAY_TIMEZONE, SummaryMetrics
+from datetime import datetime
 
 
 def _format_number(value: Optional[float], digits: int = 0) -> str:
@@ -69,6 +70,40 @@ def _format_datetime(value: Optional[pd.Timestamp]) -> str:
         
         return f"{month} {day} {time_str}"
     return str(value)
+
+
+
+def _extend_series_to_now(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    """Extend a time-series DataFrame to the current time by forward-filling the last value."""
+    if df.empty:
+        return df
+    
+    df = df.copy()
+    
+    # Ensure date_col is datetime
+    if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+        try:
+            df[date_col] = pd.to_datetime(df[date_col])
+        except Exception:
+            return df
+
+    last_date = df[date_col].max()
+    
+    # Get current time in display timezone
+    now = datetime.now(DISPLAY_TIMEZONE)
+    
+    # Handle timezone compatibility
+    is_aware = df[date_col].dt.tz is not None
+    if not is_aware:
+        now = now.replace(tzinfo=None)
+        
+    if last_date < now:
+        # Create a new row with 'now' as date and values from the last row
+        last_row = df.iloc[[-1]].copy()
+        last_row[date_col] = now
+        return pd.concat([df, last_row], ignore_index=True)
+        
+    return df
 
 
 def metric_card(title: str, value: str, *, subtitle: Optional[str] = None, color: str = "primary") -> dbc.Card:
@@ -168,10 +203,11 @@ def cumulative_profit_chart(performance_df: pd.DataFrame) -> dcc.Graph:
     fig = go.Figure()
 
     if not performance_df.empty:
+        plot_df = _extend_series_to_now(performance_df, "date")
         fig.add_trace(
             go.Scatter(
-                x=performance_df["date"],
-                y=performance_df["cumulative_profit"],
+                x=plot_df["date"],
+                y=plot_df["cumulative_profit"],
                 mode="lines+markers",
                 name="Cumulative Profit",
                 line=dict(color="#1f77b4", width=3),
@@ -219,10 +255,11 @@ def multi_model_cumulative_profit_chart(
     # Add a line for each model
     for model_type, perf_df in model_performance.items():
         if perf_df is not None and not perf_df.empty:
+            plot_df = _extend_series_to_now(perf_df, "date")
             fig.add_trace(
                 go.Scatter(
-                    x=perf_df["date"],
-                    y=perf_df["cumulative_profit"],
+                    x=plot_df["date"],
+                    y=plot_df["cumulative_profit"],
                     mode="lines+markers",
                     name=model_labels.get(model_type, model_type),
                     line=dict(
@@ -269,10 +306,11 @@ def cumulative_profit_by_league_chart(
     # Add a line for each league
     for league, perf_df in performance_by_league.items():
         if perf_df is not None and not perf_df.empty:
+            plot_df = _extend_series_to_now(perf_df, "date")
             fig.add_trace(
                 go.Scatter(
-                    x=perf_df["date"],
-                    y=perf_df["cumulative_profit"],
+                    x=plot_df["date"],
+                    y=plot_df["cumulative_profit"],
                     mode="lines+markers",
                     name=league,
                     line=dict(width=2.5),
@@ -316,10 +354,11 @@ def accuracy_by_league_chart(accuracy_df: pd.DataFrame) -> dcc.Graph:
         
         for league in leagues:
             league_df = accuracy_df[accuracy_df["league"] == league]
+            plot_df = _extend_series_to_now(league_df, "commence_time")
             fig.add_trace(
                 go.Scatter(
-                    x=league_df["commence_time"],
-                    y=league_df["accuracy"],
+                    x=plot_df["commence_time"],
+                    y=plot_df["accuracy"],
                     mode="lines+markers",
                     name=league,
                     line=dict(width=2.5),
@@ -363,10 +402,11 @@ def accuracy_difference_by_league_chart(diff_df: pd.DataFrame) -> dcc.Graph:
         
         for league in leagues:
             league_df = diff_df[diff_df["league"] == league]
+            plot_df = _extend_series_to_now(league_df, "commence_time")
             fig.add_trace(
                 go.Scatter(
-                    x=league_df["commence_time"],
-                    y=league_df["accuracy_diff"],
+                    x=plot_df["commence_time"],
+                    y=plot_df["accuracy_diff"],
                     mode="lines+markers",
                     name=league,
                     line=dict(width=2.5),
@@ -419,10 +459,11 @@ def roi_by_league_chart(
     # Add a line for each league
     for league, perf_df in performance_by_league.items():
         if perf_df is not None and not perf_df.empty and "roi" in perf_df.columns:
+            plot_df = _extend_series_to_now(perf_df, "date")
             fig.add_trace(
                 go.Scatter(
-                    x=perf_df["date"],
-                    y=perf_df["roi"],
+                    x=plot_df["date"],
+                    y=plot_df["roi"],
                     mode="lines+markers",
                     name=league,
                     line=dict(width=2.5),
@@ -515,10 +556,11 @@ def roi_over_time_chart(performance_df: pd.DataFrame) -> dcc.Graph:
     fig = go.Figure()
 
     if not performance_df.empty:
+        plot_df = _extend_series_to_now(performance_df, "date")
         fig.add_trace(
             go.Scatter(
-                x=performance_df["date"],
-                y=performance_df["roi"],
+                x=plot_df["date"],
+                y=plot_df["roi"],
                 mode="lines+markers",
                 name="ROI",
                 line=dict(color="#ff7f0e", width=3),
@@ -540,10 +582,11 @@ def win_rate_over_time_chart(performance_df: pd.DataFrame) -> dcc.Graph:
     fig = go.Figure()
 
     if not performance_df.empty:
+        plot_df = _extend_series_to_now(performance_df, "date")
         fig.add_trace(
             go.Scatter(
-                x=performance_df["date"],
-                y=performance_df["win_rate"],
+                x=plot_df["date"],
+                y=plot_df["win_rate"],
                 mode="lines+markers",
                 name="Win Rate",
                 line=dict(color="#2ca02c", width=3),
@@ -556,6 +599,40 @@ def win_rate_over_time_chart(performance_df: pd.DataFrame) -> dcc.Graph:
         yaxis_tickformat=".1%",
         template="plotly_white",
         height=320,
+    )
+
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def cumulative_accuracy_by_model_chart(accuracy_df: pd.DataFrame) -> dcc.Graph:
+    fig = go.Figure()
+
+    if not accuracy_df.empty:
+        models = accuracy_df["model"].unique()
+        colors = {"Ensemble": "#636EFA", "Random Forest": "#EF553B", "Gradient Boosting": "#00CC96"}
+        
+        for model in models:
+            model_data = accuracy_df[accuracy_df["model"] == model].copy()
+            plot_df = _extend_series_to_now(model_data, "date")
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df["date"],
+                    y=plot_df["accuracy"],
+                    mode="lines",
+                    name=model,
+                    line=dict(width=3, color=colors.get(model)),
+                )
+            )
+
+    fig.update_layout(
+        title="Cumulative Accuracy by Model",
+        xaxis_title="Date",
+        yaxis_title="Accuracy",
+        yaxis_tickformat=".1%",
+        template="plotly_white",
+        height=350,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
 
     return dcc.Graph(figure=fig, config={"displayModeBar": False})

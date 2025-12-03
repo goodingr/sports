@@ -5,16 +5,26 @@ from datetime import datetime
 import pytz
 import numpy as np
 
-from src.dashboard.data import load_forward_test_data, _expand_totals, get_totals_odds_for_recommended, get_game_odds
+from src.dashboard.data import (
+    load_forward_test_data, 
+    _expand_totals, 
+    get_totals_odds_for_recommended, 
+    get_game_odds,
+    filter_by_version,
+    get_default_version_value
+)
 from src.data.team_mappings import get_full_team_name
 from src.data.sportsbook_urls import get_sportsbook_url
 
 router = APIRouter(prefix="/api/bets", tags=["bets"])
 
-def get_totals_data(model_type: str = "ensemble") -> pd.DataFrame:
+def get_totals_data(model_type: str = "ensemble", version: Optional[str] = "all") -> pd.DataFrame:
     """Load and filter data for Over/Under bets."""
     # Load raw data
     raw_df = load_forward_test_data(model_type=model_type)
+    
+    # Filter by version
+    raw_df = filter_by_version(raw_df, version)
     
     # Expand to get totals specific columns (profit, result, etc.)
     df = _expand_totals(raw_df)
@@ -218,7 +228,41 @@ async def get_history(
     
     # Convert to list of dicts
     # Handle NaN values for JSON serialization
-    records = paginated.fillna("").to_dict(orient="records")
+    # Helper to safely get float values
+    def safe_get(row, col):
+        val = row.get(col)
+        if pd.isna(val) or (isinstance(val, float) and (np.isinf(val) or np.isnan(val))):
+            return None
+        return val
+
+    records = []
+    for _, row in paginated.iterrows():
+        record = row.fillna("").to_dict()
+        
+        # Add prediction details
+        record["predicted_total_points"] = safe_get(row, "predicted_total_points")
+        record["edge"] = safe_get(row, "edge")
+        record["profit"] = safe_get(row, "profit")
+        record["home_score"] = safe_get(row, "home_score")
+        record["away_score"] = safe_get(row, "away_score")
+        
+        # Construct recommended bet string
+        if pd.notna(row.get("side")) and pd.notna(row.get("total_line")):
+            record["recommended_bet"] = f"{row['side'].title()} {row['total_line']}"
+        else:
+            record["recommended_bet"] = None
+            
+        # 3. Get full odds data for this game
+        if "game_id" in row:
+            df_odds = get_game_odds(row["game_id"])
+            if not df_odds.empty:
+                record["odds_data"] = df_odds.fillna("").to_dict(orient="records")
+            else:
+                record["odds_data"] = []
+        else:
+            record["odds_data"] = []
+            
+        records.append(record)
     
     return {
         "data": records,
@@ -248,7 +292,39 @@ async def get_upcoming(model_type: str = "ensemble"):
         upcoming = upcoming[upcoming["commence_time"] > now]
         upcoming = upcoming.sort_values("commence_time", ascending=True)
     
-    records = upcoming.fillna("").to_dict(orient="records")
+    # Helper to safely get float values
+    def safe_get(row, col):
+        val = row.get(col)
+        if pd.isna(val) or (isinstance(val, float) and (np.isinf(val) or np.isnan(val))):
+            return None
+        return val
+
+    records = []
+    for _, row in upcoming.iterrows():
+        record = row.fillna("").to_dict()
+        
+        # Add prediction details
+        record["predicted_total_points"] = safe_get(row, "predicted_total_points")
+        record["edge"] = safe_get(row, "edge")
+        
+        # Construct recommended bet string
+        if pd.notna(row.get("side")) and pd.notna(row.get("total_line")):
+            record["recommended_bet"] = f"{row['side'].title()} {row['total_line']}"
+        else:
+            record["recommended_bet"] = None
+            
+        # 3. Get full odds data for this game
+        # Note: This is N+1 query pattern, but acceptable for limited page size
+        if "game_id" in row:
+            df_odds = get_game_odds(row["game_id"])
+            if not df_odds.empty:
+                record["odds_data"] = df_odds.fillna("").to_dict(orient="records")
+            else:
+                record["odds_data"] = []
+        else:
+            record["odds_data"] = []
+            
+        records.append(record)
     
     return {
         "data": records,
@@ -256,21 +332,80 @@ async def get_upcoming(model_type: str = "ensemble"):
     }
 
 @router.get("/game/{game_id}/odds")
-async def get_odds_for_game(game_id: str):
-    """Get all sportsbook odds for a specific game."""
-    df = get_game_odds(game_id)
+async def get_odds_for_game(game_id: str, model_type: str = "ensemble"):
+    """Get all sportsbook odds for a specific game, including prediction info."""
+    # 1. Get sportsbook odds
+    df_odds = get_game_odds(game_id)
     
-    if df.empty:
-        return {
-            "data": [],
-            "count": 0
-        }
+    odds_data = []
+    if not df_odds.empty:
+        odds_data = df_odds.fillna("").to_dict(orient="records")
+
+    # 2. Get prediction data for this game
+    # We load the full dataset and filter (efficient enough for now given parquet speed)
+    df_preds = get_totals_data(model_type)
+    
+    prediction_info = {
+        "predicted_total_points": None,
+        "recommended_bet": None,
+        "edge": None,
+        "home_score": None,
+        "away_score": None,
+        "profit": None,
+        "won": None,
+        "status": "Pending"
+    }
+    
+    if not df_preds.empty:
+        # Filter for this game
+        game_pred = df_preds[df_preds["game_id"] == game_id]
         
-    # Convert to list of dicts
-    # Handle NaN values
-    records = df.fillna("").to_dict(orient="records")
-    
+        if not game_pred.empty:
+            # Get the row with the highest edge (if multiple) or just the first one
+            # Usually there are two rows (over and under), we want the one we recommended (highest edge)
+            # If no recommendation (edge < threshold), we might just show the predicted score
+            
+            # Sort by edge desc to get the best bet first
+            if "edge" in game_pred.columns:
+                game_pred = game_pred.sort_values("edge", ascending=False)
+            
+            best_bet = game_pred.iloc[0]
+            
+            # Helper to safely get float values
+            def safe_get(row, col):
+                val = row.get(col)
+                if pd.isna(val) or (isinstance(val, float) and (np.isinf(val) or np.isnan(val))):
+                    return None
+                return val
+
+            prediction_info["predicted_total_points"] = safe_get(best_bet, "predicted_total_points")
+            
+            # Only show recommendation if it's a valid bet (has edge)
+            # But user wants to see "recommended over/under", which implies the side we favor
+            # even if it's not a strong "bet" recommendation? 
+            # The prompt says "show the recommended over/under", usually implies the one with positive edge.
+            # If both are negative edge, maybe just show the predicted score.
+            
+            # Let's send the side with the highest edge (or least negative) as the "lean"
+            prediction_info["recommended_bet"] = f"{best_bet['side'].title()} {best_bet['total_line']}"
+            prediction_info["edge"] = safe_get(best_bet, "edge")
+            
+            # Add result info
+            prediction_info["home_score"] = safe_get(best_bet, "home_score")
+            prediction_info["away_score"] = safe_get(best_bet, "away_score")
+            prediction_info["profit"] = safe_get(best_bet, "profit")
+            # won is boolean or None usually, but safe_get handles it if it's NaN
+            prediction_info["won"] = safe_get(best_bet, "won")
+            
+            # Determine status
+            if pd.notna(best_bet.get("home_score")) and pd.notna(best_bet.get("away_score")):
+                prediction_info["status"] = "Completed"
+            
+            # If we have a predicted total, we can also explicitly say "Over" or "Under" based on that
+            # vs the current line. But the 'side' column already captures this logic relative to the line.
+
     return {
-        "data": records,
-        "count": len(df)
+        "data": odds_data,
+        "count": len(odds_data),
+        "prediction": prediction_info
     }

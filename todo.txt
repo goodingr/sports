@@ -1,13 +1,13 @@
 web app link directly to sportsbook game page
-add view all sportsbooks for a game
 player level stats
 track moneyline over time
 track over under over time
 bug, data doesn't load when switching from dashboard to predictions with one league selected
-Backup database or hosted database
-blog page "What is moneyline?"
+Safer: Backup database or hosted database
 Hoverable/tappable link on moneyline with popup linking to blog page
-
+blog improvements
+model filter on winner prediction page
+web app list filters (sportsbook, league, etc.)
 
 more sports
 golf

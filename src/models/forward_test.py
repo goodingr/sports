@@ -231,14 +231,22 @@ def load_model(model_path: Optional[Path] = None, league: str = "NBA", model_typ
     return joblib.load(model_path)
 
 
-def load_totals_model(league: str) -> Optional[dict]:
-    path = Path("models") / f"{league.lower()}_totals_gradient_boosting.pkl"
+def load_totals_model(league: str, model_type: str = "gradient_boosting") -> Optional[dict]:
+    # Map ensemble to gradient_boosting for totals if no ensemble totals model exists
+    if model_type == "ensemble":
+        model_type = "gradient_boosting"
+        
+    path = Path("models") / f"{league.lower()}_totals_{model_type}.pkl"
     if not path.exists():
+        # Fallback to gradient boosting if specific model doesn't exist
+        fallback_path = Path("models") / f"{league.lower()}_totals_gradient_boosting.pkl"
+        if fallback_path.exists():
+            return joblib.load(fallback_path)
         return None
     try:
         return joblib.load(path)
     except Exception as exc:  # noqa: BLE001
-        LOGGER.warning("Failed to load totals model for %s: %s", league, exc)
+        LOGGER.warning("Failed to load totals model for %s (%s): %s", league, model_type, exc)
         return None
 
 
@@ -800,7 +808,7 @@ def prepare_features(
     return df
 
 
-def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_path: Optional[Path] = None) -> pd.DataFrame:
+def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_path: Optional[Path] = None, model_type: str = "ensemble") -> pd.DataFrame:
     """Make predictions on live games."""
     predictions = []
     
@@ -833,7 +841,7 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
     
     league_upper = league.upper()
     feature_loader = FeatureLoader(league_upper)
-    totals_model_bundle = load_totals_model(league_upper)
+    totals_model_bundle = load_totals_model(league_upper, model_type=model_type)
     
     for game in games:
         try:
@@ -1045,42 +1053,49 @@ def make_predictions(games: List[Dict], model: Any, league: str = "NBA", model_p
                 if pd.notna(away_implied):
                     away_edge = away_prob - away_implied
             
-            predictions.append({
-                "league": league_upper,
-                "game_id": game_id,
-                "commence_time": commence_time,
-                "home_team": home_team_original,  # Use original full name
-                "away_team": away_team_original,  # Use original full name
-                "home_team_code": home_team,  # Keep normalized code for reference
-                "away_team_code": away_team,  # Keep normalized code for reference
-                "home_moneyline": home_ml,
-                "away_moneyline": away_ml,
-                "draw_moneyline": draw_ml if is_soccer else None,
-                "total_line": total_line_numeric,
-                "over_moneyline": over_price_numeric,
-                "under_moneyline": under_price_numeric,
-                "predicted_total_points": predicted_total,
-                "home_predicted_prob": home_prob,
-                "away_predicted_prob": away_prob,
-                "draw_predicted_prob": draw_prob if is_soccer else None,
-                "home_implied_prob": home_implied,
-                "away_implied_prob": away_implied,
-                "draw_implied_prob": draw_implied if is_soccer else None,
-                "over_implied_prob": float(over_implied) if over_implied is not None and not pd.isna(over_implied) else None,
-                "under_implied_prob": float(under_implied) if under_implied is not None and not pd.isna(under_implied) else None,
-                "home_edge": home_edge,
-                "away_edge": away_edge,
-                "draw_edge": draw_edge if is_soccer else None,
-                "over_predicted_prob": over_prob_pred,
-                "under_predicted_prob": under_prob_pred,
-                "over_edge": over_edge_pred,
-                "under_edge": under_edge_pred,
-                "predicted_at": datetime.now(timezone.utc).isoformat(),
-                "version": "v0.3" if commence_dt and commence_dt >= pd.Timestamp("2025-11-21", tz="UTC") else ("v0.2" if commence_dt and commence_dt >= pd.Timestamp("2025-11-14", tz="UTC") else ("v0.1" if commence_dt and commence_dt >= pd.Timestamp("2025-11-03", tz="UTC") else "pre-v0.1")),
-                "result": None,  # Will be filled when game completes
-                "home_score": None,
-                "away_score": None,
-            })
+                # Determine version
+                version = "v0.3" if commence_dt and commence_dt >= pd.Timestamp("2025-11-21", tz="UTC") else ("v0.2" if commence_dt and commence_dt >= pd.Timestamp("2025-11-14", tz="UTC") else ("v0.1" if commence_dt and commence_dt >= pd.Timestamp("2025-11-03", tz="UTC") else "pre-v0.1"))
+                
+                # Force v0.3 for specific model types as requested
+                if model_type in ("random_forest", "gradient_boosting"):
+                    version = "v0.3"
+
+                predictions.append({
+                    "league": league_upper,
+                    "game_id": game_id,
+                    "commence_time": commence_time,
+                    "home_team": home_team_original,  # Use original full name
+                    "away_team": away_team_original,  # Use original full name
+                    "home_team_code": home_team,  # Keep normalized code for reference
+                    "away_team_code": away_team,  # Keep normalized code for reference
+                    "home_moneyline": home_ml,
+                    "away_moneyline": away_ml,
+                    "draw_moneyline": draw_ml if is_soccer else None,
+                    "total_line": total_line_numeric,
+                    "over_moneyline": over_price_numeric,
+                    "under_moneyline": under_price_numeric,
+                    "predicted_total_points": predicted_total,
+                    "home_predicted_prob": home_prob,
+                    "away_predicted_prob": away_prob,
+                    "draw_predicted_prob": draw_prob if is_soccer else None,
+                    "home_implied_prob": home_implied,
+                    "away_implied_prob": away_implied,
+                    "draw_implied_prob": draw_implied if is_soccer else None,
+                    "over_implied_prob": float(over_implied) if over_implied is not None and not pd.isna(over_implied) else None,
+                    "under_implied_prob": float(under_implied) if under_implied is not None and not pd.isna(under_implied) else None,
+                    "home_edge": home_edge,
+                    "away_edge": away_edge,
+                    "draw_edge": draw_edge if is_soccer else None,
+                    "over_predicted_prob": over_prob_pred,
+                    "under_predicted_prob": under_prob_pred,
+                    "over_edge": over_edge_pred,
+                    "under_edge": under_edge_pred,
+                    "predicted_at": datetime.now(timezone.utc).isoformat(),
+                    "version": version,
+                    "result": None,  # Will be filled when game completes
+                    "home_score": None,
+                    "away_score": None,
+                })
             
         except Exception as exc:
             LOGGER.warning("Failed to predict game %s: %s", game.get("id"), exc)
@@ -1937,7 +1952,7 @@ def main() -> None:
                 LOGGER.info("No live games found for %s", league)
                 continue
 
-            predictions = make_predictions(games, model, league=league, model_path=args.model)
+            predictions = make_predictions(games, model, league=league, model_path=args.model, model_type=args.model_type)
             save_predictions(predictions, timestamp=args.timestamp, model_type=args.model_type)
 
             edge_threshold = 0.06

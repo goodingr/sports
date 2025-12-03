@@ -17,139 +17,189 @@ interface MatchDetailsModalProps {
     gameId: string;
     homeTeam: string;
     awayTeam: string;
+    predictionInfo?: {
+        predicted_total_points: number | null | undefined;
+        recommended_bet: string | null | undefined;
+        edge: number | null | undefined;
+        home_score?: number | null;
+        away_score?: number | null;
+        profit?: number | null;
+        won?: boolean | null;
+        status?: string;
+    };
+    oddsData?: OddsRecord[];
 }
 
-export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam }: MatchDetailsModalProps) {
-    const [odds, setOdds] = useState<OddsRecord[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam, predictionInfo, oddsData }: MatchDetailsModalProps) {
+    const [odds, setOdds] = useState<OddsRecord[]>(oddsData || []);
 
+    // Update odds if prop changes
     useEffect(() => {
-        if (isOpen && gameId) {
-            fetchOdds();
+        if (oddsData) {
+            setOdds(oddsData);
         }
-    }, [isOpen, gameId]);
+    }, [oddsData]);
 
-    const fetchOdds = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(`http://localhost:8000/api/bets/game/${gameId}/odds`);
-            if (!response.ok) {
-                throw new Error('Failed to fetch odds');
+    // Close on Escape key
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
             }
-            const data = await response.json();
-            setOdds(data.data || []);
-        } catch (err) {
-            console.error(err);
-            setError('Could not load odds details.');
-        } finally {
-            setLoading(false);
+        };
+
+        if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown);
         }
-    };
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen, onClose]);
 
     if (!isOpen) return null;
 
-    // Filter for Totals only
-    const totalsOdds = odds.filter(o => o.market === 'totals');
-
-    // Helper to group by book
-    const groupByBook = (records: OddsRecord[]) => {
-        const books: Record<string, any> = {};
-        records.forEach(r => {
-            if (!books[r.book]) {
-                books[r.book] = { name: r.book, url: r.book_url };
-            }
-            // outcome is 'over', 'under'
-            books[r.book][r.outcome.toLowerCase()] = r;
-        });
-        return Object.values(books);
-    };
-
-    const totalsByBook = groupByBook(totalsOdds);
+    // Group odds by book
+    const totalsByBook = odds.reduce((acc: any[], curr) => {
+        const existingBook = acc.find(b => b.name === curr.book);
+        if (existingBook) {
+            if (curr.outcome === 'Over') existingBook.over = curr;
+            if (curr.outcome === 'Under') existingBook.under = curr;
+        } else {
+            acc.push({
+                name: curr.book,
+                url: curr.book_url,
+                over: curr.outcome === 'Over' ? curr : null,
+                under: curr.outcome === 'Under' ? curr : null
+            });
+        }
+        return acc;
+    }, []).filter((book: any) => book.over || book.under);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-card w-full max-w-2xl rounded-xl border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+            <div className="bg-card w-full max-w-md max-h-[90vh] rounded-xl shadow-2xl border border-white/10 flex flex-col animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
                     <div>
-                        <h2 className="text-lg font-bold text-foreground">{awayTeam} @ {homeTeam}</h2>
-                        <p className="text-xs text-muted-foreground">Over / Under Comparison</p>
+                        <h2 className="text-lg font-bold text-foreground leading-tight">
+                            {awayTeam} <span className="text-muted-foreground text-sm font-normal">@</span> {homeTeam}
+                        </h2>
+
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <X className="h-5 w-5 text-muted-foreground" />
+                    <button
+                        onClick={onClose}
+                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-muted-foreground hover:text-foreground"
+                    >
+                        <X className="h-5 w-5" />
                     </button>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin mb-2" />
-                            <p>Loading odds...</p>
-                        </div>
-                    ) : error ? (
-                        <div className="text-center py-8 text-danger">
-                            {error}
-                        </div>
-                    ) : (
-                        <>
-                            {/* Totals Section */}
-                            {totalsByBook.length > 0 ? (
-                                <div>
-                                    <div className="grid gap-2">
-                                        <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
-                                            <div>Sportsbook</div>
-                                            <div className="text-center">Line</div>
-                                            <div className="text-center">Over</div>
-                                            <div className="text-center">Under</div>
-                                        </div>
-                                        {totalsByBook.map((book: any) => {
-                                            // Determine line from either over or under
-                                            const line = book.over?.line || book.under?.line || '-';
 
-                                            return (
-                                                <a
-                                                    key={book.name}
-                                                    href={book.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-all cursor-pointer group"
-                                                >
-                                                    <div className="font-medium text-foreground flex items-center gap-2 group-hover:text-primary transition-colors">
-                                                        {book.name}
-                                                        <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
-                                                    </div>
-                                                    <div className="text-center font-bold text-foreground">
-                                                        {line}
-                                                    </div>
-                                                    <div className="text-center">
-                                                        {book.over ? (
-                                                            <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
-                                                                {book.over.moneyline > 0 ? '+' : ''}{book.over.moneyline}
-                                                            </span>
-                                                        ) : '-'}
-                                                    </div>
-                                                    <div className="text-center">
-                                                        {book.under ? (
-                                                            <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
-                                                                {book.under.moneyline > 0 ? '+' : ''}{book.under.moneyline}
-                                                            </span>
-                                                        ) : '-'}
-                                                    </div>
-                                                </a>
-                                            );
-                                        })}
+                    {/* Prediction Section - Always show if available */}
+                    {predictionInfo && (predictionInfo.recommended_bet || predictionInfo.predicted_total_points) && (
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            {/* Result Section (if completed) */}
+                            {predictionInfo.status === 'Completed' && (
+                                <>
+                                    <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
+                                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Final Total</div>
+                                        <div className="text-lg font-black text-foreground">
+                                            {(predictionInfo.away_score || 0) + (predictionInfo.home_score || 0)}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                            {predictionInfo.away_score} - {predictionInfo.home_score}
+                                        </div>
+                                    </div>
+                                    <div className={`border rounded-lg p-4 flex flex-col items-center justify-center text-center ${predictionInfo.profit && predictionInfo.profit > 0 ? 'bg-success/10 border-success/20' : 'bg-danger/10 border-danger/20'}`}>
+                                        <div className={`text-xs font-medium uppercase tracking-wider mb-1 ${predictionInfo.profit && predictionInfo.profit > 0 ? 'text-success' : 'text-danger'}`}>Profit</div>
+                                        <div className={`text-lg font-black ${predictionInfo.profit && predictionInfo.profit > 0 ? 'text-success' : 'text-danger'}`}>
+                                            {predictionInfo.profit ? (predictionInfo.profit > 0 ? `+$${predictionInfo.profit.toFixed(2)}` : `$${predictionInfo.profit.toFixed(2)}`) : '$0.00'}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+
+                            {/* Prediction Details - Always Show */}
+                            <>
+                                <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center">
+                                    <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1">Recommended Bet</div>
+                                    <div className="text-lg font-black text-foreground">
+                                        {predictionInfo.recommended_bet || "N/A"}
+                                    </div>
+                                    {predictionInfo.edge && (
+                                        <div className="text-[10px] text-success font-medium mt-1">
+                                            {predictionInfo.edge > 0 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge` : ''}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
+                                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Predicted Total</div>
+                                    <div className="text-lg font-black text-foreground">
+                                        {predictionInfo.predicted_total_points ? predictionInfo.predicted_total_points.toFixed(1) : "N/A"}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground mt-1">
+                                        Points
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    No Over/Under odds available for this game.
+                            </>
+                        </div>
+                    )}
+
+                    {/* Odds Section */}
+                    {totalsByBook.length > 0 ? (
+                        <div>
+                            <div className="grid gap-2">
+                                <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
+                                    <div>Sportsbook</div>
+                                    <div className="text-center">Line</div>
+                                    <div className="text-center">Over</div>
+                                    <div className="text-center">Under</div>
                                 </div>
-                            )}
-                        </>
+                                {totalsByBook.map((book: any) => {
+                                    // Determine line from either over or under
+                                    const line = book.over?.line || book.under?.line || '-';
+
+                                    return (
+                                        <a
+                                            key={book.name}
+                                            href={book.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-all cursor-pointer group"
+                                        >
+                                            <div className="font-medium text-foreground flex items-center gap-2 group-hover:text-primary transition-colors">
+                                                {book.name}
+                                                <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+                                            </div>
+                                            <div className="text-center font-bold text-foreground">
+                                                {line}
+                                            </div>
+                                            <div className="text-center">
+                                                {book.over ? (
+                                                    <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                                                        {book.over.moneyline > 0 ? '+' : ''}{book.over.moneyline}
+                                                    </span>
+                                                ) : '-'}
+                                            </div>
+                                            <div className="text-center">
+                                                {book.under ? (
+                                                    <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                                                        {book.under.moneyline > 0 ? '+' : ''}{book.under.moneyline}
+                                                    </span>
+                                                ) : '-'}
+                                            </div>
+                                        </a>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 text-muted-foreground">
+                            No Over/Under odds available for this game.
+                        </div>
                     )}
                 </div>
             </div>

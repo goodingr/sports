@@ -71,6 +71,28 @@ def _to_datetime(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce") if series is not None else series
 
 
+def _normalize_team_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize team names to ensure consistent deduplication."""
+    if df.empty or "league" not in df.columns:
+        return df
+        
+    df = df.copy()
+    
+    def _fix_name(row, col):
+        name = row.get(col)
+        if isinstance(name, str):
+            if name.startswith("Sv "):
+                name = name[3:]
+        return get_full_team_name(row["league"], name)
+
+    if "home_team" in df.columns:
+        df["home_team"] = df.apply(lambda row: _fix_name(row, "home_team"), axis=1)
+    if "away_team" in df.columns:
+        df["away_team"] = df.apply(lambda row: _fix_name(row, "away_team"), axis=1)
+        
+    return df
+
+
 def _convert_to_display_timezone(series: pd.Series) -> pd.Series:
     if series is None or series.empty:
         return series
@@ -276,6 +298,9 @@ def load_forward_test_data(
     if path == MASTER_PREDICTIONS_PATH:
         path = FORWARD_TEST_DIR / model_type / "predictions_master.parquet"
     
+    with open("path_debug.log", "a") as f:
+        f.write(f"Model: {model_type}, Path: {path}\n")
+        
     path_str = str(path.resolve())
     if force_refresh:
         _read_predictions_cached.cache_clear()
@@ -289,6 +314,11 @@ def load_forward_test_data(
     if not df.empty and league and "league" in df.columns:
         df = df[df["league"].str.upper() == league.upper()].copy()
     df = _assign_versions(df)
+    
+    # Force v0.3 for specific model types as they should always be v0.3
+    if model_type in ("random_forest", "gradient_boosting") and not df.empty:
+        df["version"] = "v0.3"
+        
     return df.copy() if not df.empty else df
 
 
@@ -301,7 +331,9 @@ def compare_model_predictions(
     """Load and merge predictions from multiple models for comparison."""
     dfs = {}
     for model_type in model_types:
-        df = load_forward_test_data(league=league, model_type=model_type)
+        # Handle "all" league by passing None to load function
+        target_league = None if league and league.lower() == "all" else league
+        df = load_forward_test_data(league=target_league, model_type=model_type)
         if df.empty:
             continue
         
@@ -590,15 +622,23 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
             description = f"{side.title()} {line:.1f}" if pd.notna(line) else side.title()
 
             # Get full team names
-            home_full = get_full_team_name(row.get("league"), row.get("home_team"))
-            away_full = get_full_team_name(row.get("league"), row.get("away_team"))
+            home_raw = row.get("home_team")
+            if isinstance(home_raw, str) and home_raw.startswith("Sv "):
+                home_raw = home_raw[3:]
+            
+            away_raw = row.get("away_team")
+            if isinstance(away_raw, str) and away_raw.startswith("Sv "):
+                away_raw = away_raw[3:]
+
+            home_full = get_full_team_name(row.get("league"), home_raw)
+            away_full = get_full_team_name(row.get("league"), away_raw)
 
             records.append(
                 {
                     "game_id": row.get("game_id"),
                     "league": row.get("league"),
-                    "home_team": home_full or row.get("home_team"),
-                    "away_team": away_full or row.get("away_team"),
+                    "home_team": home_full or home_raw,
+                    "away_team": away_full or away_raw,
                     "side": side,
                     "description": description,
                     "total_line": float(line),
@@ -775,6 +815,24 @@ def calculate_totals_metrics(
         )
 
     totals = totals.copy()
+
+    # Normalize team names before deduplication to match API logic
+    totals = _normalize_team_names(totals)
+
+    # Sort by edge descending to prioritize recommended bets during deduplication
+    # This ensures that if we have duplicates (one recommended, one not), we keep the recommended one
+    # to match the API's behavior (which filters first).
+    if "edge" in totals.columns:
+        totals = totals.sort_values("edge", ascending=False)
+
+    # Deduplicate by physical game (same matchup + time = same game) to match API logic
+    # This prevents games with both game_id and odds_api_id from appearing twice
+    if not totals.empty and all(col in totals.columns for col in ['home_team', 'away_team', 'commence_time', 'league', 'side']):
+        totals = totals.drop_duplicates(
+            subset=['home_team', 'away_team', 'commence_time', 'league', 'side'],
+            keep='first'
+        )
+
     total_predictions = len(totals)
     completed_games = int(totals["won"].notna().sum())
     pending_games = total_predictions - completed_games
@@ -1101,6 +1159,101 @@ def get_totals_performance_by_threshold(
 
     return summary[["bucket_label", "bets", "wins", "win_rate", "profit", "roi"]]
 
+
+def get_cumulative_accuracy_by_model(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate cumulative accuracy for each model over time."""
+    if df.empty or "result" not in df.columns:
+        return pd.DataFrame()
+
+    # Filter for completed games
+    completed = df[df["result"].notna()].copy()
+    if completed.empty:
+        return pd.DataFrame()
+
+    # Ensure we have commence_time for sorting
+    if "commence_time" in completed.columns:
+        completed = completed.sort_values("commence_time")
+        completed["date"] = completed["commence_time"].dt.date
+    else:
+        return pd.DataFrame()
+
+    models = ["ensemble", "random_forest", "gradient_boosting"]
+    results = []
+
+    # Process each model
+    for model in models:
+        # Check for probability columns
+        home_prob_col = f"{model}_home_prob"
+        away_prob_col = f"{model}_away_prob"
+        
+        if home_prob_col not in completed.columns or away_prob_col not in completed.columns:
+            # Try without prefix if it's the main model in the df (fallback)
+            if model == "ensemble" and "home_predicted_prob" in completed.columns:
+                home_prob_col = "home_predicted_prob"
+                away_prob_col = "away_predicted_prob"
+            else:
+                continue
+
+        # Determine model's winner prediction
+        # 1 if home > away, 0 if away > home (or draw handling?)
+        # For simplicity, let's compare predicted winner to actual result
+        
+        def get_winner(row):
+            h_prob = row.get(home_prob_col)
+            a_prob = row.get(away_prob_col)
+            if pd.isna(h_prob) or pd.isna(a_prob):
+                return None
+            return row["home_team"] if h_prob > a_prob else row["away_team"]
+
+        completed[f"{model}_winner"] = completed.apply(get_winner, axis=1)
+        
+        # Calculate correctness
+        # Handle potential case sensitivity or whitespace
+        # Result is usually "Home Team" or "Away Team" name, or "home"/"away" code?
+        # In forward_test.py, result is set to None initially. 
+        # In update_data, result is likely populated with the winning team name or "home"/"away".
+        # Let's check how result is formatted. 
+        # Usually it's the winning team name.
+        
+        # If result is "home"/"away", map to team name
+        def check_correct(row):
+            pred = row.get(f"{model}_winner")
+            actual = row.get("result")
+            if not pred or not actual:
+                return 0
+            
+            # Normalize
+            pred = str(pred).lower().strip()
+            actual = str(actual).lower().strip()
+            
+            if actual == "home":
+                actual = str(row.get("home_team")).lower().strip()
+            elif actual == "away":
+                actual = str(row.get("away_team")).lower().strip()
+                
+            return 1 if pred == actual else 0
+
+        is_correct = completed.apply(check_correct, axis=1)
+        
+        # Create a temporary dataframe to calculate cumulative mean
+        temp = pd.DataFrame({
+            "date": completed["date"],
+            "is_correct": is_correct
+        })
+        
+        # Group by date to get daily stats, then cumulative
+        daily = temp.groupby("date")["is_correct"].agg(["sum", "count"]).reset_index()
+        daily["cumulative_correct"] = daily["sum"].cumsum()
+        daily["cumulative_count"] = daily["count"].cumsum()
+        daily["accuracy"] = daily["cumulative_correct"] / daily["cumulative_count"]
+        daily["model"] = model.replace("_", " ").title()
+        
+        results.append(daily[["date", "model", "accuracy"]])
+
+    if not results:
+        return pd.DataFrame()
+
+    return pd.concat(results, ignore_index=True)
 
 def get_completed_bets(
     df: pd.DataFrame,
@@ -1589,6 +1742,18 @@ def get_totals_performance_by_league(
     if totals.empty or "won" not in totals.columns:
         return {}
         
+    # Normalize team names and deduplicate to match metrics logic
+    totals = _normalize_team_names(totals)
+    
+    if "edge" in totals.columns:
+        totals = totals.sort_values("edge", ascending=False)
+        
+    if not totals.empty and all(col in totals.columns for col in ['home_team', 'away_team', 'commence_time', 'league', 'side']):
+        totals = totals.drop_duplicates(
+            subset=['home_team', 'away_team', 'commence_time', 'league', 'side'],
+            keep='first'
+        )
+
     # Filter for completed bets only
     completed = totals[totals["won"].notna()].copy()
     if completed.empty:
@@ -1992,9 +2157,13 @@ def get_game_odds(game_id: str) -> pd.DataFrame:
     # Actually, looking at _match_games_to_db, it seems we match prediction IDs to DB IDs.
     
     if not db_game_id:
-        # If we couldn't map it, maybe it's already a DB ID? 
-        # Or maybe we need to try the _match_games_to_db logic if we had team names.
-        # For now, let's assume the frontend passes the prediction game_id.
+        # Check if the input game_id exists directly in the DB
+        with connect() as conn:
+            exists = conn.execute("SELECT 1 FROM games WHERE game_id = ?", (game_id,)).fetchone()
+            if exists:
+                db_game_id = game_id
+    
+    if not db_game_id:
         return pd.DataFrame()
 
     query = """

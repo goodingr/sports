@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import date, timedelta
 from io import StringIO
 from typing import Optional, Tuple
@@ -41,6 +42,7 @@ from .data import (
     compare_model_predictions,
     get_accuracy_over_time_by_league,
     get_accuracy_difference_over_time_by_league,
+    get_cumulative_accuracy_by_model,
 )
 from .components import (
     bankroll_cards,
@@ -70,6 +72,7 @@ from .components import (
     model_comparison_table,
     accuracy_by_league_chart,
     accuracy_difference_by_league_chart,
+    cumulative_accuracy_by_model_chart,
 )
 
 EXTERNAL_STYLESHEETS = [dbc.themes.FLATLY]
@@ -92,21 +95,34 @@ def _df_to_json(df: pd.DataFrame) -> str:
     return df.to_json(date_format="iso", orient="records")
 
 
+
+
+
 def _df_from_json(data: Optional[str]) -> pd.DataFrame:
     if not data:
         return pd.DataFrame()
-    buffer = StringIO(data)
-    df = pd.read_json(buffer, orient="records")
-    for column in ("commence_time", "predicted_at", "result_updated_at"):
-        if column in df.columns:
-            df[column] = pd.to_datetime(df[column], errors="coerce")
-    return df
+    return pd.read_json(StringIO(data), orient="records")
+
+
+def _get_residual_std(league: str) -> float:
+    """Get approximate residual standard deviation for totals model by league."""
+    league = str(league).upper()
+    if league == "NBA":
+        return 12.0
+    elif league == "NCAAB":
+        return 14.0
+    elif league == "NFL":
+        return 9.0
+    elif league == "CFB":
+        return 14.0
+    elif league == "NHL":
+        return 1.8
+    elif league in ["EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]:
+        return 1.2
+    return 12.0  # Default fallback
 
 
 def _filter_by_date(df: pd.DataFrame, start_date: Optional[str], end_date: Optional[str]) -> pd.DataFrame:
-    if df.empty or "commence_time" not in df.columns:
-        return df
-
     start_ts = pd.to_datetime(start_date) if start_date else None
     end_ts = pd.to_datetime(end_date) if end_date else None
     if end_ts is not None:
@@ -509,6 +525,8 @@ def _predictions_layout(pathname: Optional[str]) -> dbc.Container:
             dcc.Loading(html.Div(id="prediction-summary-cards"), type="circle"),
             html.Br(),
             dcc.Loading(html.Div(id="accuracy-by-league-chart"), type="circle"),
+            html.Br(),
+            dcc.Loading(html.Div(id="cumulative-accuracy-chart"), type="circle"),
             html.Br(),
             dcc.Loading(html.Div(id="accuracy-diff-by-league-chart"), type="circle"),
             html.Br(),
@@ -1024,6 +1042,7 @@ def update_dashboard(
 @app.callback(
     Output("prediction-summary-cards", "children"),
     Output("accuracy-by-league-chart", "children"),
+    Output("cumulative-accuracy-chart", "children"),
     Output("accuracy-diff-by-league-chart", "children"),
     Output("prediction-table", "children"),
     Input("forward-data-store", "data"),
@@ -1054,11 +1073,18 @@ def update_predictions_page(
 
     stats = summarize_prediction_comparison(comparison_df)
     accuracy_df = get_accuracy_over_time_by_league(comparison_df)
+    
+    # Fetch multi-model data for cumulative accuracy chart
+    # We need to load all models to compare them
+    multi_model_df = compare_model_predictions(league=league, start_date=start_date, end_date=end_date)
+    cumulative_accuracy_df = get_cumulative_accuracy_by_model(multi_model_df)
+    
     accuracy_diff_df = get_accuracy_difference_over_time_by_league(comparison_df)
 
     return (
         components.prediction_summary(stats),
         components.accuracy_by_league_chart(accuracy_df),
+        components.cumulative_accuracy_by_model_chart(cumulative_accuracy_df),
         components.accuracy_difference_by_league_chart(accuracy_diff_df),
         components.prediction_comparison_table(comparison_df),
     )
@@ -1102,7 +1128,7 @@ def update_overunder_page(
 
     if df.empty:
         empty = components.empty_state("No totals data available yet.")
-        return empty, empty, empty, empty, empty, empty, empty, empty, ""
+        return empty, empty, empty, empty, empty, empty, empty, empty, empty, empty, ""
     metrics = calculate_totals_metrics(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
     performance_df = get_totals_performance_over_time(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
     threshold_df = get_totals_performance_by_threshold(df, stake=DEFAULT_STAKE)
@@ -1142,6 +1168,12 @@ def update_overunder_page(
         # We want to show what's actually available in sportsbooks
         best_odds = totals_odds_df.loc[totals_odds_df.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
         
+        # Create a lookup for side flipping: (game_id, side) -> row
+        odds_lookup = {}
+        for _, row in best_odds.iterrows():
+            key = (row['forward_game_id'], row['outcome'].lower())
+            odds_lookup[key] = row.to_dict()
+
         recommended = recommended.merge(
             best_odds[['forward_game_id', 'outcome', 'book', 'moneyline', 'line', 'home_team_full', 'away_team_full']],
             left_on=['game_id', 'side'],
@@ -1208,6 +1240,96 @@ def update_overunder_page(
                 # Clear edge - these are not actionable bets
                 if 'edge' in recommended.columns:
                     recommended.loc[no_sportsbook_data, 'edge'] = pd.NA
+            
+            # Re-evaluate predictions for rows with updated lines
+            # If the line moved, our original 'side' and 'edge' might be wrong
+            if 'predicted_total_points' in recommended.columns:
+                def reevaluate_prediction(row):
+                    if pd.isna(row.get('total_line')) or pd.isna(row.get('predicted_total_points')):
+                        return row
+                    
+                    line = float(row['total_line'])
+                    pred_total = float(row['predicted_total_points'])
+                    
+                    # Calculate new side
+                    diff = pred_total - line
+                    new_side = "over" if diff > 0 else "under"
+                    
+                    # Calculate new probability
+                    # We need residual_std for this. Use approximation based on league.
+                    league = row.get('league', 'NBA')
+                    residual_std = _get_residual_std(league)
+                    
+                    try:
+                        over_prob = 0.5 * (1.0 + math.erf(diff / (residual_std * math.sqrt(2.0))))
+                        over_prob = max(0.0, min(1.0, over_prob))
+                        under_prob = 1.0 - over_prob
+                    except Exception:
+                        over_prob = 0.5
+                        under_prob = 0.5
+                        
+                    new_prob = over_prob if new_side == "over" else under_prob
+                    
+                    # Calculate new edge
+                    original_side = row.get('side')
+                    
+                    if new_side == original_side:
+                        row['predicted_prob'] = new_prob
+                        
+                        # Recalculate edge
+                        ml = row.get('moneyline')
+                        if pd.notna(ml):
+                            if ml > 0:
+                                implied = 100 / (ml + 100)
+                            else:
+                                implied = -ml / (-ml + 100)
+                            
+                            row['implied_prob'] = implied
+                            row['edge'] = new_prob - implied
+                            
+                        # Update description
+                        row['description'] = f"{new_side.title()} {line:.1f}"
+                    else:
+                        # Side flipped! Check if we have odds for the new side
+                        game_id = row.get('game_id')
+                        new_odds = odds_lookup.get((game_id, new_side))
+                        
+                        if new_odds:
+                            # We have odds for the new side!
+                            row['side'] = new_side
+                            row['predicted_prob'] = new_prob
+                            
+                            # Update odds info
+                            ml = new_odds.get('moneyline')
+                            row['moneyline'] = ml
+                            row['book'] = new_odds.get('book')
+                            
+                            # Recalculate edge
+                            if pd.notna(ml):
+                                if ml > 0:
+                                    implied = 100 / (ml + 100)
+                                else:
+                                    implied = -ml / (-ml + 100)
+                                
+                                row['implied_prob'] = implied
+                                row['edge'] = new_prob - implied
+                            else:
+                                row['edge'] = -1.0
+                                
+                            row['description'] = f"{new_side.title()} {line:.1f}"
+                        else:
+                            # No odds for the new side, mark as invalid
+                            row['edge'] = -1.0 
+                            row['description'] = f"{original_side.title()} {line:.1f} (Line Moved)"
+                            row['predicted_prob'] = new_prob 
+                        
+                    return row
+
+                # Apply re-evaluation
+                recommended.loc[has_sportsbook_data] = recommended.loc[has_sportsbook_data].apply(reevaluate_prediction, axis=1)
+
+            # Filter out bets that no longer have a positive edge after re-evaluation
+            recommended = recommended[recommended["edge"] >= edge_threshold]
             
             # Drop the line column after using it
             recommended = recommended.drop(columns=[line_col, 'home_team_full', 'away_team_full'], errors='ignore')

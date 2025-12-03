@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Lock, CheckCircle, XCircle, MinusCircle, ExternalLink } from 'lucide-react';
 import { MatchDetailsModal } from './MatchDetailsModal';
 
+
 interface Bet {
     game_id: string;
     commence_time: string;
@@ -20,6 +21,9 @@ interface Bet {
     league?: string;
     book?: string;
     book_url?: string;
+    predicted_total_points?: number;
+    recommended_bet?: string;
+    odds_data?: any[];
 }
 
 interface BetCardProps {
@@ -43,6 +47,8 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                 className="bg-card border border-white/10 rounded-none overflow-hidden mb-1 hover:border-white/20 transition-colors group relative cursor-pointer"
                 onClick={() => setIsModalOpen(true)}
             >
+
+
                 {/* League (Absolute Top Left) */}
                 <div className="absolute top-2 left-3 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
                     {bet.league}
@@ -80,7 +86,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                 href={bet.book_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex flex-col items-center gap-1 hover:bg-primary/5 px-3 py-2 rounded transition-colors cursor-pointer"
+                                className="flex flex-col items-center gap-1 transition-colors cursor-pointer group/link"
                                 onClick={(e) => e.stopPropagation()}
                             >
                                 <div className="text-sm font-black text-primary uppercase tracking-tight text-center leading-tight">
@@ -90,7 +96,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                     {bet.odds > 0 ? `+${bet.odds}` : str(bet.odds)}
                                 </div>
                                 {bet.book && (
-                                    <div className="text-[10px] text-primary/70 flex items-center gap-0.5 transition-colors">
+                                    <div className="text-[10px] text-muted-foreground group-hover/link:text-primary flex items-center gap-0.5 transition-colors">
                                         {bet.book}
                                         <ExternalLink className="h-2.5 w-2.5" />
                                     </div>
@@ -106,13 +112,8 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
 
                                 {/* 2. Final Score (Badge) */}
                                 {isCompleted && (
-                                    <div>
-                                        <Badge
-                                            status={bet.status}
-                                            result={bet.result}
-                                            compact
-                                            actualTotal={(bet.home_score || 0) + (bet.away_score || 0)}
-                                        />
+                                    <div className="text-[10px] font-bold text-muted-foreground whitespace-nowrap">
+                                        Final: {(bet.home_score || 0) + (bet.away_score || 0)}
                                     </div>
                                 )}
 
@@ -152,6 +153,17 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                 gameId={bet.game_id}
                 homeTeam={bet.home_team}
                 awayTeam={bet.away_team}
+                predictionInfo={{
+                    predicted_total_points: bet.predicted_total_points,
+                    recommended_bet: bet.recommended_bet,
+                    edge: bet.edge,
+                    home_score: bet.home_score,
+                    away_score: bet.away_score,
+                    profit: bet.profit,
+                    won: bet.result === 'Win', // approximate
+                    status: bet.status
+                }}
+                oddsData={bet.odds_data}
             />
         </>
     );

@@ -1,20 +1,35 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useStats } from '@/hooks/useStats';
 import { Container } from '@/components/ui/Container';
-import { TrendingUp, DollarSign, Percent } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, ChevronUp, ChevronDown } from 'lucide-react';
 
 export function HeroStats() {
     const { stats, loading } = useStats();
+    const [isCollapsed, setIsCollapsed] = useState(false);
+
+    // Load persisted state on mount
+    useEffect(() => {
+        const savedState = localStorage.getItem('statsCollapsed');
+        if (savedState !== null) {
+            setIsCollapsed(savedState === 'true');
+        }
+    }, []);
+
+    // Persist state on change
+    useEffect(() => {
+        localStorage.setItem('statsCollapsed', String(isCollapsed));
+    }, [isCollapsed]);
 
     if (loading) {
         return (
-            <div className="py-12 bg-black/50 border-b border-white/10 animate-pulse">
+            <div className="py-4 bg-black/50 border-b border-white/10 animate-pulse">
                 <Container>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        <div className="h-32 bg-white/5 rounded-xl"></div>
-                        <div className="h-32 bg-white/5 rounded-xl"></div>
-                        <div className="h-32 bg-white/5 rounded-xl"></div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
+                        <div className="h-20 bg-white/5 rounded-xl"></div>
+                        <div className="h-20 bg-white/5 rounded-xl"></div>
+                        <div className="h-20 bg-white/5 rounded-xl"></div>
                     </div>
                 </Container>
             </div>
@@ -24,42 +39,73 @@ export function HeroStats() {
     if (!stats) return null;
 
     return (
-        <div className="py-12 bg-black/50 border-b border-white/10">
-            <Container>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <StatCard
-                        label="Total Profit"
-                        value={`$${stats.total_profit.toLocaleString()}`}
-                        icon={<DollarSign className="h-5 w-5 text-success" />}
-                        trend="All Time"
-                    />
-                    <StatCard
-                        label="ROI"
-                        value={`${stats.roi}%`}
-                        icon={<TrendingUp className="h-5 w-5 text-primary" />}
-                        trend="Return on Investment"
-                    />
-                    <StatCard
-                        label="Win Rate"
-                        value={`${stats.win_rate}%`}
-                        icon={<Percent className="h-5 w-5 text-blue-500" />}
-                        trend={`${stats.total_bets} Total Bets`}
-                    />
+        <div className={`relative bg-black/50 border-b border-white/10 transition-[padding] duration-300 ease-in-out ${isCollapsed ? 'pb-8' : 'pb-0'}`}>
+            <div
+                className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+                    }`}
+            >
+                <div className="overflow-hidden">
+                    <div className="py-8">
+                        <Container>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
+                                <StatCard
+                                    label="Total Profit"
+                                    value={`$${stats.total_profit.toLocaleString()}`}
+                                    icon={<DollarSign className="h-4 w-4 text-success" />}
+                                    trend="All Time"
+                                />
+                                <StatCard
+                                    label="ROI"
+                                    value={`${stats.roi}%`}
+                                    icon={<TrendingUp className="h-4 w-4 text-primary" />}
+                                    trend="Return on Investment"
+                                />
+                                <StatCard
+                                    label="Win Rate"
+                                    value={`${stats.win_rate}%`}
+                                    icon={<Percent className="h-4 w-4 text-blue-500" />}
+                                    trend={`${stats.total_bets} Total Bets`}
+                                />
+                            </div>
+                        </Container>
+                    </div>
                 </div>
-            </Container>
+            </div>
+
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 z-10 flex flex-col items-center">
+                <div
+                    className={`mb-2 text-[10px] font-medium text-muted-foreground uppercase tracking-widest transition-opacity duration-300 ${isCollapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                        }`}
+                >
+                    View Stats
+                </div>
+                <button
+                    onClick={() => {
+                        const newState = !isCollapsed;
+                        setIsCollapsed(newState);
+                        if (newState) {
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }
+                    }}
+                    className="flex items-center justify-center w-8 h-8 rounded-full bg-card border border-white/10 text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors shadow-lg"
+                    aria-label={isCollapsed ? "Show stats" : "Hide stats"}
+                >
+                    {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                </button>
+            </div>
         </div>
     );
 }
 
 function StatCard({ label, value, icon, trend }: { label: string, value: string, icon: React.ReactNode, trend: string }) {
     return (
-        <div className="bg-card border border-white/10 rounded-xl p-6 hover:border-primary/50 transition-colors duration-300">
-            <div className="flex items-center justify-between mb-4">
-                <span className="text-muted-foreground font-medium text-sm">{label}</span>
-                <div className="p-2 bg-white/5 rounded-lg">{icon}</div>
+        <div className="bg-card border border-white/10 p-2 hover:border-primary/50 transition-colors duration-300 flex flex-col items-center justify-center text-center">
+            <div className="flex flex-col items-center justify-center mb-1 gap-1">
+                <div className="p-1 bg-white/5 rounded-full">{icon}</div>
+                <span className="text-muted-foreground font-medium text-[10px] uppercase tracking-wider">{label}</span>
             </div>
-            <div className="text-3xl font-bold text-foreground mb-1">{value}</div>
-            <div className="text-xs text-muted-foreground">{trend}</div>
+            <div className="text-lg font-bold text-foreground mb-0.5">{value}</div>
+            <div className="text-[10px] text-muted-foreground">{trend}</div>
         </div>
     );
 }

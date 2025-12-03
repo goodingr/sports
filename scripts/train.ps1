@@ -417,6 +417,15 @@ try {
                         $trainedLeagues += $league
                     }
                 }
+                
+                # Train totals model if applicable (only for GB and RF)
+                if ($modelType -in @("gradient_boosting", "random_forest")) {
+                    Write-Log "Training $league $modelType totals model..."
+                    & poetry run python -m src.models.train_totals --league $league --model-type $modelType
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Log "WARNING: Totals training failed for $league ($modelType)"
+                    }
+                }
             }
         }
     }
