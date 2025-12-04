@@ -1,0 +1,452 @@
+﻿DATABASE SCHEMA ANALYSIS
+================================================================================
+
+Total Tables: 20
+
+
+================================================================================
+TABLE: books
+================================================================================
+
+Columns:
+  - book_id                        INTEGER         NULL       [PRIMARY KEY]
+  - name                           TEXT            NOT NULL  
+  - region                         TEXT            NULL      
+
+Indexes:
+  - sqlite_autoindex_books_1 [UNIQUE]
+
+Row Count: 31
+
+================================================================================
+TABLE: data_files
+================================================================================
+
+Columns:
+  - file_id                        INTEGER         NULL       [PRIMARY KEY]
+  - path                           TEXT            NOT NULL  
+  - file_type                      TEXT            NOT NULL  
+  - loaded_at                      TEXT            NOT NULL   DEFAULT datetime('now')
+  - row_count                      INTEGER         NULL      
+  - hash                           TEXT            NULL      
+
+Row Count: 0
+
+================================================================================
+TABLE: data_sources
+================================================================================
+
+Columns:
+  - source_id                      INTEGER         NULL       [PRIMARY KEY]
+  - source_key                     TEXT            NOT NULL  
+  - name                           TEXT            NOT NULL  
+  - league                         TEXT            NULL      
+  - category                       TEXT            NOT NULL  
+  - uri                            TEXT            NULL      
+  - enabled                        INTEGER         NOT NULL   DEFAULT 1
+  - default_frequency              TEXT            NULL      
+  - created_at                     TEXT            NOT NULL   DEFAULT datetime('now')
+
+Indexes:
+  - sqlite_autoindex_data_sources_1 [UNIQUE]
+
+Row Count: 33
+
+================================================================================
+TABLE: game_results
+================================================================================
+
+Columns:
+  - game_id                        TEXT            NULL       [PRIMARY KEY]
+  - home_score                     INTEGER         NULL      
+  - away_score                     INTEGER         NULL      
+  - home_moneyline_close           REAL            NULL      
+  - away_moneyline_close           REAL            NULL      
+  - spread_close                   REAL            NULL      
+  - total_close                    REAL            NULL      
+  - source_version                 TEXT            NULL      
+  - tr_pick                        TEXT            NULL      
+  - tr_total_line                  REAL            NULL      
+  - tr_confidence                  REAL            NULL      
+  - tr_odds                        REAL            NULL      
+  - tr_model_pick                  TEXT            NULL      
+  - tr_model_prob                  REAL            NULL      
+  - tr_retrieved_at                TEXT            NULL      
+
+Foreign Keys:
+  - game_id -> games(game_id)
+
+Indexes:
+  - sqlite_autoindex_game_results_1 [UNIQUE]
+
+Row Count: 246,952
+
+================================================================================
+TABLE: games
+================================================================================
+
+Columns:
+  - game_id                        TEXT            NULL       [PRIMARY KEY]
+  - sport_id                       INTEGER         NOT NULL  
+  - season                         INTEGER         NULL      
+  - game_type                      TEXT            NULL      
+  - week                           INTEGER         NULL      
+  - start_time_utc                 TEXT            NULL      
+  - home_team_id                   INTEGER         NOT NULL  
+  - away_team_id                   INTEGER         NOT NULL  
+  - venue                          TEXT            NULL      
+  - status                         TEXT            NULL       DEFAULT 'scheduled'
+  - gsis_id                        TEXT            NULL      
+  - pfr_id                         TEXT            NULL      
+  - odds_api_id                    TEXT            NULL      
+  - is_neutral                     INTEGER         NULL       DEFAULT 0
+
+Foreign Keys:
+  - away_team_id -> teams(team_id)
+  - home_team_id -> teams(team_id)
+  - sport_id -> sports(sport_id)
+
+Indexes:
+  - idx_games_odds_api
+  - idx_games_sport_season_week
+  - sqlite_autoindex_games_1 [UNIQUE]
+
+Row Count: 248,459
+
+================================================================================
+TABLE: ingestion_runs
+================================================================================
+
+Columns:
+  - run_id                         TEXT            NULL       [PRIMARY KEY]
+  - process                        TEXT            NOT NULL  
+  - started_at                     TEXT            NOT NULL  
+  - finished_at                    TEXT            NULL      
+  - status                         TEXT            NOT NULL  
+  - notes                          TEXT            NULL      
+
+Indexes:
+  - sqlite_autoindex_ingestion_runs_1 [UNIQUE]
+
+Row Count: 0
+
+================================================================================
+TABLE: injury_reports
+================================================================================
+
+Columns:
+  - injury_id                      INTEGER         NULL       [PRIMARY KEY]
+  - league                         TEXT            NOT NULL  
+  - sport_id                       INTEGER         NULL      
+  - team_id                        INTEGER         NULL      
+  - team_code                      TEXT            NULL      
+  - season                         INTEGER         NULL      
+  - week                           INTEGER         NULL      
+  - player_name                    TEXT            NOT NULL  
+  - position                       TEXT            NULL      
+  - status                         TEXT            NULL      
+  - practice_status                TEXT            NULL      
+  - report_date                    TEXT            NULL      
+  - game_date                      TEXT            NULL      
+  - detail                         TEXT            NULL      
+  - source_key                     TEXT            NOT NULL  
+  - created_at                     TEXT            NOT NULL   DEFAULT datetime('now')
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - sport_id -> sports(sport_id)
+
+Indexes:
+  - idx_injury_reports_team
+  - idx_injury_reports_league_date
+  - sqlite_autoindex_injury_reports_1 [UNIQUE]
+
+Row Count: 0
+
+================================================================================
+TABLE: model_input
+================================================================================
+
+Columns:
+  - input_id                       INTEGER         NULL       [PRIMARY KEY]
+  - game_id                        TEXT            NOT NULL  
+  - team_id                        INTEGER         NOT NULL  
+  - feature_set                    TEXT            NOT NULL  
+  - is_home                        INTEGER         NOT NULL  
+  - moneyline                      REAL            NULL      
+  - implied_prob                   REAL            NULL      
+  - spread_line                    REAL            NULL      
+  - total_line                     REAL            NULL      
+  - win                            INTEGER         NULL      
+  - dataset_hash                   TEXT            NULL      
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - game_id -> games(game_id)
+
+Indexes:
+  - sqlite_autoindex_model_input_1 [UNIQUE]
+
+Row Count: 0
+
+================================================================================
+TABLE: model_predictions
+================================================================================
+
+Columns:
+  - prediction_id                  INTEGER         NULL       [PRIMARY KEY]
+  - model_id                       TEXT            NOT NULL  
+  - game_id                        TEXT            NOT NULL  
+  - team_id                        INTEGER         NOT NULL  
+  - probability                    REAL            NOT NULL  
+  - market_prob                    REAL            NULL      
+  - edge                           REAL            NULL      
+  - created_at                     TEXT            NOT NULL   DEFAULT datetime('now')
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - game_id -> games(game_id)
+  - model_id -> models(model_id)
+
+Indexes:
+  - sqlite_autoindex_model_predictions_1 [UNIQUE]
+
+Row Count: 578,551
+
+================================================================================
+TABLE: models
+================================================================================
+
+Columns:
+  - model_id                       TEXT            NULL       [PRIMARY KEY]
+  - trained_at                     TEXT            NOT NULL  
+  - model_type                     TEXT            NOT NULL  
+  - calibration                    TEXT            NOT NULL  
+  - seasons_start                  INTEGER         NULL      
+  - seasons_end                    INTEGER         NULL      
+  - features                       TEXT            NULL      
+  - dataset_hash                   TEXT            NULL      
+  - metrics_json                   TEXT            NULL      
+  - artifact_path                  TEXT            NULL      
+  - predictions_path               TEXT            NULL      
+  - league                         TEXT            NULL      
+
+Indexes:
+  - sqlite_autoindex_models_1 [UNIQUE]
+
+Row Count: 683
+
+================================================================================
+TABLE: odds
+================================================================================
+
+Columns:
+  - snapshot_id                    TEXT            NOT NULL   [PRIMARY KEY]
+  - game_id                        TEXT            NOT NULL   [PRIMARY KEY]
+  - book_id                        INTEGER         NOT NULL   [PRIMARY KEY]
+  - market                         TEXT            NOT NULL   [PRIMARY KEY]
+  - outcome                        TEXT            NOT NULL   [PRIMARY KEY]
+  - price_american                 REAL            NULL      
+  - price_decimal                  REAL            NULL      
+  - implied_prob                   REAL            NULL      
+  - line                           REAL            NULL      
+
+Foreign Keys:
+  - book_id -> books(book_id)
+  - game_id -> games(game_id)
+  - snapshot_id -> odds_snapshots(snapshot_id)
+
+Indexes:
+  - idx_odds_game_market
+  - sqlite_autoindex_odds_1 [UNIQUE]
+
+Row Count: 370,260
+
+================================================================================
+TABLE: odds_snapshots
+================================================================================
+
+Columns:
+  - snapshot_id                    TEXT            NULL       [PRIMARY KEY]
+  - fetched_at_utc                 TEXT            NOT NULL  
+  - sport_id                       INTEGER         NOT NULL  
+  - source                         TEXT            NULL      
+  - raw_path                       TEXT            NULL      
+
+Foreign Keys:
+  - sport_id -> sports(sport_id)
+
+Indexes:
+  - sqlite_autoindex_odds_snapshots_1 [UNIQUE]
+
+Row Count: 410
+
+================================================================================
+TABLE: player_stats
+================================================================================
+
+Columns:
+  - stat_id                        INTEGER         NULL       [PRIMARY KEY]
+  - game_id                        TEXT            NOT NULL  
+  - team_id                        INTEGER         NOT NULL  
+  - player_id                      INTEGER         NOT NULL  
+  - player_name                    TEXT            NULL      
+  - min                            REAL            NULL      
+  - pts                            INTEGER         NULL      
+  - reb                            INTEGER         NULL      
+  - ast                            INTEGER         NULL      
+  - stl                            INTEGER         NULL      
+  - blk                            INTEGER         NULL      
+  - tov                            INTEGER         NULL      
+  - pf                             INTEGER         NULL      
+  - plus_minus                     INTEGER         NULL      
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - game_id -> games(game_id)
+
+Indexes:
+  - idx_player_stats_player
+  - idx_player_stats_game
+  - sqlite_autoindex_player_stats_1 [UNIQUE]
+
+Row Count: 26,188
+
+================================================================================
+TABLE: recommendations
+================================================================================
+
+Columns:
+  - recommendation_id              INTEGER         NULL       [PRIMARY KEY]
+  - model_id                       TEXT            NOT NULL  
+  - snapshot_id                    TEXT            NULL      
+  - game_id                        TEXT            NOT NULL  
+  - team_id                        INTEGER         NOT NULL  
+  - recommended_at                 TEXT            NOT NULL   DEFAULT datetime('now')
+  - edge                           REAL            NULL      
+  - kelly_fraction                 REAL            NULL      
+  - stake                          REAL            NULL      
+  - status                         TEXT            NULL       DEFAULT 'pending'
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - game_id -> games(game_id)
+  - snapshot_id -> odds_snapshots(snapshot_id)
+  - model_id -> models(model_id)
+
+Row Count: 2,745
+
+================================================================================
+TABLE: source_files
+================================================================================
+
+Columns:
+  - file_id                        INTEGER         NULL       [PRIMARY KEY]
+  - source_id                      INTEGER         NOT NULL  
+  - captured_at                    TEXT            NOT NULL  
+  - storage_path                   TEXT            NOT NULL  
+  - hash                           TEXT            NULL      
+  - season                         INTEGER         NULL      
+  - metadata_json                  TEXT            NULL      
+
+Foreign Keys:
+  - source_id -> data_sources(source_id)
+
+Indexes:
+  - idx_source_files_source_season
+  - sqlite_autoindex_source_files_1 [UNIQUE]
+
+Row Count: 2,222
+
+================================================================================
+TABLE: source_runs
+================================================================================
+
+Columns:
+  - run_id                         TEXT            NULL       [PRIMARY KEY]
+  - source_id                      INTEGER         NOT NULL  
+  - started_at                     TEXT            NOT NULL  
+  - finished_at                    TEXT            NULL      
+  - status                         TEXT            NOT NULL  
+  - message                        TEXT            NULL      
+  - records_ingested               INTEGER         NULL      
+  - raw_path                       TEXT            NULL      
+
+Foreign Keys:
+  - source_id -> data_sources(source_id)
+
+Indexes:
+  - idx_source_runs_source_id
+  - sqlite_autoindex_source_runs_1 [UNIQUE]
+
+Row Count: 939
+
+================================================================================
+TABLE: sports
+================================================================================
+
+Columns:
+  - sport_id                       INTEGER         NULL       [PRIMARY KEY]
+  - name                           TEXT            NOT NULL  
+  - league                         TEXT            NOT NULL  
+  - default_market                 TEXT            NOT NULL  
+  - created_at                     TEXT            NOT NULL   DEFAULT datetime('now')
+
+Indexes:
+  - sqlite_autoindex_sports_1 [UNIQUE]
+
+Row Count: 10
+
+================================================================================
+TABLE: sqlite_sequence
+================================================================================
+
+Columns:
+  - name                                           NULL      
+  - seq                                            NULL      
+
+Row Count: 8
+
+================================================================================
+TABLE: team_features
+================================================================================
+
+Columns:
+  - feature_id                     INTEGER         NULL       [PRIMARY KEY]
+  - game_id                        TEXT            NOT NULL  
+  - team_id                        INTEGER         NOT NULL  
+  - feature_set                    TEXT            NOT NULL  
+  - feature_json                   TEXT            NOT NULL  
+  - created_at                     TEXT            NOT NULL   DEFAULT datetime('now')
+
+Foreign Keys:
+  - team_id -> teams(team_id)
+  - game_id -> games(game_id)
+
+Indexes:
+  - sqlite_autoindex_team_features_1 [UNIQUE]
+
+Row Count: 0
+
+================================================================================
+TABLE: teams
+================================================================================
+
+Columns:
+  - team_id                        INTEGER         NULL       [PRIMARY KEY]
+  - sport_id                       INTEGER         NOT NULL  
+  - code                           TEXT            NOT NULL  
+  - name                           TEXT            NOT NULL  
+  - active_from                    INTEGER         NULL      
+  - active_to                      INTEGER         NULL      
+
+Foreign Keys:
+  - sport_id -> sports(sport_id)
+
+Indexes:
+  - sqlite_autoindex_teams_1 [UNIQUE]
+
+Row Count: 1,502
+
+================================================================================
+Analysis complete!

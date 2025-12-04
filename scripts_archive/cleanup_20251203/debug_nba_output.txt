@@ -1,0 +1,26 @@
+Checking NBA data in database...
+
+Recent NBA Snapshots:
+                        snapshot_id                    fetched_at_utc
+0  2286756339ed4df39afebc6a4445d096  2025-12-01T00:07:31.583660+00:00
+1  a1b2e300419947dea34bc83b1313acd6  2025-11-26T14:32:12.986115+00:00
+2  01313aaa8ba34036a5f3ce14e4804d07  2025-11-26T02:36:43.436182+00:00
+3  dad65a6d6a9443e3b62878f3b5521998  2025-11-25T23:39:12.691643+00:00
+4  f6fde5bf962b4c23b13a189c6240fec5  2025-11-25T05:25:28.853198+00:00
+
+Checking upcoming NBA games in DB (raw query):
+                                game_id             start_time_utc
+0  NBA_960545896b814924ffb72a9aa942cb73  2025-11-30T23:10:00+00:00
+1  NBA_49831135f016fd82fa36e584dd2f36f8  2025-11-30T23:11:00+00:00
+2  NBA_9777fc2821608e3c758fdaf7cae6f6f5  2025-11-30T23:11:00+00:00
+3  NBA_e4bc5abec9d682f3bf0d64f2a354f211  2025-11-30T23:12:00+00:00
+4  NBA_836e9666d5f6430cd502c1ad6dfc6bcd  2025-12-01T00:10:00+00:00
+5  NBA_7a41d0fddaf36ced2b5dae81f717d9c9  2025-12-01T02:10:00+00:00
+6  NBA_ff4a951f59cc072e579d5c907b1d8872  2025-12-01T02:40:00+00:00
+7  NBA_099fbdb7f4738db6e1f5b7889ab3d707  2025-12-09T23:00:00+00:00
+8  NBA_582a77bcdc5401a29e263ffed5d26609  2025-12-10T01:30:00+00:00
+9  NBA_9373b84d11358f66f18562222dbf5f42  2025-12-11T00:30:00+00:00
+
+Testing load_games_from_database('NBA'):
+Found 3 games via load_games_from_database
+First game sample: {'id': '836e9666d5f6430cd502c1ad6dfc6bcd', 'sport_key': 'basketball_nba', 'commence_time': '2025-12-01T00:10:00+00:00', 'home_team': 'Minnesota Timberwolves', 'away_team': 'San Antonio Spurs', 'bookmakers': [{'key': 'fanduel', 'title': 'FanDuel', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -188.0}, {'name': 'San Antonio Spurs', 'price': 158.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -112.0, 'point': 233.5}, {'name': 'Under', 'price': -108.0, 'point': 233.5}]}]}, {'key': 'lowvig.ag', 'title': 'LowVig.ag', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -175.0}, {'name': 'San Antonio Spurs', 'price': 154.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -107.0, 'point': 233.5}, {'name': 'Under', 'price': -107.0, 'point': 233.5}]}]}, {'key': 'betonline.ag', 'title': 'BetOnline.ag', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -175.0}, {'name': 'San Antonio Spurs', 'price': 153.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -110.0, 'point': 233.5}, {'name': 'Under', 'price': -110.0, 'point': 233.5}]}]}, {'key': 'draftkings', 'title': 'DraftKings', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -185.0}, {'name': 'San Antonio Spurs', 'price': 154.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -112.0, 'point': 233.5}, {'name': 'Under', 'price': -108.0, 'point': 233.5}]}]}, {'key': 'bovada', 'title': 'Bovada', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -175.0}, {'name': 'San Antonio Spurs', 'price': 150.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -105.0, 'point': 234.5}, {'name': 'Under', 'price': -115.0, 'point': 234.5}]}]}, {'key': 'betrivers', 'title': 'BetRivers', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -195.0}, {'name': 'San Antonio Spurs', 'price': 155.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -113.0, 'point': 234.5}, {'name': 'Under', 'price': -113.0, 'point': 234.5}]}]}, {'key': 'betmgm', 'title': 'BetMGM', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -190.0}, {'name': 'San Antonio Spurs', 'price': 155.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -115.0, 'point': 233.5}, {'name': 'Under', 'price': -105.0, 'point': 233.5}]}]}, {'key': 'betus', 'title': 'BetUS', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -175.0}, {'name': 'San Antonio Spurs', 'price': 150.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -110.0, 'point': 234.5}, {'name': 'Under', 'price': -110.0, 'point': 234.5}]}]}, {'key': 'mybookie.ag', 'title': 'MyBookie.ag', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Minnesota Timberwolves', 'price': -179.0}, {'name': 'San Antonio Spurs', 'price': 144.0}]}, {'key': 'totals', 'outcomes': [{'name': 'Over', 'price': -110.0, 'point': 234.0}, {'name': 'Under', 'price': -110.0, 'point': 234.0}]}]}]}

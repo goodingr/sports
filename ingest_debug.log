@@ -1,6 +1,0 @@
-INFO:__main__:Skipping Odds API call for icehockey_nhl: cached snapshot from 2025-11-25T03:41:54.937995+00:00 is only 4.5 minutes old
-INFO:src.db.loaders:Stored odds snapshot eb24a47abad64b9d83e75b28e277ee70 with 4 events
-DEBUG: sport_id=9, game_id=NFL_dcbddccfa1005b850998953d92fe58c2, odds_api_id=dcbddccfa1005b850998953d92fe58c2, start_iso=2025-11-25T01:09:16+00:00
-DEBUG: sport_id=9, game_id=NFL_006b1675167b3910a0b7d18686b6b25f, odds_api_id=eabe557cb36bf288311a831806dd2003, start_iso=2025-11-25T02:09:11+00:00
-DEBUG: sport_id=9, game_id=NFL_908b7e13b66706ed495630c0f37429b6, odds_api_id=908b7e13b66706ed495630c0f37429b6, start_iso=2025-11-25T02:16:11+00:00
-DEBUG: sport_id=9, game_id=NFL_17233f3e18774f0a1544acb5e924ed87, odds_api_id=17233f3e18774f0a1544acb5e924ed87, start_iso=2025-11-26T02:10:00+00:00
