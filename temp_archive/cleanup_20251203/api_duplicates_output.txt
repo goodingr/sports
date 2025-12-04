@@ -1,0 +1,178 @@
+﻿Fetching API response...
+
+Total games in API: 69
+
+Cremonese/Bologna games found: 6
+
+=== Game 1 ===
+{
+  "game_id": "b9aa270332a686385631824d477fd3b5",
+  "league": "SERIEA",
+  "home_team": "Bologna",
+  "away_team": "Cremonese",
+  "side": "over",
+  "description": "Over 2.5",
+  "total_line": 2.5,
+  "moneyline": 110.0,
+  "predicted_prob": 0.6310668595378828,
+  "implied_prob": 0.5454545454545454,
+  "edge": 0.08561231408333736,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-01T14:45:00-05:00",
+  "predicted_at": "2025-11-30T19:28:05.433509-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 2.7570236655942177,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "BetUS",
+  "book_url": "https://www.betus.com.pa"
+}
+
+=== Game 2 ===
+{
+  "game_id": "SERIEA_736909",
+  "league": "SERIEA",
+  "home_team": "Bologna",
+  "away_team": "Cremonese",
+  "side": "over",
+  "description": "Over 2.5",
+  "total_line": 2.5,
+  "moneyline": 110.0,
+  "predicted_prob": 0.7263551359176886,
+  "implied_prob": 0.5238095238095238,
+  "edge": 0.2025456121081648,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-01T14:45:00-05:00",
+  "predicted_at": "2025-12-01T14:45:00-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 3.1617364448302,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "BetUS",
+  "book_url": "https://www.betus.com.pa"
+}
+
+=== Game 3 ===
+{
+  "game_id": "SERIEA_621f7e62b4c5abf661896ef6f1e5ebc5",
+  "league": "SERIEA",
+  "home_team": "Cremonese",
+  "away_team": "Lecce",
+  "side": "over",
+  "description": "Over 2.0",
+  "total_line": 2.0,
+  "moneyline": -110.0,
+  "predicted_prob": 0.6592644550467175,
+  "implied_prob": 0.5238095238095238,
+  "edge": 0.13545493123719365,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-07T06:30:00-05:00",
+  "predicted_at": "2025-12-07T06:30:00-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 2.621820840502965,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "",
+  "book_url": ""
+}
+
+=== Game 4 ===
+{
+  "game_id": "621f7e62b4c5abf661896ef6f1e5ebc5",
+  "league": "SERIEA",
+  "home_team": "Cremonese",
+  "away_team": "Lecce",
+  "side": "over",
+  "description": "Over 2.5",
+  "total_line": 2.5,
+  "moneyline": 145.0,
+  "predicted_prob": 0.5320454010672008,
+  "implied_prob": 0.4166666666666667,
+  "edge": 0.11537873440053409,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-07T06:30:00-05:00",
+  "predicted_at": "2025-11-30T19:28:05.535585-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 2.621820840502965,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "BetRivers",
+  "book_url": "https://www.betrivers.com"
+}
+
+=== Game 5 ===
+{
+  "game_id": "SERIEA_736923",
+  "league": "SERIEA",
+  "home_team": "Lazio",
+  "away_team": "Bologna",
+  "side": "over",
+  "description": "Over 2.5",
+  "total_line": 2.5,
+  "moneyline": 138.0,
+  "predicted_prob": 0.7152469615374245,
+  "implied_prob": 0.5238095238095238,
+  "edge": 0.19143743772790067,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-07T12:00:00-05:00",
+  "predicted_at": "2025-12-07T12:00:00-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 3.111671485303155,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "BetRivers",
+  "book_url": "https://www.betrivers.com"
+}
+
+=== Game 6 ===
+{
+  "game_id": "e2b5b2b5a86377af6fcc08c8cd61d081",
+  "league": "SERIEA",
+  "home_team": "Lazio",
+  "away_team": "Bologna",
+  "side": "over",
+  "description": "Over 2.5",
+  "total_line": 2.5,
+  "moneyline": 138.0,
+  "predicted_prob": 0.6360115524435954,
+  "implied_prob": 0.4807692307692308,
+  "edge": 0.15524232167436464,
+  "won": "",
+  "profit": 0.0,
+  "stake": "",
+  "commence_time": "2025-12-07T12:00:00-05:00",
+  "predicted_at": "2025-11-30T19:28:05.586017-05:00",
+  "settled_at": "NaT",
+  "total_points": "",
+  "predicted_total_points": 2.7769266010499942,
+  "home_score": "",
+  "away_score": "",
+  "status": "Pending",
+  "book": "BetRivers",
+  "book_url": "https://www.betrivers.com"
+}
+
+================================================================================
+CHECKING FOR DUPLICATE GAME_IDS
+================================================================================
+Game IDs: ['b9aa270332a686385631824d477fd3b5', 'SERIEA_736909', 'SERIEA_621f7e62b4c5abf661896ef6f1e5ebc5', '621f7e62b4c5abf661896ef6f1e5ebc5', 'SERIEA_736923', 'e2b5b2b5a86377af6fcc08c8cd61d081']

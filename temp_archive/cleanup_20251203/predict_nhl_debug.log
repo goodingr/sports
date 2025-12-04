@@ -1,0 +1,12 @@
+INFO:__main__:=== Running forward test for NHL ===
+INFO:__main__:Loading model from models\nhl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Loading NHL games from database...
+INFO:__main__:Using snapshot 04b8155fcc8b4a11904fad028dcf64c7 from 2025-11-25T03:41:54.937995+00:00
+WARNING:__main__:No upcoming games found in database for NHL
+INFO:__main__:No live games found for NHL
+INFO:__main__:=== Running forward test for NHL ===
+INFO:__main__:Loading model from models\nhl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Loading NHL games from database...
+INFO:__main__:Using snapshot 04b8155fcc8b4a11904fad028dcf64c7 from 2025-11-25T03:41:54.937995+00:00
+WARNING:__main__:No upcoming games found in database for NHL
+INFO:__main__:No live games found for NHL
