@@ -1,8 +1,0 @@
-INFO:__main__:Skipping Odds API call for basketball_nba: cached snapshot from 2025-11-25T03:47:27.373379+00:00 is only 11.5 minutes old
-INFO:src.db.loaders:Stored odds snapshot b0264fdd1f3a47259f6cc41a3270e581 with 6 events
-DEBUG: sport_id=2, game_id=NBA_0022401088, odds_api_id=bd5ab48d88ac2df3a17c43a6d06e52ad, start_iso=2025-11-25T02:43:00+00:00
-DEBUG: sport_id=2, game_id=NBA_0022400661, odds_api_id=c59eff6b208318c28ec7d189749e568d, start_iso=2025-11-25T03:11:00+00:00
-DEBUG: sport_id=2, game_id=NBA_0022500197, odds_api_id=3640b757990601e61f5ca4fb241d99a8, start_iso=2025-11-25T03:11:00+00:00
-DEBUG: sport_id=2, game_id=NBA_0022400744, odds_api_id=9ad9826a5e6c2de97a7596b87f1e3c76, start_iso=2025-11-26T00:10:00+00:00
-DEBUG: sport_id=2, game_id=NBA_0022500114, odds_api_id=a43d5e85ccdf728d56f44bfda12b9d06, start_iso=2025-11-26T01:10:00+00:00
-DEBUG: sport_id=2, game_id=NBA_0022400874, odds_api_id=b7209d3aae71bb2dc1ca8f9412a95a4a, start_iso=2025-11-26T04:10:00+00:00

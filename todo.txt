@@ -8,6 +8,10 @@ Hoverable/tappable link on moneyline with popup linking to blog page
 blog improvements
 model filter on winner prediction page
 web app list filters (sportsbook, league, etc.)
+Scores are wrong for games Nov 22 and earlier after trying to recover from data deletion. Scores were taken from previous matchups.
+free prediction of the day
+ongoing games in dashboard and webapp
+/data page on dashboard that shows all data
 
 more sports
 golf

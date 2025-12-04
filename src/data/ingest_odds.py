@@ -13,7 +13,7 @@ import requests
 
 from src.db.loaders import load_odds_snapshot
 
-from .config import RAW_DATA_DIR, OddsAPISettings, ensure_directories
+from .config import RAW_DATA_DIR, OddsAPISettings, OddsAPIKeyManager, ensure_directories
 
 
 LOGGER = logging.getLogger(__name__)
@@ -54,30 +54,42 @@ def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
         "commenceTimeTo": time_to,
     }
 
-    response = requests.get(url, params=params, timeout=10)
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:  # pragma: no cover - network guard
-        if response.status_code == 401:
-            raise RuntimeError(
-                "Received 401 Unauthorized from The Odds API. "
-                "Confirm that your plan includes odds-history access and that the API key is valid."
-            ) from exc
-        if response.status_code == 404:
-            LOGGER.warning(
-                "Odds endpoint returned 404 for sport %s (url=%s). Returning empty payload.",
-                settings.sport,
-                url,
-            )
-            return {
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "request": {"url": url, "params": params},
-                "results": [],
-                "rate_limit_remaining": response.headers.get("x-requests-remaining"),
-                "rate_limit_reset": response.headers.get("x-requests-reset"),
-                "error": "404 Not Found",
-            }
-        raise
+    max_attempts = len(OddsAPIKeyManager.get_available_keys())
+    for attempt in range(max_attempts):
+        # Always use the current active key from the manager
+        params["apiKey"] = OddsAPIKeyManager.get_current_key()
+        
+        response = requests.get(url, params=params, timeout=10)
+        try:
+            response.raise_for_status()
+            break # Success
+        except requests.HTTPError as exc:  # pragma: no cover - network guard
+            if response.status_code == 401:
+                LOGGER.warning("Odds API returned 401 Unauthorized with key ending in ...%s", params["apiKey"][-4:])
+                if attempt < max_attempts - 1:
+                    LOGGER.info("Rotating API key and retrying...")
+                    OddsAPIKeyManager.rotate_key()
+                    continue
+                else:
+                    raise RuntimeError(
+                        "All Odds API keys exhausted (401 Unauthorized). "
+                        "Confirm that your plan includes odds-history access and that the API keys are valid."
+                    ) from exc
+            if response.status_code == 404:
+                LOGGER.warning(
+                    "Odds endpoint returned 404 for sport %s (url=%s). Returning empty payload.",
+                    settings.sport,
+                    url,
+                )
+                return {
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "request": {"url": url, "params": params},
+                    "results": [],
+                    "rate_limit_remaining": response.headers.get("x-requests-remaining"),
+                    "rate_limit_reset": response.headers.get("x-requests-reset"),
+                    "error": "404 Not Found",
+                }
+            raise
 
     payload = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),

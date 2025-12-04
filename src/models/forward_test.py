@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 from zoneinfo import ZoneInfo
 
-from src.data.config import OddsAPISettings
+
 from src.data.ingest_odds import fetch_odds
 from src.data.ingest_results_soccer import fetch_from_espn
 from src.data.team_mappings import normalize_team_code
@@ -1211,68 +1211,7 @@ def save_predictions(predictions: pd.DataFrame, timestamp: Optional[str] = None,
     return predictions_path
 
 
-def _fetch_recent_scores(
-    league: str,
-    *,
-    days_from: int = 5,
-    dotenv_path: Optional[Path] = None,
-) -> Dict[str, Tuple[int, int]]:
-    """Fetch recently completed scores for the given league."""
-    try:
-        settings = OddsAPISettings.from_env(dotenv_path)
-    except RuntimeError as exc:
-        LOGGER.warning("Unable to load Odds API settings for %s scores: %s", league, exc)
-        return {}
 
-    sport_key = _get_sport_key(league)
-    url = f"{settings.base_url}/sports/{sport_key}/scores/"
-    params = {"apiKey": settings.api_key, "daysFrom": min(max(1, days_from), 3)}
-
-    try:
-        response = requests.get(url, params=params, timeout=20)
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - defensive network guard
-        LOGGER.warning("Failed to fetch %s scores from The Odds API: %s", league, exc)
-        return {}
-
-    results: Dict[str, Tuple[int, int]] = {}
-    for event in response.json() or []:
-        if not event.get("completed"):
-            continue
-        event_id = event.get("id")
-        if not event_id:
-            continue
-
-        scores = event.get("scores") or []
-        home_score = None
-        away_score = None
-        for entry in scores:
-            name = entry.get("name")
-            score_value = entry.get("score")
-            if name is None or score_value is None:
-                continue
-            try:
-                parsed_score = int(score_value)
-            except (TypeError, ValueError):
-                continue
-            if name == event.get("home_team"):
-                home_score = parsed_score
-            elif name == event.get("away_team"):
-                away_score = parsed_score
-
-        if home_score is None or away_score is None:
-            if len(scores) == 2:
-                try:
-                    home_score = int(scores[0].get("score"))
-                    away_score = int(scores[1].get("score"))
-                except (TypeError, ValueError):
-                    continue
-            else:
-                continue
-
-        results[str(event_id)] = (home_score, away_score)
-
-    return results
 
 
 def _fetch_espn_cfb_scores(dates: Iterable[date]) -> Dict[Tuple[str, str, date], Tuple[int, int]]:
@@ -1680,21 +1619,7 @@ def update_results(
 
         return None
 
-    # Build quick lookup of recently completed scores per league via The Odds API
-    if league_upper:
-        leagues_to_check = [league_upper]
-    elif "league" in target_predictions.columns:
-        leagues_to_check = sorted(
-            {str(value).upper() for value in target_predictions["league"].dropna().unique() if str(value)}
-        )
-    else:
-        leagues_to_check = sorted(SUPPORTED_LEAGUES)
 
-    score_lookup: Dict[str, Tuple[int, int]] = {}
-    for league_code in leagues_to_check:
-        fetched_scores = _fetch_recent_scores(league_code, days_from=7, dotenv_path=dotenv_path)
-        if fetched_scores:
-            score_lookup.update(fetched_scores)
 
     with connect() as conn:
         # Re-validate recent games that already have results to ensure they are confirmed
@@ -1708,9 +1633,7 @@ def update_results(
                 for idx, row in target_predictions.loc[recent_mask].iterrows():
                     if not _find_final_score(row, conn):
                         # Check if result is available in recent API fetches before clearing
-                        game_id = str(row.get("game_id"))
-                        if game_id in score_lookup:
-                            continue
+
                             
                         if _lookup_soccer_score(row):
                             continue
@@ -1749,15 +1672,7 @@ def update_results(
 
         for idx, row in incomplete.iterrows():
             game_id = row.get("game_id")
-            if game_id and score_lookup:
-                score_pair = score_lookup.get(str(game_id))
-            else:
-                score_pair = None
 
-            if score_pair:
-                home_score, away_score = score_pair
-                _apply_result(idx, home_score, away_score)
-                continue
 
             match = _find_final_score(row, conn)
 

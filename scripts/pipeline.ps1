@@ -8,7 +8,7 @@
 #>
 
 param(
-    [switch]$Train = $false,
+    [switch]$SkipTraining = $false,
     [switch]$SoccerOnly = $false,
     [switch]$SkipOdds = $false
 )
@@ -28,17 +28,31 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Data backup completed."
 }
 
-if ($Train) {
+# 1. Ingest All Data
+Write-Host "=== Starting Data Ingestion ==="
+& "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Data ingestion failed."
+    exit $LASTEXITCODE
+}
+
+# 2. Train (Default, unless skipped)
+if (-not $SkipTraining) {
     Write-Host "=== Starting Training Pipeline ==="
-    & "$scriptDir/train.ps1" -SoccerOnly:$SoccerOnly
+    # Skip ingestion since we just did it
+    & "$scriptDir/train.ps1" -SoccerOnly:$SoccerOnly -SkipIngestion
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Training pipeline failed. Aborting."
         exit $LASTEXITCODE
     }
+} else {
+    Write-Host "=== Skipping Training Pipeline ==="
 }
 
+# 3. Predict
 Write-Host "=== Starting Prediction Pipeline ==="
-& "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds
+# Skip history and odds since we just did them
+& "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly -SkipHistory -SkipOdds
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Prediction pipeline failed."
     exit $LASTEXITCODE

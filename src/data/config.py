@@ -19,6 +19,80 @@ def _load_dotenv_if_available(dotenv_path: Optional[Path] = None) -> None:
     load_dotenv(dotenv_path)
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
+
+
+class OddsAPIKeyManager:
+    """Manages multiple API keys and rotation."""
+    
+    INDEX_FILE = PROJECT_ROOT / ".odds_api_key_index"
+
+    @classmethod
+    def get_available_keys(cls) -> list[str]:
+        """Load all ODDS_API_KEY* from environment."""
+        keys = []
+        # Primary key
+        k1 = os.getenv("ODDS_API_KEY")
+        if k1:
+            keys.append(k1)
+        
+        # Secondary keys (ODDS_API_KEY_2, _3, etc.)
+        i = 2
+        while True:
+            k = os.getenv(f"ODDS_API_KEY_{i}")
+            if not k:
+                break
+            keys.append(k)
+            i += 1
+        return keys
+
+    @classmethod
+    def get_current_index(cls) -> int:
+        """Read current key index from file."""
+        if not cls.INDEX_FILE.exists():
+            return 0
+        try:
+            return int(cls.INDEX_FILE.read_text().strip())
+        except (ValueError, OSError):
+            return 0
+
+    @classmethod
+    def set_current_index(cls, index: int) -> None:
+        """Persist current key index."""
+        try:
+            cls.INDEX_FILE.write_text(str(index))
+        except OSError:
+            pass
+
+    @classmethod
+    def get_current_key(cls) -> str:
+        """Get the currently active API key."""
+        keys = cls.get_available_keys()
+        if not keys:
+            raise RuntimeError("No ODDS_API_KEY found in environment")
+        
+        idx = cls.get_current_index()
+        if idx >= len(keys):
+            idx = 0
+            cls.set_current_index(0)
+            
+        return keys[idx]
+
+    @classmethod
+    def rotate_key(cls) -> str:
+        """Switch to the next available key."""
+        keys = cls.get_available_keys()
+        if not keys:
+            raise RuntimeError("No ODDS_API_KEY found")
+            
+        current = cls.get_current_index()
+        next_idx = (current + 1) % len(keys)
+        cls.set_current_index(next_idx)
+        return keys[next_idx]
+
+
 @dataclass
 class OddsAPISettings:
     api_key: str
@@ -32,9 +106,8 @@ class OddsAPISettings:
     def from_env(cls, dotenv_path: Optional[Path] = None) -> "OddsAPISettings":
         _load_dotenv_if_available(dotenv_path)
 
-        api_key = os.getenv("ODDS_API_KEY")
-        if not api_key:
-            raise RuntimeError("ODDS_API_KEY must be set in the environment or .env file")
+        # Use the key manager to get the current key
+        api_key = OddsAPIKeyManager.get_current_key()
 
         region = os.getenv("ODDS_API_REGION", "us")
         market = os.getenv("ODDS_API_MARKET", "h2h")
@@ -55,11 +128,6 @@ class OddsAPISettings:
         )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
-PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
-
-
 def ensure_directories() -> None:
     """Guarantee core data directories exist."""
 
@@ -72,4 +140,3 @@ def load_env(dotenv_path: Optional[Path] = None) -> dict[str, str]:
 
     _load_dotenv_if_available(dotenv_path)
     return dict(os.environ)
-

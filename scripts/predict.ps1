@@ -7,7 +7,8 @@
 
 param(
     [switch]$SoccerOnly = $false,
-    [switch]$SkipOdds = $false
+    [switch]$SkipOdds = $false,
+    [switch]$SkipHistory = $false
 )
 
 $ErrorActionPreference = "Continue"
@@ -83,6 +84,36 @@ foreach ($league in $targetLeagues) {
 }
 
 
+
+
+# Step 2: Smart Data Ingestion (History + Updates)
+Write-Log "Step 2: Smart Data Ingestion..."
+if (-not $SkipHistory) {
+    try {
+        # Pass the target leagues to the ingestion manager
+        $leagueArgs = $targetLeagues -join " "
+        Write-Log "Running smart ingestion for: $leagueArgs"
+        & poetry run python -m src.data.ingest_manager --leagues $targetLeagues
+    } catch {
+        Write-Log "WARNING: Smart ingestion failed: $_"
+    }
+} else {
+    Write-Log "Skipping smart ingestion (SkipHistory enabled)"
+}
+
+# Step 2b: Ingest Scores (Live)
+if (-not $SkipOdds) {
+    try {
+        # Also run ingest_scores for immediate Odds API updates (fastest for live scores)
+        Write-Log "Fetching latest scores from Odds API..."
+        $commaLeagues = $targetLeagues -join ","
+        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env
+    } catch {
+        Write-Log "WARNING: Score ingestion failed: $_"
+    }
+} else {
+    Write-Log "Skipping score ingestion (SkipOdds enabled)"
+}
 
 # Step 3: Generate predictions
 Write-Log "Step 3: Generating predictions..."

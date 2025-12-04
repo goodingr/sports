@@ -125,17 +125,17 @@ Adjust the edge threshold per league to trade off volume vs. confidence.
 
 `scripts/pipeline.ps1` orchestrates the complete workflow:
 
-1. **Step 1**: Ingest odds, injuries, and ESPN schedules
-2. **Step 2**: Refresh advanced stats (Football-Data, Understat)
-3. **Step 3**: Rebuild datasets for all leagues
-4. **Step 4**: Train models (ensemble, random_forest, gradient_boosting)
-5. **Step 5**: Generate predictions and update results for all models
-6. **Step 6**: Sync results across model types
+1. **Step 1**: Ingest All Data (Smart History + Live Odds + Live Scores)
+2. **Step 2**: Train Models (Default, unless skipped)
+3. **Step 3**: Generate Predictions
 
 **Usage:**
 ```powershell
-# Full pipeline
+# Full pipeline (Ingest -> Train -> Predict)
 .\scripts\pipeline.ps1
+
+# Skip training (Ingest -> Predict)
+.\scripts\pipeline.ps1 -SkipTraining
 
 # Skip odds API calls (saves credits, still updates results)
 .\scripts\pipeline.ps1 -SkipOdds
