@@ -21,7 +21,7 @@ Key outcomes:
 - Unified feature builder (`src/features/moneyline_dataset.py`) handles all leagues.
 - Soccer seasons are clipped to **2021–2025** with auto‑filled odds (Football-Data) and Understat‑driven lineup metrics.
 - Understat match payloads (rosters/shots) are cached per league/season; subsequent hourly runs only fetch new matches.
-- `scripts/run_hourly_pipeline.ps1` orchestrates ingestion → advanced stats → dataset build → model refresh → forward-test predictions.
+- `scripts/pipeline.ps1` orchestrates ingestion → advanced stats → dataset build → model refresh → forward-test predictions.
 
 ---
 
@@ -32,7 +32,7 @@ data/
   raw/            # Source snapshots, ESPN pulls, etc.
   processed/      # Feature-ready tables, model inputs
 docs/             # Source notes, dashboards, automation instructions
-scripts/          # PowerShell automation (hourly pipeline, forward tests, schedulers)
+scripts/          # PowerShell automation (pipeline, forward tests, schedulers)
 src/
   data/           # Ingestion + normalization
   features/       # Feature engineering
@@ -61,8 +61,8 @@ tests/            # Pytest suites
    ```
 
 4. **Bootstrap sources**
-   - All historical feeds run once automatically and are skipped on later hourly jobs.
-   - Manual refresh: `poetry run python -m src.data.ingest_sources --full-refresh`.
+   - The pipeline automatically handles backfilling via `src.data.ingest_manager`.
+   - To force a full refresh: `poetry run python -m src.data.ingest_manager --leagues ALL --force-backfill`.
 
 ---
 
@@ -70,17 +70,15 @@ tests/            # Pytest suites
 
 | Task | Command |
 | --- | --- |
+| **Smart Ingestion** (History + Updates) | `poetry run python -m src.data.ingest_manager --leagues NFL,NBA` |
 | List available structured sources | `poetry run python -m src.data.ingest_sources --list` |
-| Run all enabled sources | `poetry run python -m src.data.ingest_sources` |
-| League-only (e.g., NFL) | `... --league nfl --season-start 2019 --season-end 2023` |
-| Odds snapshots (Odds API) | `poetry run python -m src.data.ingest_odds --sport americanfootball_nfl` (swap sport id) |
-| ESPN scoreboard odds | `poetry run python -m src.data.ingest_sources --source espn_odds_nba` |
-| Historical schedules/results | `poetry run python -m src.data.ingest_results --seasons 1999 2024` |
-| NBA schedules | `poetry run python -m src.data.ingest_results_nba --seasons 2015 2024` |
-| CFB schedules | `poetry run python -m src.data.ingest_results_cfb --seasons 2024 --season-type regular` |
+| Odds snapshots (Odds API) | `poetry run python -m src.data.ingest_odds --sport americanfootball_nfl` |
+| Live Scores (Odds API) | `poetry run python -m src.data.ingest_scores --leagues NFL,NBA` |
+| Historical Backfill (Manual) | `poetry run python -m src.data.backfill_nfl --seasons 1999 2024` |
+| NBA Backfill | `poetry run python -m src.data.backfill_nba --seasons 2015 2024` |
+| CFB Backfill | `poetry run python -m src.data.backfill_cfb --seasons 2024 --season-type regular` |
 | Football-Data odds (soccer) | `poetry run python -m src.data.ingest_football_data --leagues premier-league,serie-a` |
 | Understat archives | `poetry run python -m src.data.ingest_understat --leagues EPL,La_liga --seasons 2021,2025` |
-| Understat match payloads (lineups/shots) | `poetry run python -m src.data.sources.understat_match_payloads --leagues EPL --seasons 2024`<br>*(caches per league/season; add `--force` to re-download)* |
 
 All scrapers are designed to **skip work when cached files exist**, preventing redundant network hits.
 
