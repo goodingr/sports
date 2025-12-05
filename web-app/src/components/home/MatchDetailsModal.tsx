@@ -26,6 +26,8 @@ interface MatchDetailsModalProps {
         profit?: number | null;
         won?: boolean | null;
         status?: string;
+        book?: string;
+        book_url?: string;
     };
     oddsData?: OddsRecord[];
 }
@@ -124,17 +126,41 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
 
                             {/* Prediction Details - Always Show */}
                             <>
-                                <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                                    <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1">Recommended Bet</div>
-                                    <div className="text-lg font-black text-foreground">
-                                        {predictionInfo.recommended_bet || "N/A"}
-                                    </div>
-                                    {predictionInfo.edge && (
-                                        <div className="text-[10px] text-success font-medium mt-1">
-                                            {predictionInfo.edge > 0 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge` : ''}
+                                {predictionInfo.book_url ? (
+                                    <a
+                                        href={predictionInfo.book_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-primary/20 transition-colors cursor-pointer group"
+                                    >
+                                        <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1 flex items-center gap-1">
+                                            Recommended Bet
+                                            <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
                                         </div>
-                                    )}
-                                </div>
+                                        <div className="text-lg font-black text-foreground">
+                                            {predictionInfo.recommended_bet || "N/A"}
+                                        </div>
+                                        {predictionInfo.edge && (
+                                            <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
+                                                {predictionInfo.book && <span className="text-muted-foreground">{predictionInfo.book}</span>}
+                                                {predictionInfo.edge > 0 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge` : ''}
+                                            </div>
+                                        )}
+                                    </a>
+                                ) : (
+                                    <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center">
+                                        <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1">Recommended Bet</div>
+                                        <div className="text-lg font-black text-foreground">
+                                            {predictionInfo.recommended_bet || "N/A"}
+                                        </div>
+                                        {predictionInfo.edge && (
+                                            <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
+                                                {predictionInfo.book && <span className="text-muted-foreground">{predictionInfo.book}</span>}
+                                                {predictionInfo.edge > 0 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge` : ''}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
                                     <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Predicted Total</div>
                                     <div className="text-lg font-black text-foreground">

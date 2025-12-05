@@ -34,9 +34,16 @@ interface BetCardProps {
 export function BetCard({ bet, isPremium = false }: BetCardProps) {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const isCompleted = bet.status === 'Completed';
-    const isLocked = !isCompleted && !isPremium;
 
-    const time = new Date(bet.commence_time).toLocaleTimeString('en-US', {
+    // Check if game has started
+    const now = new Date();
+    const commenceDate = new Date(bet.commence_time);
+    const isStarted = commenceDate <= now;
+
+    // Unlock if completed OR premium OR started (ongoing)
+    const isLocked = !isCompleted && !isPremium && !isStarted;
+
+    const time = commenceDate.toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
     });
@@ -56,7 +63,11 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
 
                 {/* Time (Absolute Top Center) */}
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-                    {time}
+                    {isStarted && !isCompleted ? (
+                        <span className="text-red-500 font-bold animate-pulse">LIVE</span>
+                    ) : (
+                        time
+                    )}
                 </div>
 
                 <div className="p-4 pt-6 flex items-center justify-between gap-2 md:gap-4">
@@ -66,9 +77,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                         <div className="font-bold text-foreground text-sm md:text-base leading-tight">
                             {bet.away_team}
                         </div>
-                        {isCompleted && (
-                            <div className="text-xl md:text-2xl font-black font-mono text-foreground">
-                                {bet.away_score}
+                        {(isCompleted || isStarted) && (
+                            <div className="text-2xl md:text-3xl font-black font-mono text-foreground tracking-tighter">
+                                {bet.away_score ?? 0}
                             </div>
                         )}
                     </div>
@@ -111,9 +122,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                 </div>
 
                                 {/* 2. Final Score (Badge) */}
-                                {isCompleted && (
-                                    <div className="text-[10px] font-bold text-muted-foreground whitespace-nowrap">
-                                        Final: {(bet.home_score || 0) + (bet.away_score || 0)}
+                                {(isCompleted || isStarted) && (
+                                    <div className="text-[10px] font-black text-foreground whitespace-nowrap bg-muted/30 px-1.5 py-0.5 rounded">
+                                        {isCompleted ? "FINAL: " : "SCORE: "}{(bet.home_score || 0) + (bet.away_score || 0)}
                                     </div>
                                 )}
 
@@ -130,9 +141,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
 
                     {/* Right: Home Team */}
                     <div className="flex-1 flex items-center justify-start text-left gap-2 md:gap-3">
-                        {isCompleted && (
-                            <div className="text-xl md:text-2xl font-black font-mono text-foreground">
-                                {bet.home_score}
+                        {(isCompleted || isStarted) && (
+                            <div className="text-2xl md:text-3xl font-black font-mono text-foreground tracking-tighter">
+                                {bet.home_score ?? 0}
                             </div>
                         )}
                         <div className="font-bold text-foreground text-sm md:text-base leading-tight">
@@ -161,7 +172,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                     away_score: bet.away_score,
                     profit: bet.profit,
                     won: bet.result === 'Win', // approximate
-                    status: bet.status
+                    status: bet.status,
+                    book: bet.book,
+                    book_url: bet.book_url
                 }}
                 oddsData={bet.odds_data}
             />

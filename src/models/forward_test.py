@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 
 from src.data.ingest_odds import fetch_odds
-from src.data.ingest_results_soccer import fetch_from_espn
+from src.data.backfill_soccer import fetch_from_espn
 from src.data.team_mappings import normalize_team_code
 from src.db.core import connect
 from src.models.feature_loader import FeatureLoader
@@ -1372,20 +1372,24 @@ def update_results(
 
     save_required = False
 
-    def _apply_result(index: int, home_score: int, away_score: int) -> None:
+    def _apply_result(index: int, home_score: int, away_score: int, is_final: bool = True) -> None:
         nonlocal save_required
-        if home_score > away_score:
-            result_str = "home"
-        elif away_score > home_score:
-            result_str = "away"
-        else:
-            result_str = "tie"
+        result_str = None
+        if is_final:
+            if home_score > away_score:
+                result_str = "home"
+            elif away_score > home_score:
+                result_str = "away"
+            else:
+                result_str = "tie"
+        
         result_timestamp = datetime.now(timezone.utc).isoformat()
         for frame in (predictions, target_predictions):
             if index in frame.index:
                 frame.at[index, "home_score"] = home_score
                 frame.at[index, "away_score"] = away_score
-                frame.at[index, "result"] = result_str
+                if result_str:
+                    frame.at[index, "result"] = result_str
                 frame.at[index, "result_updated_at"] = result_timestamp
         save_required = True
 
@@ -1479,7 +1483,7 @@ def update_results(
                 or stored_home_int != match[0]
                 or stored_away_int != match[1]
             ):
-                _apply_result(idx, match[0], match[1])
+                _apply_result(idx, match[0], match[1], is_final=True)
 
     # Clear any results that were accidentally recorded for future games
     if "result" in target_predictions.columns:
@@ -1493,7 +1497,7 @@ def update_results(
             for idx in target_predictions[future_results_mask].index:
                 _clear_result(idx)
 
-    def _find_final_score(row: pd.Series, conn) -> Optional[Tuple[int, int]]:
+    def _find_final_score(row: pd.Series, conn) -> Optional[Tuple[int, int, bool]]:
         league = row.get("league")
         game_id = row.get("game_id")
         commence_time = row.get("commence_time")
@@ -1526,7 +1530,7 @@ def update_results(
                 league = "NBA"
         league = str(league).upper()
 
-        def _valid_match(db_row: sqlite3.Row) -> Optional[Tuple[int, int]]:
+        def _valid_match(db_row: sqlite3.Row) -> Optional[Tuple[int, int, bool]]:
             start_time_value = db_row["start_time_utc"]
             if start_time_value is None:
                 return None
@@ -1550,19 +1554,22 @@ def update_results(
 
             home_score = db_row["home_score"]
             away_score = db_row["away_score"]
+            status = db_row["status"]
             if home_score is None or away_score is None:
                 return None
-            return int(home_score), int(away_score)
+            
+            is_final = (status == 'final')
+            return int(home_score), int(away_score), is_final
 
         # First try exact match by game_id / odds_api_id
         result_rows = conn.execute(
             """
-            SELECT r.home_score, r.away_score, g.start_time_utc
+            SELECT r.home_score, r.away_score, g.start_time_utc, g.status
             FROM game_results r
             JOIN games g ON g.game_id = r.game_id
             WHERE g.sport_id = (SELECT sport_id FROM sports WHERE league = ?)
             AND (g.game_id = ? OR g.odds_api_id = ?)
-            AND g.status = 'final'
+            AND (g.status = 'final' OR g.status = 'in_progress')
             AND g.start_time_utc IS NOT NULL
             """,
             (league, game_id, game_id),
@@ -1586,7 +1593,7 @@ def update_results(
 
                 result_rows = conn.execute(
                     """
-                    SELECT r.home_score, r.away_score, g.start_time_utc
+                    SELECT r.home_score, r.away_score, g.start_time_utc, g.status
                     FROM game_results r
                     JOIN games g ON g.game_id = r.game_id
                     JOIN teams ht ON ht.team_id = g.home_team_id
@@ -1597,7 +1604,7 @@ def update_results(
                     AND (DATE(g.start_time_utc) = ?
                          OR DATE(g.start_time_utc) = ?
                          OR DATE(g.start_time_utc) = ?)
-                    AND g.status = 'final'
+                    AND (g.status = 'final' OR g.status = 'in_progress')
                     AND g.start_time_utc IS NOT NULL
                     """,
                     (
@@ -1692,8 +1699,10 @@ def update_results(
 
             if not match:
                 continue
-            home_score, away_score = match
-            _apply_result(idx, home_score, away_score)
+            if not match:
+                continue
+            home_score, away_score, is_final = match
+            _apply_result(idx, home_score, away_score, is_final=is_final)
 
     if not save_required:
         LOGGER.info("No completed games found to update")

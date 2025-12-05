@@ -26,7 +26,7 @@ Write-Host "=== Starting Data Ingestion ==="
 Write-Host "Step 1: Smart History Ingestion..."
 try {
     $leagueArgs = $targetLeagues -join " "
-    & poetry run python -m src.data.ingest_manager --leagues $targetLeagues
+    & poetry run python -m src.data.ingest_manager --leagues $targetLeagues 2>&1 | ForEach-Object { "$_" }
 } catch {
     Write-Host "WARNING: Smart ingestion failed: $_"
 }
@@ -39,9 +39,9 @@ if (-not $SkipOdds) {
         if ($theOddsLeagues -notcontains $league) { continue }
         try {
             Write-Host "Fetching odds for $league..."
-            & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh | Out-Null
+            & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh 2>&1 | ForEach-Object { "$_" }
         } catch {
-            Write-Host "WARNING: Odds fetch failed for $league: $_"
+            Write-Host ("WARNING: Odds fetch failed for {0}: {1}" -f $league, $_)
         }
     }
 } else {
@@ -53,7 +53,7 @@ if (-not $SkipOdds) {
     Write-Host "Step 3: Fetching Live Scores..."
     try {
         $commaLeagues = $targetLeagues -join ","
-        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env
+        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env 2>&1 | ForEach-Object { "$_" }
     } catch {
         Write-Host "WARNING: Score ingestion failed: $_"
     }

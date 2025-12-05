@@ -366,6 +366,11 @@ def _parse_args() -> argparse.Namespace:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        help="Limit results to the last N days",
+    )
     return parser.parse_args()
 
 
@@ -373,7 +378,7 @@ def main() -> None:
     args = _parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
     seasons = _to_int_list(args.seasons)
-    run(seasons, season_type=args.season_type)
+    run(seasons, season_type=args.season_type, days_back=args.days_back)
 
 
 if __name__ == "__main__":

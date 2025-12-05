@@ -74,7 +74,7 @@ foreach ($league in $targetLeagues) {
     if (-not $SkipOdds) {
         try {
             Write-Log "Requesting Odds API snapshot for $league (moneyline + totals)..."
-            & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh | Out-Null
+            & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh 2>&1 | ForEach-Object { "$_" }
         } catch {
             Write-Log ("WARNING: Odds API snapshot failed for {0}: {1}" -f $league, $_)
         }
@@ -93,7 +93,7 @@ if (-not $SkipHistory) {
         # Pass the target leagues to the ingestion manager
         $leagueArgs = $targetLeagues -join " "
         Write-Log "Running smart ingestion for: $leagueArgs"
-        & poetry run python -m src.data.ingest_manager --leagues $targetLeagues
+        & poetry run python -m src.data.ingest_manager --leagues $targetLeagues 2>&1 | ForEach-Object { "$_" }
     } catch {
         Write-Log "WARNING: Smart ingestion failed: $_"
     }
@@ -107,7 +107,7 @@ if (-not $SkipOdds) {
         # Also run ingest_scores for immediate Odds API updates (fastest for live scores)
         Write-Log "Fetching latest scores from Odds API..."
         $commaLeagues = $targetLeagues -join ","
-        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env
+        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env 2>&1 | ForEach-Object { "$_" }
     } catch {
         Write-Log "WARNING: Score ingestion failed: $_"
     }
@@ -126,13 +126,13 @@ try {
             foreach ($modelType in $modelTypes) {
                 Write-Log "Forward testing $league with $modelType model..."
                 # Always use --use-db-odds because we just fetched the odds in Step 1 (or skipped if SkipOdds is set)
-                & poetry run python -m src.models.forward_test predict --league $league --model-type $modelType --dotenv .env --log-level INFO --use-db-odds
+                & poetry run python -m src.models.forward_test predict --league $league --model-type $modelType --dotenv .env --log-level INFO --use-db-odds 2>&1 | ForEach-Object { "$_" }
                 if ($LASTEXITCODE -ne 0) {
                     Write-Log "WARNING: Forward test failed for $league ($modelType)"
                     continue
                 }
                 Write-Log "Updating completed results for $league ($modelType)..."
-                & poetry run python -m src.models.forward_test update --league $league --model-type $modelType --dotenv .env --log-level INFO
+                & poetry run python -m src.models.forward_test update --league $league --model-type $modelType --dotenv .env --log-level INFO 2>&1 | ForEach-Object { "$_" }
                 if ($LASTEXITCODE -ne 0) {
                     Write-Log "WARNING: Result update failed for $league ($modelType)"
                 }
@@ -147,7 +147,7 @@ try {
 # Step 4: Sync results
 Write-Log "Step 4: Syncing results across model types..."
 try {
-    & poetry run python scripts/copy_results.py
+    & poetry run python scripts/copy_results.py 2>&1 | ForEach-Object { "$_" }
     if ($LASTEXITCODE -eq 0) {
         Write-Log "Results synced successfully across all model types"
     } else {

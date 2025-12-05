@@ -1164,9 +1164,50 @@ def update_overunder_page(
         totals_odds_json = totals_odds_df.to_json(date_format="iso", orient="records")
         
         # Merge fresh odds into recommended dataframe for the table display
-        # Select the BEST odds (highest moneyline) for each game/side, regardless of line
-        # We want to show what's actually available in sportsbooks
-        best_odds = totals_odds_df.loc[totals_odds_df.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
+        # Select the BEST odds based on EDGE (not just highest moneyline) for each game/side
+        # We want to show the most profitable bet available in sportsbooks
+        
+        # Create lookups for edge calculation
+        game_id_to_pred = recommended.set_index('game_id')['predicted_total_points'].to_dict()
+        game_id_to_league = recommended.set_index('game_id')['league'].to_dict()
+        
+        def _calc_edge_row(row):
+            gid = row['forward_game_id']
+            pred = game_id_to_pred.get(gid)
+            if pd.isna(pred) or pd.isna(row['line']) or pd.isna(row['moneyline']):
+                return -100.0
+            
+            line = float(row['line'])
+            ml = float(row['moneyline'])
+            outcome = str(row['outcome']).lower()
+            
+            # Implied prob
+            if ml > 0:
+                imp = 100 / (ml + 100)
+            else:
+                imp = -ml / (-ml + 100)
+            
+            # Pred prob
+            diff = pred - line
+            league = game_id_to_league.get(gid, 'NBA')
+            std = _get_residual_std(league)
+                
+            try:
+                over_prob = 0.5 * (1.0 + math.erf(diff / (std * math.sqrt(2.0))))
+                over_prob = max(0.0, min(1.0, over_prob))
+                under_prob = 1.0 - over_prob
+                prob = over_prob if outcome == 'over' else under_prob
+                return prob - imp
+            except Exception:
+                return -100.0
+
+        totals_odds_df['calc_edge'] = totals_odds_df.apply(_calc_edge_row, axis=1)
+        
+        # Sort by edge descending
+        totals_odds_df = totals_odds_df.sort_values('calc_edge', ascending=False)
+        
+        # Group by game/outcome and take first (best edge)
+        best_odds = totals_odds_df.groupby(['forward_game_id', 'outcome']).first().reset_index()
         
         # Create a lookup for side flipping: (game_id, side) -> row
         odds_lookup = {}
@@ -1419,10 +1460,11 @@ def update_overunder_page(
                 else:
                     return -stake
 
-            # Only recalculate for rows where we have scores
-            has_scores = completed['total_points'].notna()
+            # Only recalculate for rows where we have scores AND the game is actually complete (has a result)
+            # This prevents ongoing games from prematurely showing win/loss
+            has_scores_and_final = completed['total_points'].notna() & completed['result'].notna()
             
-            if has_scores.any():
+            if has_scores_and_final.any():
                 # Recalculate 'won'
                 # If Over: total > line -> Win
                 # If Under: total < line -> Win
@@ -1433,23 +1475,23 @@ def update_overunder_page(
                 is_under = completed['side'].str.lower() == 'under'
                 
                 # Initialize won as None
-                completed.loc[has_scores, 'won'] = None
+                completed.loc[has_scores_and_final, 'won'] = None
                 
                 # Over wins
                 over_wins = is_over & (completed['total_points'] > completed['total_line'])
-                completed.loc[has_scores & over_wins, 'won'] = True
+                completed.loc[has_scores_and_final & over_wins, 'won'] = True
                 
                 # Over losses
                 over_losses = is_over & (completed['total_points'] < completed['total_line'])
-                completed.loc[has_scores & over_losses, 'won'] = False
+                completed.loc[has_scores_and_final & over_losses, 'won'] = False
                 
                 # Under wins
                 under_wins = is_under & (completed['total_points'] < completed['total_line'])
-                completed.loc[has_scores & under_wins, 'won'] = True
+                completed.loc[has_scores_and_final & under_wins, 'won'] = True
                 
                 # Under losses
                 under_losses = is_under & (completed['total_points'] > completed['total_line'])
-                completed.loc[has_scores & under_losses, 'won'] = False
+                completed.loc[has_scores_and_final & under_losses, 'won'] = False
                 
                 # Pushes (total == line) remain None (or we can set explicitly if needed)
                 # If won is None, profit should be 0 (Push)

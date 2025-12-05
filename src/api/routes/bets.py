@@ -214,11 +214,21 @@ async def get_history(
             "limit": limit
         }
 
-    completed = df[df["status"] == "Completed"].copy()
+    # Filter for completed bets OR ongoing bets (started but not finished)
+    # Ongoing bets are Pending but commence_time <= now
+    now = pd.Timestamp.now(tz="UTC")
     
-    # Sort by date desc
-    if "commence_time" in completed.columns:
+    if "commence_time" in df.columns:
+        mask = (df["status"] == "Completed") | (
+            (df["status"] == "Pending") & 
+            (df["commence_time"] <= now)
+        )
+        completed = df[mask].copy()
+        
+        # Sort by date desc
         completed = completed.sort_values("commence_time", ascending=False)
+    else:
+        completed = df[df["status"] == "Completed"].copy()
         
     # Pagination
     start = (page - 1) * limit

@@ -854,7 +854,7 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
         df["league"] = df["league"].fillna("").astype(str)
     
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    df["won"] = df["won"].apply(lambda x: "Win" if x is True else "Loss" if x is False else "")
+    df["won"] = df["won"].apply(lambda x: "Win" if x is True else "Loss" if x is False else "Ongoing")
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "—")
     df["stake"] = df["stake"].apply(lambda x: _format_currency(x, 0) if pd.notna(x) else "—")
     
@@ -1033,7 +1033,7 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
         )
     else:
         df["predicted_total_points"] = ""
-    df["won"] = df["won"].apply(lambda v: "Win" if v is True else "Loss" if v is False else "")
+    df["won"] = df["won"].apply(lambda v: "Win" if v is True else "Loss" if v is False else "Ongoing")
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "")
 
     columns = [

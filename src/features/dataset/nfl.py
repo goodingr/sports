@@ -500,7 +500,7 @@ def build_dataset(paths: DatasetPaths, seasons: Iterable[int]) -> pd.DataFrame:
             dataset[injury_col] = 0.0
 
     dataset = merge_espn_odds(dataset, "NFL")
-    dataset = merge_team_metrics(dataset)
+    # dataset = merge_team_metrics(dataset)  # Redundant, already merged above
     dataset = add_team_form_features(dataset)
     dataset = add_rest_travel_features(dataset)
     dataset = add_weather_features(dataset)

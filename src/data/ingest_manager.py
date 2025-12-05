@@ -25,6 +25,8 @@ LEAGUE_CONFIG = {
     "CFB": {"module": "src.data.backfill_cfb", "current_season": 2024, "start_year": 2018},
     "MLB": {"module": "src.data.backfill_mlb", "current_season": 2024, "start_year": 2015},
     "SOCCER": {"module": "src.data.backfill_soccer", "current_season": 2024, "start_year": 2018}, # Generic for all soccer
+    "NCAAB": {"module": "src.data.backfill_killersports_seasons", "current_season": 2024, "start_year": 2018},
+    "NHL": {"module": "src.data.backfill_killersports_seasons", "current_season": 2024, "start_year": 2016},
 }
 
 SOCCER_LEAGUES = ["EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
@@ -92,6 +94,9 @@ def ingest_league(league: str, force_backfill: bool = False):
         elif league == "MLB":
              # MLB script takes --seasons
              run_module(module, ["--seasons"] + [str(y) for y in range(start_year, current_season + 1)])
+        elif league in ("NCAAB", "NHL"):
+             # Killersports script takes --league, --start-season, --end-season
+             run_module(module, ["--league", league, "--start-season", str(start_year), "--end-season", str(current_season)])
              
     else:
         LOGGER.info(f"[{league}] Found history up to {last_date.date()}. Running update for current season...")
@@ -106,20 +111,6 @@ def ingest_league(league: str, force_backfill: bool = False):
             # NBA supports days_back
             run_module(module, ["--seasons", str(current_season), "--days-back", "7"])
         elif league == "NFL":
-            # NFL just fetch current season (fast enough)
-            run_module(module, ["--seasons", str(current_season)])
-        elif league == "CFB":
-            # CFB just fetch current season
-            run_module(module, [str(current_season)])
-        elif league == "MLB":
-            # MLB fetch current season
-            run_module(module, ["--seasons", str(current_season)])
-
-def main():
-    parser = argparse.ArgumentParser(description="Smart Data Ingestion Manager")
-    parser.add_argument("--leagues", nargs="+", help="Leagues to ingest (default: all)")
-    parser.add_argument("--force-backfill", action="store_true", help="Force full backfill even if history exists")
-    parser.add_argument("--log-level", default="INFO")
     
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))

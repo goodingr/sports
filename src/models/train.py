@@ -365,6 +365,7 @@ def _build_estimator(model_type: str, league: str = "NFL") -> Pipeline:
                         min_child_samples=10,
                         random_state=42,
                         n_jobs=1,
+                        verbosity=-1,
                     ),
                 ),
             ]

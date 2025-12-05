@@ -607,7 +607,10 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
             if pd.notna(row.get("home_score")) and pd.notna(row.get("away_score")):
                 actual_total = float(row.get("home_score") + row.get("away_score"))
 
-            if actual_total is None:
+            # Only calculate result if the game is actually finished (has a result in the source data)
+            is_final = pd.notna(row.get("result"))
+
+            if actual_total is None or not is_final:
                 won = None
             else:
                 if actual_total > line:
@@ -656,6 +659,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
                     "predicted_total_points": row.get("predicted_total_points"),
                     "home_score": row.get("home_score"),
                     "away_score": row.get("away_score"),
+                    "result": row.get("result"),
                 }
             )
 
@@ -1279,13 +1283,21 @@ def get_completed_bets(
     if bets.empty or "won" not in bets.columns:
         return pd.DataFrame()
 
-    # Filter to recommended bets that have results (won is not null means result was determined)
-    # Also check if scores exist as a secondary indicator
+    # Filter to recommended bets that have results OR are ongoing (started but not finished)
+    # We already filtered for commence_time <= now at the start of the function.
+    
+    # Check for results
     has_results = bets["won"].notna()
     if "home_score" in bets.columns and "away_score" in bets.columns:
         has_results = has_results & bets["home_score"].notna() & bets["away_score"].notna()
     
-    completed = bets[has_results & bets["edge"].notna() & (bets["edge"] >= edge_threshold)].copy()
+    # Check for ongoing (no results yet)
+    is_ongoing = bets["won"].isna()
+    
+    # Combine: keep if has results OR is ongoing
+    keep_mask = has_results | is_ongoing
+    
+    completed = bets[keep_mask & bets["edge"].notna() & (bets["edge"] >= edge_threshold)].copy()
 
     if completed.empty:
         return pd.DataFrame()
@@ -1372,15 +1384,16 @@ def get_completed_bets(
                             else:
                                 commence_ts = commence_ts.tz_convert("UTC")
 
-                        # Explicit in-progress statuses should still be hidden
+                        # Explicit in-progress statuses should be shown as they are "ongoing"
                         if status_normalized in {"in_progress", "live", "halftime"}:
+                            final_game_ids.append(pred_id)
                             continue
 
                         # Upcoming games still scheduled should remain hidden if they have not started yet
                         if status_normalized == "scheduled":
                             if commence_ts is not None and commence_ts > now:
                                 continue
-                            # Game should have started; allow it to display since we have results
+                            # Game should have started; allow it to display since we have results or it's ongoing
                             final_game_ids.append(pred_id)
                             continue
 
@@ -1505,7 +1518,29 @@ def get_overunder_completed(
     totals = _expand_totals(df, stake=stake)
     if totals.empty:
         return pd.DataFrame()
-    completed = totals[totals["won"].notna() & totals["edge"].notna() & (totals["edge"] >= edge_threshold)].copy()
+        
+    # Filter for games that have started (completed or ongoing)
+    # won.notna() means completed. won.isna() means pending/ongoing.
+    # We need to check commence_time for ongoing games.
+    
+    mask = totals["edge"].notna() & (totals["edge"] >= edge_threshold)
+    
+    if "commence_time" in totals.columns:
+        # Ensure UTC comparison
+        commence_times = pd.to_datetime(totals["commence_time"], errors="coerce", utc=True)
+        now = pd.Timestamp.now(tz="UTC")
+        
+        # Keep if (Completed) OR (Started AND Pending)
+        # Actually, if it started, it's either completed or ongoing.
+        # So just check commence_time <= now.
+        time_mask = (commence_times.notna()) & (commence_times <= now)
+        mask = mask & time_mask
+    else:
+        # Fallback if no time: only show completed
+        mask = mask & totals["won"].notna()
+        
+    completed = totals[mask].copy()
+    
     if completed.empty:
         return pd.DataFrame()
     if "commence_time" in completed.columns:

@@ -68,7 +68,7 @@ def copy_results(base_dir: Path = Path("data/forward_test")):
         new_results = model_df["result"].notna().sum()
         print(f"  Now has {new_results} completed games (added {new_results - existing_results})")
     
-    print("\n✓ Done! All model types now have the same game results.")
+    print("\n[OK] Done! All model types now have the same game results.")
 
 if __name__ == "__main__":
     copy_results()

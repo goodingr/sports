@@ -18,6 +18,13 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
 
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$logFile = "logs/pipeline_${timestamp}.log"
+New-Item -ItemType Directory -Force -Path "logs" | Out-Null
+
+# Start Transcript to capture all output
+Start-Transcript -Path $logFile -Append
+
 
 
 Write-Host "=== Starting Data Backup ==="
@@ -59,3 +66,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "=== Master Pipeline Completed ==="
+
+Stop-Transcript

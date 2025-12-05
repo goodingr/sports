@@ -216,6 +216,17 @@ nba:
     storage_subdir: "nba/injuries"
     notes: "League-published injury statuses"
 
+  - key: nba_rolling_metrics
+    name: "NBA rolling metrics"
+    category: advanced_metrics
+    url: "https://stats.nba.com/"
+    handler: "src.data.sources.nba_rolling_metrics:ingest"
+    frequency: daily
+    enabled: true
+    storage_subdir: "nba/rolling_metrics"
+    notes: "Calculated rolling metrics from game logs."
+    params: {}
+
 nhl:
   - key: killersports_nhl
     name: "Killersports NHL odds"

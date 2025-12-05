@@ -70,9 +70,9 @@ def update_database(scores_data: List[Dict], league: str) -> int:
     
     with connect() as conn:
         for event in scores_data:
-            if not event.get("completed"):
-                continue
-                
+            # Process both completed and live games
+            is_completed = event.get("completed", False)
+            
             event_id = event.get("id")
             if not event_id:
                 continue
@@ -147,10 +147,11 @@ def update_database(scores_data: List[Dict], league: str) -> int:
                     (game_id, home_score, away_score)
                 )
                 
-                # Also update games table status
+                # Update status
+                new_status = 'final' if is_completed else 'in_progress'
                 conn.execute(
-                    "UPDATE games SET status = 'final' WHERE game_id = ?",
-                    (game_id,)
+                    "UPDATE games SET status = ? WHERE game_id = ?",
+                    (new_status, game_id)
                 )
                 updated_count += 1
                 

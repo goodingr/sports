@@ -1,0 +1,8 @@
+                              game_id             commence_time           home_team            away_team result
+774  3bb98aa07fabd4fae0e83a62c2d5fb1a 2025-12-05 00:10:00+00:00  Washington Wizards       Boston Celtics   None
+556  82945fcefbdab5eff92ea10d50b8b9ed 2025-12-03 00:10:00+00:00  Philadelphia 76ers   Washington Wizards   home
+547  a2fb7d9b25c10290c0ddfe4ed08d9911 2025-12-02 00:00:00+00:00  Washington Wizards      Milwaukee Bucks   home
+323                    NBA_0022400744 2025-11-26 00:10:00+00:00  Washington Wizards        Atlanta Hawks   None
+63                     NBA_0022500029 2025-11-07 00:00:00+00:00  Washington Wizards  Cleveland Cavaliers   away
+46                     NBA_0022500174 2025-11-05 00:00:00+00:00      Boston Celtics   Washington Wizards   home
+1                      NBA_0022500159 2025-11-03 00:00:00+00:00     New York Knicks   Washington Wizards   home
