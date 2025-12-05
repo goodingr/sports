@@ -78,18 +78,12 @@ def get_totals_data(model_type: str = "ensemble", version: Optional[str] = "all"
         pending = df[df["status"] == "Pending"].copy()
         if not pending.empty:
             try:
-                print(f"\nDEBUG: Processing {len(pending)} pending bets")
-                
                 # Get sportsbook odds from database
                 odds_df = get_totals_odds_for_recommended(pending)
-                
-                print(f"DEBUG: Found {len(odds_df)} odds records for {len(pending)} pending bets")
                 
                 if not odds_df.empty:
                     # Group by game_id and side to get the best odds (highest moneyline for each side)
                     best_odds = odds_df.loc[odds_df.groupby(['forward_game_id', 'outcome'])['moneyline'].idxmax()]
-                    
-                    print(f"DEBUG: Best odds found for {len(best_odds)} game+side combinations")
                     
                     # Merge sportsbook data back to main dataframe
                     # Match on game_id and side

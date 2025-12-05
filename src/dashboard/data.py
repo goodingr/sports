@@ -1578,29 +1578,41 @@ def _map_game_ids_by_odds_api(recommended: pd.DataFrame) -> pd.DataFrame:
             f"""
             SELECT odds_api_id, game_id
             FROM games
-            WHERE odds_api_id IS NOT NULL
-              AND odds_api_id IN ({placeholders})
+            WHERE (odds_api_id IS NOT NULL AND odds_api_id IN ({placeholders}))
+               OR game_id IN ({placeholders})
             """,
-            all_ids_to_try,
+            all_ids_to_try + all_ids_to_try,
         ).fetchall()
 
     if not rows:
         return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
 
-    # Build a reverse mapping from odds_api_id back to prediction_game_id
-    # Need to handle that prediction_id might be "BUNDESLIGA_746813" but odds_api_id is "746813"
-    odds_to_db = {row[0]: row[1] for row in rows if row[0] and row[1]}
+    # Build a reverse mapping
+    # Row is (odds_api_id, game_id)
+    # We want to map prediction_id -> db_game_id
     
     mapping_list = []
+    
+    # Create lookup dictionaries
+    odds_api_to_db = {row[0]: row[1] for row in rows if row[0]}
+    game_id_to_db = {row[1]: row[1] for row in rows if row[1]}
+    
     for pred_id in unique_ids:
-        # Try exact match first
-        if pred_id in odds_to_db:
-            mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_to_db[pred_id]})
-        # Try without prefix
-        elif "_" in pred_id:
+        # 1. Try direct game_id match
+        if pred_id in game_id_to_db:
+             mapping_list.append({"prediction_game_id": pred_id, "db_game_id": game_id_to_db[pred_id]})
+             continue
+             
+        # 2. Try exact odds_api_id match
+        if pred_id in odds_api_to_db:
+            mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_api_to_db[pred_id]})
+            continue
+            
+        # 3. Try without prefix against odds_api_id
+        if "_" in pred_id:
             no_prefix = pred_id.split("_", 1)[1]
-            if no_prefix in odds_to_db:
-                mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_to_db[no_prefix]})
+            if no_prefix in odds_api_to_db:
+                mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_api_to_db[no_prefix]})
     
     if not mapping_list:
         return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
