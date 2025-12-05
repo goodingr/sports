@@ -1557,7 +1557,21 @@ def _map_game_ids_by_odds_api(recommended: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
 
     unique_ids = sorted(set(prediction_ids))
-    placeholders = ",".join("?" for _ in unique_ids)
+    
+    # Also generate IDs without league prefix (e.g., "BUNDESLIGA_746813" -> "746813")
+    # to handle cases where odds_api_id is stored without prefix
+    unique_ids_no_prefix = []
+    for gid in unique_ids:
+        if "_" in gid:
+            # Strip everything before the first underscore
+            no_prefix = gid.split("_", 1)[1]
+            unique_ids_no_prefix.append(no_prefix)
+        else:
+            unique_ids_no_prefix.append(gid)
+    
+    # Try matching against both full IDs and IDs without prefix
+    all_ids_to_try = sorted(set(unique_ids + unique_ids_no_prefix))
+    placeholders = ",".join("?" for _ in all_ids_to_try)
 
     with connect() as conn:
         rows = conn.execute(
@@ -1567,15 +1581,31 @@ def _map_game_ids_by_odds_api(recommended: pd.DataFrame) -> pd.DataFrame:
             WHERE odds_api_id IS NOT NULL
               AND odds_api_id IN ({placeholders})
             """,
-            unique_ids,
+            all_ids_to_try,
         ).fetchall()
 
     if not rows:
         return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
 
-    mapping = pd.DataFrame(
-        [{"prediction_game_id": row[0], "db_game_id": row[1]} for row in rows if row[0] and row[1]]
-    )
+    # Build a reverse mapping from odds_api_id back to prediction_game_id
+    # Need to handle that prediction_id might be "BUNDESLIGA_746813" but odds_api_id is "746813"
+    odds_to_db = {row[0]: row[1] for row in rows if row[0] and row[1]}
+    
+    mapping_list = []
+    for pred_id in unique_ids:
+        # Try exact match first
+        if pred_id in odds_to_db:
+            mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_to_db[pred_id]})
+        # Try without prefix
+        elif "_" in pred_id:
+            no_prefix = pred_id.split("_", 1)[1]
+            if no_prefix in odds_to_db:
+                mapping_list.append({"prediction_game_id": pred_id, "db_game_id": odds_to_db[no_prefix]})
+    
+    if not mapping_list:
+        return pd.DataFrame(columns=["prediction_game_id", "db_game_id"])
+    
+    mapping = pd.DataFrame(mapping_list)
     return mapping.drop_duplicates(subset=["prediction_game_id"])
 
 
