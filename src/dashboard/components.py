@@ -855,6 +855,20 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
     
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
     
+    # Create winner column - show which team won
+    # Must run this BEFORE overwriting 'won' with string status
+    def get_winner(row):
+        # Check for NaN (Ongoing)
+        if pd.isna(row.get("won")):
+            return ""
+        if row.get("won") is True:
+            return row.get("team", "—")
+        elif row.get("won") is False:
+            return row.get("opponent", "—")
+        return "" # Should not happen for bools
+    
+    df["winner"] = df.apply(get_winner, axis=1)
+
     def format_result(row):
         if row["won"] is True:
             return "Win"
@@ -867,6 +881,7 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
             return "Ongoing"
 
     df["won"] = df.apply(format_result, axis=1)
+
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "—")
     df["stake"] = df["stake"].apply(lambda x: _format_currency(x, 0) if pd.notna(x) else "—")
     
@@ -880,17 +895,6 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
         )
     else:
         df["score"] = "—"
-    
-    # Create winner column - show which team won
-    def get_winner(row):
-        if pd.isna(row.get("won")):
-            return ""
-        if row.get("won") is True:
-            return row.get("team", "—")
-        else:
-            return row.get("opponent", "—")
-    
-    df["winner"] = df.apply(get_winner, axis=1)
 
     columns = [
         {"name": "Start Time", "id": "start_time"},

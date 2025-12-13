@@ -62,5 +62,5 @@ def is_user_premium(user: Optional[dict]) -> bool:
         return False
         
     public_metadata = user.get("public_metadata", {})
-    # Check for is_premium flag and ensure it's True
-    return public_metadata.get("is_premium") is True
+    # Check for is_premium flag (handle both snake_case and camelCase)
+    return (public_metadata.get("is_premium") is True) or (public_metadata.get("isPremium") is True)

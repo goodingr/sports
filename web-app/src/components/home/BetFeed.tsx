@@ -5,7 +5,7 @@ import { fetchAPI } from '@/lib/api';
 import { BetCard } from './BetCard';
 import { Lock } from 'lucide-react';
 import Link from 'next/link';
-import { useUser } from '@clerk/nextjs';
+import { useUser, useAuth } from '@clerk/nextjs';
 
 interface Bet {
     game_id: string;
@@ -36,6 +36,7 @@ export function BetFeed() {
     const [page, setPage] = useState(1);
     const [totalHistory, setTotalHistory] = useState(0);
     const { user, isLoaded } = useUser();
+    const { getToken } = useAuth();
 
     const isPremium = !!user?.publicMetadata?.isPremium;
 
@@ -53,9 +54,12 @@ export function BetFeed() {
     useEffect(() => {
         async function loadBets() {
             try {
+                const token = await getToken();
+                const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
                 const [upcomingData, historyData] = await Promise.all([
-                    fetchAPI<{ data: any[] }>('/api/bets/upcoming'),
-                    fetchAPI<{ data: any[], total: number }>('/api/bets/history?limit=30&page=1')
+                    fetchAPI<{ data: any[] }>('/api/bets/upcoming', { headers }),
+                    fetchAPI<{ data: any[], total: number }>('/api/bets/history?limit=30&page=1', { headers })
                 ]);
 
                 setUpcoming(upcomingData.data.map(mapBet));
@@ -71,13 +75,17 @@ export function BetFeed() {
         if (isLoaded) {
             loadBets();
         }
-    }, [isLoaded]);
+    }, [isLoaded, getToken]);
+
     const handleLoadMore = async () => {
         if (loadingMore) return;
         setLoadingMore(true);
         try {
+            const token = await getToken();
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
             const nextPage = page + 1;
-            const data = await fetchAPI<{ data: any[], total: number }>(`/api/bets/history?limit=30&page=${nextPage}`);
+            const data = await fetchAPI<{ data: any[], total: number }>(`/api/bets/history?limit=30&page=${nextPage}`, { headers });
 
             setHistory(prev => [...prev, ...data.data.map(mapBet)]);
             setPage(nextPage);

@@ -79,6 +79,11 @@ def update_database(scores_data: List[Dict], league: str) -> int:
             # Process both completed and live games
             is_completed = event.get("completed", False)
             
+            # FAST FIX: User reported false live scores (e.g. 1-1 when 0-0).
+            # Disabling live score ingestion for now. Only ingest FINAL scores.
+            if not is_completed:
+                 continue
+            
             event_id = event.get("id")
             if not event_id:
                 continue
