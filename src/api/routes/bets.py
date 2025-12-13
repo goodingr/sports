@@ -133,9 +133,12 @@ async def get_stats(model_type: str = "ensemble"):
 async def get_history(
     page: int = 1, 
     limit: int = 20, 
-    model_type: str = "ensemble"
+    model_type: str = "ensemble",
+    user: Optional[dict] = Depends(get_current_user)
 ):
-    """Get historical completed bets."""
+    """Get historical completed bets. Live games are masked for non-premium users."""
+    is_premium = is_user_premium(user)
+    
     df = get_totals_data(model_type)
     
     if df.empty:
@@ -196,17 +199,12 @@ async def get_history(
              odds_map[game_id] = group.to_dict(orient="records")
 
     # DEFERRED FETCH: Get totals odds (sportsbook lines) for these specific games
-    # This replaces the global fetch
+    # ONLY FETCH IF PREMIUM OR IF GAME IS COMPLETED (History is free)
+    # Actually, for Live games we want to hide it if not premium.
+    # We can fetch for everything, but conditionally display.
     sportsbook_map = {}
     if not paginated.empty:
         try:
-             # Only fetch for pending bets in the current view? 
-             # Or all bets to show historical lines?
-             # For history, we probably want to show what the line WAS or IS?
-             # The original code only fetched for PENDING bets.
-             
-             # Filter primarily for pending or recently completed?
-             # Let's stick to the original logic: fetch for pending.
              pending_slice = paginated[paginated["status"] == "Pending"].copy()
              
              if not pending_slice.empty:
@@ -234,42 +232,66 @@ async def get_history(
     for _, row in paginated.iterrows():
         record = row.fillna("").to_dict()
         
+        # Determine if we should mask (Live + Non-Premium)
+        is_live = row.get("is_live", False)
+        should_mask = is_live and not is_premium
+        
         # Add prediction details
-        record["predicted_total_points"] = safe_get(row, "predicted_total_points")
-        record["edge"] = safe_get(row, "edge")
+        if should_mask:
+             # MASKED
+             record["predicted_total_points"] = None
+             record["edge"] = None
+             record["recommended_bet"] = "Premium Only"
+             record["book"] = None
+             record["moneyline"] = None
+             record["total_line"] = None
+             record["book_url"] = None
+             # Hide odds data for live games if not premium
+             record["odds_data"] = []
+             
+             # CRITICAL: Mask side/description to prevent leak
+             record["side"] = None
+             record["description"] = None
+        else:
+            # VISIBLE (Completed or Premium)
+            record["predicted_total_points"] = safe_get(row, "predicted_total_points")
+            record["edge"] = safe_get(row, "edge")
+        
+        # Profit/Score always visible (even for live) to track game state
         record["profit"] = safe_get(row, "profit")
         record["home_score"] = safe_get(row, "home_score")
         record["away_score"] = safe_get(row, "away_score")
         
-        # Merge sportsbook data if available (DEFERRED)
-        game_id = row.get("game_id")
-        if game_id and game_id in sportsbook_map:
-            sb_data = sportsbook_map[game_id]
-            # Update fields
-            if sb_data.get("book"): record["book"] = sb_data.get("book")
-            if sb_data.get("moneyline"): record["moneyline"] = sb_data.get("moneyline")
-            if sb_data.get("line"): 
-                record["total_line"] = sb_data.get("line")
-                record["recommended_bet"] = f"{str(row.get('side')).title()} {sb_data.get('line')}"
-            
-            # Add book_url
-            book_name = sb_data.get("book", "")
-            if book_name:
-                record["book_url"] = get_sportsbook_url(book_name)
+        if not should_mask:
+            # Merge sportsbook data if available (DEFERRED)
+            game_id = row.get("game_id")
+            if game_id and game_id in sportsbook_map:
+                sb_data = sportsbook_map[game_id]
+                # Update fields
+                if sb_data.get("book"): record["book"] = sb_data.get("book")
+                if sb_data.get("moneyline"): record["moneyline"] = sb_data.get("moneyline")
+                if sb_data.get("line"): 
+                    record["total_line"] = sb_data.get("line")
+                    record["recommended_bet"] = f"{str(row.get('side')).title()} {sb_data.get('line')}"
+                
+                # Add book_url
+                book_name = sb_data.get("book", "")
+                if book_name:
+                    record["book_url"] = get_sportsbook_url(book_name)
 
-        # Construct recommended bet string (fallback)
-        if "recommended_bet" not in record or not record["recommended_bet"]:
-            if pd.notna(row.get("side")) and pd.notna(row.get("total_line")):
-                record["recommended_bet"] = f"{row['side'].title()} {row['total_line']}"
+            # Construct recommended bet string (fallback)
+            if "recommended_bet" not in record or not record["recommended_bet"]:
+                if pd.notna(row.get("side")) and pd.notna(row.get("total_line")):
+                    record["recommended_bet"] = f"{row['side'].title()} {row['total_line']}"
+                else:
+                    record["recommended_bet"] = None
+            
+            # 3. Get full odds data for this game using MAP
+            if "game_id" in row and row["game_id"] in odds_map:
+                 record["odds_data"] = odds_map[row["game_id"]]
             else:
-                record["recommended_bet"] = None
-            
-        # 3. Get full odds data for this game using MAP
-        if "game_id" in row and row["game_id"] in odds_map:
-             record["odds_data"] = odds_map[row["game_id"]]
-        else:
-             record["odds_data"] = []
-            
+                 record["odds_data"] = []
+                 
         records.append(record)
     
     return {

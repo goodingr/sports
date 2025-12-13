@@ -40,8 +40,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
     const commenceDate = new Date(bet.commence_time);
     const isStarted = commenceDate <= now;
 
-    // Unlock if completed OR premium OR started (ongoing)
-    const isLocked = !isCompleted && !isPremium && !isStarted;
+    // Unlock if completed OR premium. If not completed and not premium, it is LOCKED.
+    // This covers both "Upcoming" and "Live" (Started but not Completed) games.
+    const isLocked = !isCompleted && !isPremium;
 
     const time = commenceDate.toLocaleTimeString('en-US', {
         hour: 'numeric',

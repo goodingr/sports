@@ -13,7 +13,7 @@ A production-grade machine learning platform for multi-league sports betting pre
     -   **Calibration**: Sigmoid calibration for accurate probability estimation.
     -   **Totals**: Dedicated models for Over/Under predictions.
 -   **Real-Time Dashboard**: Interactive web app for tracking live odds, model performance, and ROI analysis.
--   **Automated Pipeline**: Single-command orchestration for ingestion, training, and prediction.
+-   **Automated Pipeline**: Single-command orchestration for ingestion, training, and prediction. [Learn more](docs/AUTOMATION.md).
 
 ---
 
@@ -65,6 +65,8 @@ Visit `http://localhost:8050` in your browser.
 ---
 
 ## 🏗️ Architecture
+
+For a detailed diagram and component overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Pipeline Flow
 
