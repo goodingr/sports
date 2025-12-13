@@ -854,7 +854,19 @@ def completed_bets_table(bets_df: pd.DataFrame, *, page_size: int = 25) -> dash_
         df["league"] = df["league"].fillna("").astype(str)
     
     df["edge"] = df["edge"].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-    df["won"] = df["won"].apply(lambda x: "Win" if x is True else "Loss" if x is False else "Ongoing")
+    
+    def format_result(row):
+        if row["won"] is True:
+            return "Win"
+        elif row["won"] is False:
+            return "Loss"
+        elif pd.notna(row.get("result")):
+            # If we have a result (game is final) but won is None, it's a Push (or at least finished)
+            return "Push"
+        else:
+            return "Ongoing"
+
+    df["won"] = df.apply(format_result, axis=1)
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "—")
     df["stake"] = df["stake"].apply(lambda x: _format_currency(x, 0) if pd.notna(x) else "—")
     
@@ -1033,7 +1045,19 @@ def overunder_completed_table(totals_df: pd.DataFrame) -> dash_table.DataTable:
         )
     else:
         df["predicted_total_points"] = ""
-    df["won"] = df["won"].apply(lambda v: "Win" if v is True else "Loss" if v is False else "Ongoing")
+    
+    def format_result(row):
+        if row["won"] is True:
+            return "Win"
+        elif row["won"] is False:
+            return "Loss"
+        elif pd.notna(row.get("result")):
+            # If we have a result (game is final) but won is None, it's a Push
+            return "Push"
+        else:
+            return "Ongoing"
+
+    df["won"] = df.apply(format_result, axis=1)
     df["profit"] = df["profit"].apply(lambda x: _format_currency(x, 2) if pd.notna(x) else "")
 
     columns = [
@@ -1422,4 +1446,35 @@ __all__ = [
     "moneyline_detail_table",
     "totals_detail_table",
     "model_comparison_table",
+    "raw_data_table",
 ]
+
+
+def raw_data_table(df: pd.DataFrame, *, page_size: int = 50) -> dash_table.DataTable:
+    """
+    Generic table to display raw dataframe content.
+    Auto-generates columns based on the dataframe.
+    """
+    if df.empty:
+        return empty_state("No data returned from database.")
+
+    # Create columns config
+    columns = [{"name": i, "id": i} for i in df.columns]
+
+    # Format datetime columns for readability if possible, else stringify
+    data = df.copy()
+    for col in data.columns:
+        if pd.api.types.is_datetime64_any_dtype(data[col]):
+            data[col] = data[col].apply(str)
+
+    return dash_table.DataTable(
+        data=data.to_dict("records"),
+        columns=columns,
+        page_size=page_size,
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={"textAlign": "left", "padding": "0.5rem", "minWidth": "100px"},
+        style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
+    )
+

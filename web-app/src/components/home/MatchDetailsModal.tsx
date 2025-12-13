@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, ExternalLink, Loader2 } from 'lucide-react';
+import { X, ExternalLink, Loader2, Lock } from 'lucide-react';
 
 interface OddsRecord {
     market: string;
@@ -17,6 +17,7 @@ interface MatchDetailsModalProps {
     gameId: string;
     homeTeam: string;
     awayTeam: string;
+    commenceTime?: string;
     predictionInfo?: {
         predicted_total_points: number | null | undefined;
         recommended_bet: string | null | undefined;
@@ -32,7 +33,7 @@ interface MatchDetailsModalProps {
     oddsData?: OddsRecord[];
 }
 
-export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam, predictionInfo, oddsData }: MatchDetailsModalProps) {
+export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam, commenceTime, predictionInfo, oddsData }: MatchDetailsModalProps) {
     const [odds, setOdds] = useState<OddsRecord[]>(oddsData || []);
 
     // Update odds if prop changes
@@ -61,6 +62,15 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
 
     if (!isOpen) return null;
 
+    // Format Date
+    const formattedDate = commenceTime ? new Date(commenceTime).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+    }) : "";
+
     // Group odds by book
     const totalsByBook = odds.reduce((acc: any[], curr) => {
         const existingBook = acc.find(b => b.name === curr.book);
@@ -78,16 +88,26 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
         return acc;
     }, []).filter((book: any) => book.over || book.under);
 
+    // Check if premium locked
+    // If we have an explicit isPremium prop, use it.
+    // Otherwise check for the masked value from API.
+    const isPremiumLocked = predictionInfo?.recommended_bet === "Premium Only";
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
-            <div className="bg-card w-full max-w-md max-h-[90vh] rounded-xl shadow-2xl border border-white/10 flex flex-col animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="bg-card w-full max-w-md max-h-[90vh] rounded-xl shadow-2xl border border-white/10 flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden relative" onClick={e => e.stopPropagation()}>
+
                 {/* Header */}
-                <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+                <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5 z-20 relative">
                     <div>
+                        {formattedDate && (
+                            <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
+                                {formattedDate}
+                            </div>
+                        )}
                         <h2 className="text-lg font-bold text-foreground leading-tight">
                             {awayTeam} <span className="text-muted-foreground text-sm font-normal">@</span> {homeTeam}
                         </h2>
-
                     </div>
                     <button
                         onClick={onClose}
@@ -98,11 +118,30 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 relative">
+
+                    {/* Premium Lock Overlay */}
+                    {isPremiumLocked && (
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/60 backdrop-blur-md p-6 text-center">
+                            <div className="bg-primary/10 p-4 rounded-full mb-4 ring-1 ring-primary/20">
+                                <Lock className="h-8 w-8 text-primary" />
+                            </div>
+                            <h3 className="text-xl font-bold text-foreground mb-2">Premium Only</h3>
+                            <p className="text-sm text-muted-foreground mb-6 max-w-[250px]">
+                                Subscribe to view our AI predictions, edges, and best live odds for this game.
+                            </p>
+                            <a
+                                href="/pricing"
+                                className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-8 py-3 rounded-lg transition-all transform hover:scale-105 shadow-lg shadow-primary/25"
+                            >
+                                Subscribe to Unlock
+                            </a>
+                        </div>
+                    )}
 
                     {/* Prediction Section - Always show if available */}
-                    {predictionInfo && (predictionInfo.recommended_bet || predictionInfo.predicted_total_points) && (
-                        <div className="grid grid-cols-2 gap-4 mb-6">
+                    {predictionInfo && (predictionInfo.recommended_bet || predictionInfo.predicted_total_points || isPremiumLocked) && (
+                        <div className={`grid grid-cols-2 gap-4 mb-6 ${isPremiumLocked ? 'opacity-20 pointer-events-none filter blur-sm' : ''}`}>
                             {/* Result Section (if completed) */}
                             {predictionInfo.status === 'Completed' && (
                                 <>
@@ -124,7 +163,7 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
                                 </>
                             )}
 
-                            {/* Prediction Details - Always Show */}
+                            {/* Prediction Details - Always Show (Blurred if locked) */}
                             <>
                                 {predictionInfo.book_url ? (
                                     <a
@@ -151,22 +190,27 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
                                     <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center">
                                         <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1">Recommended Bet</div>
                                         <div className="text-lg font-black text-foreground">
-                                            {predictionInfo.recommended_bet || "N/A"}
+                                            {isPremiumLocked ? "OVER 215.5" : (predictionInfo.recommended_bet || "N/A")}
                                         </div>
-                                        {predictionInfo.edge && (
+                                        {predictionInfo.edge ? (
                                             <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
                                                 {predictionInfo.book && <span className="text-muted-foreground">{predictionInfo.book}</span>}
                                                 {predictionInfo.edge > 0 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge` : ''}
                                             </div>
-                                        )}
+                                        ) : isPremiumLocked ? (
+                                            <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
+                                                <span className="text-muted-foreground">DraftKings</span>
+                                                +4.2% Edge
+                                            </div>
+                                        ) : null}
                                     </div>
                                 )}
                                 <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
                                     <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Predicted Total</div>
                                     <div className="text-lg font-black text-foreground">
-                                        {predictionInfo.predicted_total_points ? predictionInfo.predicted_total_points.toFixed(1) : "N/A"}
+                                        {isPremiumLocked ? "224.2" : (predictionInfo.predicted_total_points ? predictionInfo.predicted_total_points.toFixed(1) : "N/A")}
                                     </div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">
+                                    <div className="text-xs text-muted-foreground mt-1">
                                         Points
                                     </div>
                                 </div>
@@ -175,7 +219,25 @@ export function MatchDetailsModal({ isOpen, onClose, gameId, homeTeam, awayTeam,
                     )}
 
                     {/* Odds Section */}
-                    {totalsByBook.length > 0 ? (
+                    {isPremiumLocked ? (
+                        // Fake placeholder rows for locked view
+                        <div className={`grid gap-2 opacity-20 pointer-events-none filter blur-sm select-none`}>
+                            <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
+                                <div>Sportsbook</div>
+                                <div className="text-center">Line</div>
+                                <div className="text-center">Over</div>
+                                <div className="text-center">Under</div>
+                            </div>
+                            {[1, 2, 3].map((i) => (
+                                <div key={i} className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5">
+                                    <div className="font-medium text-foreground">DraftKings</div>
+                                    <div className="text-center font-bold text-foreground">215.5</div>
+                                    <div className="text-center text-muted-foreground">-110</div>
+                                    <div className="text-center text-muted-foreground">-110</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : totalsByBook.length > 0 ? (
                         <div>
                             <div className="grid gap-2">
                                 <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS games (
     status TEXT DEFAULT 'scheduled',
     gsis_id TEXT,
     pfr_id TEXT,
-    odds_api_id TEXT
+    odds_api_id TEXT,
+    espn_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_sport_season_week
@@ -141,6 +142,34 @@ CREATE TABLE IF NOT EXISTS model_predictions (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (model_id, game_id, team_id)
 );
+
+CREATE TABLE IF NOT EXISTS predictions (
+    prediction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL REFERENCES games(game_id),
+    model_type TEXT NOT NULL,
+    predicted_at TEXT NOT NULL,
+    home_prob REAL,
+    away_prob REAL,
+    home_moneyline REAL,
+    away_moneyline REAL,
+    home_edge REAL,
+    away_edge REAL,
+    home_implied_prob REAL,
+    away_implied_prob REAL,
+    total_line REAL,
+    over_prob REAL,
+    under_prob REAL,
+    over_moneyline REAL,
+    under_moneyline REAL,
+    over_edge REAL,
+    under_edge REAL,
+    over_implied_prob REAL,
+    under_implied_prob REAL,
+    UNIQUE (game_id, model_type, predicted_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_game_model
+    ON predictions (game_id, model_type);
 
 CREATE TABLE IF NOT EXISTS recommendations (
     recommendation_id INTEGER PRIMARY KEY AUTOINCREMENT,

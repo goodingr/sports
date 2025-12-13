@@ -71,6 +71,10 @@ def ingest_league(league: str, force_backfill: bool = False):
         LOGGER.error(f"No configuration for league {league}")
         return
 
+    # User requested to unplug external sources to prevent duplicates
+    LOGGER.warning(f"Skipping ingestion for {league} to prevent duplicates (Source: User Request)")
+    return
+
     last_date = get_latest_game_date(league)
     current_season = config["current_season"]
     start_year = config["start_year"]
@@ -111,6 +115,15 @@ def ingest_league(league: str, force_backfill: bool = False):
             # NBA supports days_back
             run_module(module, ["--seasons", str(current_season), "--days-back", "7"])
         elif league == "NFL":
+            # NFL script takes --seasons
+            run_module(module, ["--seasons", str(current_season)])
+
+def main():
+    """Main entry point for ingestion manager."""
+    parser = argparse.ArgumentParser(description="Manage data ingestion for all leagues")
+    parser.add_argument("--leagues", nargs="+", help="Specific leagues to ingest (default: all)")
+    parser.add_argument("--force-backfill", action="store_true", help="Force full backfill even if history exists")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
@@ -122,6 +135,7 @@ def ingest_league(league: str, force_backfill: bool = False):
             ingest_league(league, args.force_backfill)
         except Exception as e:
             LOGGER.error(f"Failed to ingest {league}: {e}")
+
 
 if __name__ == "__main__":
     main()

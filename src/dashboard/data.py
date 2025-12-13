@@ -71,49 +71,6 @@ def _to_datetime(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce") if series is not None else series
 
 
-def _normalize_team_names(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize team names to ensure consistent deduplication."""
-    if df.empty or "league" not in df.columns:
-        return df
-        
-    df = df.copy()
-    
-    def _fix_name(row, col):
-        name = row.get(col)
-        if isinstance(name, str):
-            if name.startswith("Sv "):
-                name = name[3:]
-        return get_full_team_name(row["league"], name)
-
-    if "home_team" in df.columns:
-        df["home_team"] = df.apply(lambda row: _fix_name(row, "home_team"), axis=1)
-    if "away_team" in df.columns:
-        df["away_team"] = df.apply(lambda row: _fix_name(row, "away_team"), axis=1)
-        
-    return df
-
-
-def _convert_to_display_timezone(series: pd.Series) -> pd.Series:
-    if series is None or series.empty:
-        return series
-    if not pd.api.types.is_datetime64_any_dtype(series):
-        return series
-
-    tz = getattr(series.dt, "tz", None)
-    if tz is None:
-        return series.dt.tz_localize(DISPLAY_TIMEZONE)
-    return series.dt.tz_convert(DISPLAY_TIMEZONE)
-
-
-def _ensure_utc(ts: pd.Timestamp) -> pd.Timestamp:
-    """Ensure a timestamp is timezone-aware UTC."""
-    if pd.isna(ts):
-        return ts
-    if ts.tzinfo is None:
-        return ts.tz_localize("UTC")
-    return ts.tz_convert("UTC")
-
-
 @lru_cache(maxsize=1)
 def _load_version_config() -> dict:
     if not VERSION_CONFIG_PATH.exists():
@@ -204,85 +161,7 @@ def filter_by_version(df: pd.DataFrame, version: Optional[str]) -> pd.DataFrame:
     return df[df["version"] == version].copy()
 
 
-@lru_cache(maxsize=1)
-def _read_predictions_cached(path_str: str, cache_buster: int) -> pd.DataFrame:
-    path = Path(path_str)
-    if not path.exists():
-        return pd.DataFrame()
 
-    df = pd.read_parquet(path)
-
-    def _infer_league_from_game_id(game_id: object) -> str:
-        if not isinstance(game_id, str):
-            return "NBA"
-        upper = game_id.upper()
-        if upper.startswith("NFL_"):
-            return "NFL"
-        if upper.startswith("NHL_"):
-            return "NHL"
-        if upper.startswith("NCAAB_"):
-            return "NCAAB"
-        if upper.startswith("CFB_"):
-            return "CFB"
-        if upper.startswith("NBA_"):
-            return "NBA"
-        if upper.startswith("EPL_"):
-            return "EPL"
-        if upper.startswith("LALIGA_"):
-            return "LALIGA"
-        if upper.startswith("BUNDESLIGA_"):
-            return "BUNDESLIGA"
-        if upper.startswith("SERIEA_"):
-            return "SERIEA"
-        if upper.startswith("LIGUE1_"):
-            return "LIGUE1"
-        return "NBA"
-
-    # Add or fix league column (for backward compatibility)
-    # Default to NBA for old predictions, or infer from game_id
-    if "league" not in df.columns:
-        if "game_id" in df.columns:
-            # Infer league from game_id prefix
-            df["league"] = df["game_id"].apply(_infer_league_from_game_id)
-        else:
-            # Default to NBA for old predictions without game_id info
-            df["league"] = "NBA"
-    else:
-        # Fix None/NaN values in existing league column
-        if "game_id" in df.columns:
-            mask = df["league"].isna() | (df["league"] == "None") | (df["league"].astype(str).str.lower() == "none")
-            df.loc[mask, "league"] = df.loc[mask, "game_id"].apply(_infer_league_from_game_id)
-        else:
-            # Fill any None/NaN with NBA as default
-            df["league"] = df["league"].fillna("NBA")
-            df.loc[df["league"].astype(str).str.lower() == "none", "league"] = "NBA"
-
-    for column in ("commence_time", "predicted_at", "result_updated_at"):
-        if column in df.columns:
-            df[column] = _to_datetime(df[column])
-
-    # Ensure numeric columns are floats
-    numeric_cols = [
-        "home_moneyline",
-        "away_moneyline",
-        "home_predicted_prob",
-        "away_predicted_prob",
-        "home_implied_prob",
-        "away_implied_prob",
-        "home_edge",
-        "away_edge",
-    ]
-    for column in numeric_cols:
-        if column in df.columns:
-            df[column] = pd.to_numeric(df[column], errors="coerce")
-
-
-
-    for column in ("commence_time", "predicted_at", "result_updated_at"):
-        if column in df.columns:
-            df[column] = _convert_to_display_timezone(df[column])
-
-    return df
 
 
 def load_forward_test_data(
@@ -290,36 +169,110 @@ def load_forward_test_data(
     force_refresh: bool = False, 
     path: Path = MASTER_PREDICTIONS_PATH, 
     league: Optional[str] = None,
-    model_type: str = "ensemble",
+    model_type: Union[str, List[str]] = "ensemble",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Load forward test predictions with optional cache busting, league filtering, and model type selection."""
+    """Load predictions from the database with optional league filtering and model type selection."""
     
-    # If using default path, update it to include model_type subdirectory
-    if path == MASTER_PREDICTIONS_PATH:
-        path = FORWARD_TEST_DIR / model_type / "predictions_master.parquet"
+    base_query = """
+        SELECT 
+            p.game_id,
+            p.model_type,
+            p.predicted_at,
+            p.home_prob as home_predicted_prob,
+            p.away_prob as away_predicted_prob,
+            p.home_moneyline,
+            p.away_moneyline,
+            p.home_edge,
+            p.away_edge,
+            p.home_implied_prob,
+            p.away_implied_prob,
+            p.total_line,
+            p.over_prob as over_predicted_prob,
+            p.under_prob as under_predicted_prob,
+            p.over_moneyline,
+            p.under_moneyline,
+            p.over_edge,
+            p.under_edge,
+            p.over_implied_prob,
+            p.under_implied_prob,
+            p.predicted_total_points,
+            g.start_time_utc as commence_time,
+            ht.name as home_team,
+            at.name as away_team,
+            s.league,
+            gr.home_score,
+            gr.away_score,
+            CASE 
+                WHEN g.status = 'final' THEN 
+                    CASE 
+                        WHEN gr.home_score > gr.away_score THEN 'home'
+                        WHEN gr.away_score > gr.home_score THEN 'away'
+                        ELSE 'tie'
+                    END
+                ELSE NULL 
+            END as result,
+            g.status
+        FROM predictions p
+        JOIN games g ON p.game_id = g.game_id
+        JOIN sports s ON g.sport_id = s.sport_id
+        JOIN teams ht ON g.home_team_id = ht.team_id
+        JOIN teams at ON g.away_team_id = at.team_id
+        LEFT JOIN game_results gr ON p.game_id = gr.game_id
+    """
     
-    with open("path_debug.log", "a") as f:
-        f.write(f"Model: {model_type}, Path: {path}\n")
+    params = []
+    where_clauses = []
+    
+    # helper to handle single or list of model types
+    if isinstance(model_type, str):
+        where_clauses.append("p.model_type = ?")
+        params.append(model_type)
+    elif isinstance(model_type, list):
+        if not model_type:
+            return pd.DataFrame()
+        placeholders = ",".join("?" for _ in model_type)
+        where_clauses.append(f"p.model_type IN ({placeholders})")
+        params.extend(model_type)
+    
+    if league and league.lower() != "all":
+        where_clauses.append("s.league = ?")
+        params.append(league.upper())
+
+    if start_date:
+        where_clauses.append("g.start_time_utc >= ?")
+        params.append(start_date)
         
-    path_str = str(path.resolve())
-    if force_refresh:
-        _read_predictions_cached.cache_clear()
-    try:
-        cache_buster = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        cache_buster = 0
-    df = _read_predictions_cached(path_str, cache_buster)
+    if end_date:
+        # Ensure we cover the full day if just a date string is provided and not already handled
+        if len(end_date) == 10: # YYYY-MM-DD
+            end_date_full = end_date + "T23:59:59"
+        else:
+            end_date_full = end_date
+            
+        where_clauses.append("g.start_time_utc <= ?")
+        params.append(end_date_full)
+        
+    if where_clauses:
+        base_query += " WHERE " + " AND ".join(where_clauses)
+        
+    with connect() as conn:
+        df = pd.read_sql_query(base_query, conn, params=params)
+        
+    if df.empty:
+        return df
+        
+    # Post-processing
+    df["commence_time"] = pd.to_datetime(df["commence_time"])
+    # Convert timestamps
+    # Use format='mixed' to handle potential variations (e.g. microseconds)
+    df["predicted_at"] = pd.to_datetime(df["predicted_at"], format="mixed")
     
-    # Filter by league if specified
-    if not df.empty and league and "league" in df.columns:
-        df = df[df["league"].str.upper() == league.upper()].copy()
+    # Assign versions
     df = _assign_versions(df)
     
-    # Force v0.3 for specific model types as they should always be v0.3
-    if model_type in ("random_forest", "gradient_boosting") and not df.empty:
-        df["version"] = "v0.3"
-        
-    return df.copy() if not df.empty else df
+    return df
 
 
 def compare_model_predictions(
@@ -333,15 +286,14 @@ def compare_model_predictions(
     for model_type in model_types:
         # Handle "all" league by passing None to load function
         target_league = None if league and league.lower() == "all" else league
-        df = load_forward_test_data(league=target_league, model_type=model_type)
+        df = load_forward_test_data(
+            league=target_league, 
+            model_type=model_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
         if df.empty:
             continue
-        
-        # Filter by date if specified
-        if start_date:
-            df = df[df["commence_time"] >= pd.to_datetime(start_date, utc=True)]
-        if end_date:
-            df = df[df["commence_time"] <= pd.to_datetime(end_date, utc=True)]
             
         dfs[model_type] = df
     
@@ -450,115 +402,173 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
         "away_score",
     ]
     
-    # Optional columns (may not exist in older predictions or non-soccer leagues)
-    optional_columns = ["predicted_at", "result_updated_at", "draw_moneyline", "draw_predicted_prob", 
-                       "draw_implied_prob", "draw_edge"]
-
     missing = [column for column in required_columns if column not in df.columns]
     if missing:
         raise KeyError(f"Missing expected columns in predictions: {missing}")
 
-    records: list[dict[str, object]] = []
-    for _, row in df.iterrows():
-        # Check if this is a soccer league (has draw_moneyline)
-        has_draw = pd.notna(row.get("draw_moneyline")) and row.get("draw_moneyline") is not None
+    # Common columns to keep in all rows
+    # Include 'model_type' if present
+    common_cols = [c for c in [
+        "game_id", "commence_time", "league", "model_type", "result", 
+        "home_score", "away_score", "predicted_at", "result_updated_at"
+    ] if c in df.columns]
+
+    dfs = []
+    
+    # --- HOME ---
+    home_mapping = {
+        "home_team": "team", 
+        "away_team": "opponent",
+        "home_moneyline": "moneyline",
+        "home_predicted_prob": "predicted_prob",
+        "home_implied_prob": "implied_prob",
+        "home_edge": "edge"
+    }
+    # Ensure source cols exist
+    home_src_cols = [c for c in home_mapping.keys() if c in df.columns]
+    
+    df_home = df[common_cols + home_src_cols].rename(columns=home_mapping)
+    df_home["side"] = "home"
+    # For full compatibility, add extra name columns
+    # In vectorized approach, we assume 'home_team' column from DB is already valid name
+    if "home_team" in df.columns:
+        df_home["home_team_name"] = df["home_team"]
+    if "away_team" in df.columns:
+        df_home["away_team_name"] = df["away_team"]
         
-        sides = ["home", "away"]
-        if has_draw:
-            sides.append("draw")
+    dfs.append(df_home)
+    
+    # --- AWAY ---
+    away_mapping = {
+        "away_team": "team", 
+        "home_team": "opponent",
+        "away_moneyline": "moneyline",
+        "away_predicted_prob": "predicted_prob",
+        "away_implied_prob": "implied_prob",
+        "away_edge": "edge"
+    }
+    away_src_cols = [c for c in away_mapping.keys() if c in df.columns]
+
+    df_away = df[common_cols + away_src_cols].rename(columns=away_mapping)
+    df_away["side"] = "away"
+    if "home_team" in df.columns:
+        df_away["home_team_name"] = df["home_team"]
+    if "away_team" in df.columns:
+        df_away["away_team_name"] = df["away_team"]
         
-        for side in sides:
-            # Resolve full team names
-            home_full = get_full_team_name(row.get("league"), row.get("home_team")) or row.get("home_team")
-            away_full = get_full_team_name(row.get("league"), row.get("away_team")) or row.get("away_team")
+    dfs.append(df_away)
+    
+    # --- DRAW ---
+    if "draw_moneyline" in df.columns:
+        # Only consider rows where draw_moneyline is valid
+        mask_draw = df["draw_moneyline"].notna()
+        if mask_draw.any():
+            df_draw_src = df.loc[mask_draw]
+            
+            draw_mapping = {
+                "draw_moneyline": "moneyline",
+                "draw_predicted_prob": "predicted_prob",
+                "draw_implied_prob": "implied_prob",
+                "draw_edge": "edge"
+            }
+            draw_src_cols = [c for c in draw_mapping.keys() if c in df_draw_src.columns]
+            
+            df_draw = df_draw_src[common_cols + draw_src_cols].rename(columns=draw_mapping)
+            df_draw["side"] = "draw"
+            df_draw["team"] = "Draw"
+            
+            # Construct opponent name "Home vs Away"
+            if "home_team" in df_draw_src.columns and "away_team" in df_draw_src.columns:
+                df_draw["opponent"] = df_draw_src["home_team"] + " vs " + df_draw_src["away_team"]
+                df_draw["home_team_name"] = df_draw_src["home_team"]
+                df_draw["away_team_name"] = df_draw_src["away_team"]
+            
+            dfs.append(df_draw)
 
-            if side == "draw":
-                # Handle draw bet
-                team = "Draw"
-                opponent = f"{home_full} vs {away_full}"
-                moneyline_col = "draw_moneyline"
-                prob_col = "draw_predicted_prob"
-                implied_col = "draw_implied_prob"
-                edge_col = "draw_edge"
-                
-                moneyline = row.get(moneyline_col)
-                predicted_prob = row.get(prob_col)
-                implied_prob = row.get(implied_col)
-                edge = row.get(edge_col)
-                result = row.get("result")
-                
-                # Draw wins if result is "tie" or "draw"
-                if result in ("tie", "draw"):
-                    won = True
-                elif result in ("home", "away"):
-                    won = False
-                else:
-                    won = None
-            else:
-                # Handle home/away bets (existing logic)
-                moneyline_col = f"{side}_moneyline"
-                prob_col = f"{side}_predicted_prob"
-                implied_col = f"{side}_implied_prob"
-                edge_col = f"{side}_edge"
+    # Combine all
+    bets = pd.concat(dfs, ignore_index=True)
+    
+    # Filter invalid moneyline (None, NaN, 0)
+    bets = bets.dropna(subset=["moneyline"])
+    bets = bets[bets["moneyline"] != 0]
 
-                if side == "home":
-                    team = home_full
-                    opponent = away_full
-                else:
-                    team = away_full
-                    opponent = home_full
+    if bets.empty:
+        return pd.DataFrame()
 
-                moneyline = row.get(moneyline_col)
-                predicted_prob = row.get(prob_col)
-                implied_prob = row.get(implied_col)
-                edge = row.get(edge_col)
-                result = row.get("result")
+    # Vectorized Calculations
+    
+    # 1. Decimal Odds for calculation
+    # >= 0: 1 + ml/100
+    # < 0:  1 + 100/abs(ml)
+    ml = bets["moneyline"].astype(float)
+    decimal_odds = np.where(ml >= 0, 1 + ml/100.0, 1 + 100.0/ml.abs())
+    bets["implied_decimal"] = decimal_odds
+    
+    # 2. Determine Winner (won)
+    # Default to None (NaN)
+    bets["won"] = np.nan
+    
+    # Only calculate for games with a result
+    has_result = bets["result"].notna()
+    
+    if has_result.any():
+        # Logic:
+        # If result == side -> Win
+        # If side == 'draw' and result in ('tie', 'draw') -> Win
+        # Else (if has_result) -> Loss
+        
+        result_col = bets.loc[has_result, "result"]
+        side_col = bets.loc[has_result, "side"]
+        
+        # Direct match (home==home, away==away)
+        is_direct_win = (result_col == side_col)
+        
+        # Draw match
+        is_draw_win = (side_col == "draw") & result_col.isin(["tie", "draw"])
+        
+        # Combined win condition
+        is_win = Is_direct_win = is_direct_win | is_draw_win
+        
+        bets.loc[has_result, "won"] = is_win
 
-                if result in ("tie", "draw"):
-                    won = False
-                elif result in ("home", "away"):
-                    won = result == side
-                else:
-                    won = None
+    # 3. Calculate Profit
+    # If won is True: stake * (decimal - 1)
+    # If won is False: -stake
+    # If won is NaN: NaN
+    
+    # Initialize profit with NaN (or 0.0? Original profit logic implies NaN for pending?)
+    # Original _bet_profit returns -stake for loss, profit for win.
+    
+    profit = pd.Series(np.nan, index=bets.index)
+    
+    # Win mask
+    mask_win = (bets["won"] == True)
+    profit[mask_win] = stake * (decimal_odds[mask_win] - 1)
+    
+    # Loss mask
+    mask_loss = (bets["won"] == False)
+    profit[mask_loss] = -stake
+    
+    bets["profit"] = profit
+    
+    # Stake column (only if resolved? OR always? Original code: stake if won is not None else np.nan)
+    bets["stake"] = np.where(bets["won"].notna(), stake, np.nan)
 
-            profit = _bet_profit(float(moneyline) if moneyline is not None else np.nan, stake, won)
-
-            records.append(
-                {
-                    "game_id": row.get("game_id"),
-                    "side": side,
-                    "team": team,
-                    "opponent": opponent,
-                    "league": row.get("league"),
-                    "home_team_name": home_full,
-                    "away_team_name": away_full,
-                    "moneyline": float(moneyline) if moneyline is not None else np.nan,
-                    "predicted_prob": float(predicted_prob) if predicted_prob is not None else np.nan,
-                    "implied_prob": float(implied_prob) if implied_prob is not None else np.nan,
-                    "edge": float(edge) if edge is not None else np.nan,
-                    "result": result,
-                    "won": won,
-                    "profit": profit,
-                    "stake": stake if won is not None else np.nan,
-                    "commence_time": row.get("commence_time"),
-                    "predicted_at": row.get("predicted_at"),
-                    "settled_at": row.get("result_updated_at") if "result_updated_at" in row.index else row.get("commence_time"),
-                    "home_score": row.get("home_score"),
-                    "away_score": row.get("away_score"),
-                    "implied_decimal": _american_to_decimal(float(moneyline)) if moneyline is not None else np.nan,
-                }
-            )
-
-    bets = pd.DataFrame(records)
-    if not bets.empty:
-        # Convert to datetime but don't convert timezone yet - we'll do that after sorting
+    # 4. Dates
+    if "commence_time" in bets.columns:
         bets["commence_time"] = _to_datetime(bets["commence_time"])
+        
+    if "predicted_at" in bets.columns:
         bets["predicted_at"] = _to_datetime(bets["predicted_at"])
-        # Handle settled_at - use result_updated_at if available, otherwise commence_time
-        if "result_updated_at" in bets.columns:
-            bets["settled_at"] = _to_datetime(bets["result_updated_at"])
-        else:
-            bets["settled_at"] = bets["commence_time"].copy()
+        
+    # Settled At
+    if "result_updated_at" in bets.columns:
+         bets["settled_at"] = _to_datetime(bets["result_updated_at"])
+         # Fill missing settled_at with commence_time
+         bets["settled_at"] = bets["settled_at"].fillna(bets["commence_time"])
+    elif "commence_time" in bets.columns:
+         bets["settled_at"] = bets["commence_time"].copy()
+
     return bets
 
 
@@ -570,7 +580,6 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
         "game_id",
         "league",
         "commence_time",
-
         "total_line",
         "over_moneyline",
         "under_moneyline",
@@ -586,89 +595,122 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
 
     missing = [col for col in required if col not in df.columns]
     if missing:
-        LOGGER.warning("Totals expansion skipped, missing columns: %s", missing)
+        # LOGGER.warning("Totals expansion skipped, missing columns: %s", missing)
         return pd.DataFrame()
 
-    records: list[dict[str, object]] = []
-    for _, row in df.iterrows():
-        line = row.get("total_line")
-        over_ml = row.get("over_moneyline")
-        under_ml = row.get("under_moneyline")
-        if pd.isna(line) or pd.isna(over_ml) or pd.isna(under_ml):
-            continue
+    # Common columns
+    common_cols = [c for c in [
+        "game_id", "league", "commence_time", "model_type", "result", 
+        "home_score", "away_score", "predicted_at", "total_line",
+        "home_team", "away_team", "predicted_total_points"
+    ] if c in df.columns]
 
-        for side in ("over", "under"):
-            price = row.get(f"{side}_moneyline")
-            pred = row.get(f"{side}_predicted_prob")
-            implied = row.get(f"{side}_implied_prob")
-            edge = row.get(f"{side}_edge")
+    dfs = []
+    
+    # --- OVER ---
+    over_mapping = {
+        "over_moneyline": "moneyline",
+        "over_predicted_prob": "predicted_prob",
+        "over_implied_prob": "implied_prob",
+        "over_edge": "edge"
+    }
+    over_src = [c for c in over_mapping.keys() if c in df.columns]
+    df_over = df[common_cols + over_src].rename(columns=over_mapping)
+    df_over["side"] = "over"
+    dfs.append(df_over)
+    
+    # --- UNDER ---
+    under_mapping = {
+        "under_moneyline": "moneyline",
+        "under_predicted_prob": "predicted_prob",
+        "under_implied_prob": "implied_prob",
+        "under_edge": "edge"
+    }
+    under_src = [c for c in under_mapping.keys() if c in df.columns]
+    df_under = df[common_cols + under_src].rename(columns=under_mapping)
+    df_under["side"] = "under"
+    dfs.append(df_under)
+    
+    # Combine
+    totals = pd.concat(dfs, ignore_index=True)
+    
+    # Filter valid
+    totals = totals.dropna(subset=["moneyline"])
+    totals = totals[totals["moneyline"] != 0]
+    
+    if totals.empty:
+        return pd.DataFrame()
 
-            actual_total = None
-            if pd.notna(row.get("home_score")) and pd.notna(row.get("away_score")):
-                actual_total = float(row.get("home_score") + row.get("away_score"))
+    # Clean team names (vectorized)
+    if "home_team" in totals.columns:
+        totals["home_team"] = totals["home_team"].astype(str).str.replace(r"^Sv ", "", regex=True)
+    if "away_team" in totals.columns:
+        totals["away_team"] = totals["away_team"].astype(str).str.replace(r"^Sv ", "", regex=True)
 
-            # Only calculate result if the game is actually finished (has a result in the source data)
-            is_final = pd.notna(row.get("result"))
-
-            if actual_total is None or not is_final:
-                won = None
-            else:
-                if actual_total > line:
-                    winner = "over"
-                elif actual_total < line:
-                    winner = "under"
-                else:
-                    winner = None
-                won = winner == side if winner is not None else None
-
-            profit = _bet_profit(float(price), stake, won)
-            description = f"{side.title()} {line:.1f}" if pd.notna(line) else side.title()
-
-            # Get full team names
-            home_raw = row.get("home_team")
-            if isinstance(home_raw, str) and home_raw.startswith("Sv "):
-                home_raw = home_raw[3:]
-            
-            away_raw = row.get("away_team")
-            if isinstance(away_raw, str) and away_raw.startswith("Sv "):
-                away_raw = away_raw[3:]
-
-            home_full = get_full_team_name(row.get("league"), home_raw)
-            away_full = get_full_team_name(row.get("league"), away_raw)
-
-            records.append(
-                {
-                    "game_id": row.get("game_id"),
-                    "league": row.get("league"),
-                    "home_team": home_full or home_raw,
-                    "away_team": away_full or away_raw,
-                    "side": side,
-                    "description": description,
-                    "total_line": float(line),
-                    "moneyline": float(price) if price is not None else np.nan,
-                    "predicted_prob": float(pred) if pred is not None else np.nan,
-                    "implied_prob": float(implied) if implied is not None else np.nan,
-                    "edge": float(edge) if edge is not None else np.nan,
-                    "won": won,
-                    "profit": profit,
-                    "stake": stake if won is not None else np.nan,
-                    "commence_time": row.get("commence_time"),
-                    "predicted_at": row.get("predicted_at"),
-                    "settled_at": row.get("result_updated_at") if "result_updated_at" in row.index else row.get("commence_time"),
-                    "total_points": actual_total,
-                    "predicted_total_points": row.get("predicted_total_points"),
-                    "home_score": row.get("home_score"),
-                    "away_score": row.get("away_score"),
-                    "result": row.get("result"),
-                }
-            )
-
-    totals_df = pd.DataFrame(records)
-    if not totals_df.empty:
-        totals_df["commence_time"] = _to_datetime(totals_df["commence_time"])
-        totals_df["predicted_at"] = _to_datetime(totals_df["predicted_at"])
-        totals_df["settled_at"] = _to_datetime(totals_df["settled_at"])
-    return totals_df
+    # Calculate Actual Total
+    totals["total_points"] = pd.to_numeric(totals["home_score"], errors='coerce') + pd.to_numeric(totals["away_score"], errors='coerce')
+    totals["actual_total"] = totals["total_points"] # Keep this for internal use if needed, or just use total_points
+    
+    # Calculate Winner
+    totals["winner"] = np.nan
+    
+    # We only grade as "Over/Under/Push" if the game is FINAL.
+    # We use 'result' column (which is only set if status='final') as the flag.
+    mask_final = totals["result"].notna() if "result" in totals.columns else pd.Series(False, index=totals.index)
+    
+    mask_valid = totals["total_points"].notna() & totals["total_line"].notna() & mask_final
+    
+    if mask_valid.any():
+        valid = totals.loc[mask_valid]
+        mask_over = (valid["total_points"] > valid["total_line"])
+        mask_under = (valid["total_points"] < valid["total_line"])
+        mask_push = (valid["total_points"] == valid["total_line"])
+        
+        totals.loc[mask_valid & mask_over, "winner"] = "over"
+        totals.loc[mask_valid & mask_under, "winner"] = "under"
+        totals.loc[mask_valid & mask_push, "winner"] = "push"
+        
+    # Calculate Won
+    totals["won"] = np.nan
+    # Only grade Won/Lost for decisive results (Over/Under)
+    # Pushes remain won=NaN (Void)
+    mask_decided = totals["winner"].isin(["over", "under"])
+    if mask_decided.any():
+        totals.loc[mask_decided, "won"] = (totals.loc[mask_decided, "winner"] == totals.loc[mask_decided, "side"])
+        
+    # Decimal Odds
+    ml = totals["moneyline"].astype(float)
+    decimal = np.where(ml >= 0, 1 + ml/100.0, 1 + 100.0/ml.abs())
+    totals["implied_decimal"] = decimal
+    
+    # Profit
+    summary_profit = pd.Series(np.nan, index=totals.index)
+    mask_win = (totals["won"] == True)
+    mask_loss = (totals["won"] == False)
+    mask_push_result = (totals["winner"] == "push")
+    
+    summary_profit[mask_win] = stake * (decimal[mask_win] - 1)
+    summary_profit[mask_loss] = -stake
+    summary_profit[mask_push_result] = 0.0 # Push returns stake (profit=0)
+    totals["profit"] = summary_profit
+    
+    totals["stake"] = np.where(totals["won"].notna(), stake, np.nan)
+    
+    # Description
+    if "side" in totals.columns and "total_line" in totals.columns:
+         totals["description"] = totals["side"].str.title() + " " + totals["total_line"].astype(str)
+    
+    # Dates
+    if "commence_time" in totals.columns:
+        totals["commence_time"] = _to_datetime(totals["commence_time"])
+    if "predicted_at" in totals.columns:
+        totals["predicted_at"] = _to_datetime(totals["predicted_at"])
+    if "settled_at" in totals.columns:
+        totals["settled_at"] = _to_datetime(totals["settled_at"])
+    elif "commence_time" in totals.columns:
+        totals["settled_at"] = totals["commence_time"].copy()
+        
+    return totals
 
 
 def calculate_summary_metrics(
@@ -676,6 +718,7 @@ def calculate_summary_metrics(
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    bets: Optional[pd.DataFrame] = None,
 ) -> SummaryMetrics:
     if df.empty:
         return SummaryMetrics(
@@ -696,7 +739,8 @@ def calculate_summary_metrics(
             bankroll_growth=None,
         )
 
-    bets = _expand_predictions(df, stake=stake)
+    if bets is None:
+        bets = _expand_predictions(df, stake=stake)
     
     if bets.empty or "won" not in bets.columns:
         return SummaryMetrics(
@@ -770,11 +814,24 @@ def calculate_summary_metrics(
     )
 
 
+def _normalize_team_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize team names in the dataframe."""
+    if df.empty:
+        return df
+    df = df.copy()
+    if "home_team" in df.columns:
+        df["home_team"] = df["home_team"].astype(str).str.strip()
+    if "away_team" in df.columns:
+        df["away_team"] = df["away_team"].astype(str).str.strip()
+    return df
+
+
 def calculate_totals_metrics(
     df: pd.DataFrame,
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    totals: Optional[pd.DataFrame] = None,
 ) -> SummaryMetrics:
     if df.empty:
         return SummaryMetrics(
@@ -795,7 +852,8 @@ def calculate_totals_metrics(
             bankroll_growth=None,
         )
 
-    totals = _expand_totals(df, stake=stake)
+    if totals is None:
+        totals = _expand_totals(df, stake=stake)
     if totals.empty or "edge" not in totals.columns:
         total_predictions = int(df["total_line"].notna().sum()) if "total_line" in df.columns else 0
         completed_games = int(df["home_score"].notna().sum()) if "home_score" in df.columns else 0
@@ -894,8 +952,10 @@ def get_performance_over_time(
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
     freq: str = "D",
+    bets: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    bets = _expand_predictions(df, stake=stake)
+    if bets is None:
+        bets = _expand_predictions(df, stake=stake)
     if bets.empty or "won" not in bets.columns:
         return pd.DataFrame(columns=["date", "bets", "wins", "profit", "roi", "win_rate", "cumulative_profit"])
 
@@ -931,8 +991,10 @@ def get_totals_performance_over_time(
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
     freq: str = "D",
+    totals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    totals = _expand_totals(df, stake=stake)
+    if totals is None:
+        totals = _expand_totals(df, stake=stake)
     if totals.empty or "won" not in totals.columns:
         return pd.DataFrame(columns=["date", "bets", "wins", "profit", "roi", "win_rate", "cumulative_profit"])
 
@@ -1045,12 +1107,14 @@ def get_recommended_bets(
     df: pd.DataFrame,
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    bets: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    bets = _expand_predictions(df)
+    if bets is None:
+        bets = _expand_predictions(df)
     if bets.empty or "won" not in bets.columns:
         return pd.DataFrame()
 
-    upcoming = bets[bets["won"].isna()]
+    upcoming = bets[bets["won"].isna()].copy()
     
     # Filter out past games
     now = pd.Timestamp.now(tz="UTC")
@@ -1086,8 +1150,10 @@ def get_performance_by_threshold(
     *,
     thresholds: Optional[Iterable[float]] = None,
     stake: float = DEFAULT_STAKE,
+    bets: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    bets = _expand_predictions(df, stake=stake)
+    if bets is None:
+        bets = _expand_predictions(df, stake=stake)
     if bets.empty or "won" not in bets.columns:
         return pd.DataFrame(columns=["bucket", "bets", "wins", "win_rate", "profit", "roi"])
     
@@ -1126,8 +1192,10 @@ def get_totals_performance_by_threshold(
     *,
     thresholds: Optional[Iterable[float]] = None,
     stake: float = DEFAULT_STAKE,
+    totals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    totals = _expand_totals(df, stake=stake)
+    if totals is None:
+        totals = _expand_totals(df, stake=stake)
     if totals.empty or "won" not in totals.columns:
         return pd.DataFrame(columns=["bucket_label", "bets", "wins", "win_rate", "profit", "roi"])
 
@@ -1264,6 +1332,7 @@ def get_completed_bets(
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    bets: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Get all completed bets with results, win/loss, and profit.
     
@@ -1279,7 +1348,8 @@ def get_completed_bets(
         now = datetime.now(timezone.utc)
         df = df.loc[(commence_times.notna()) & (commence_times <= now)].copy()
 
-    bets = _expand_predictions(df, stake=stake)
+    if bets is None:
+        bets = _expand_predictions(df, stake=stake)
     if bets.empty or "won" not in bets.columns:
         return pd.DataFrame()
 
@@ -1453,12 +1523,14 @@ def get_overunder_recommendations(
     df: pd.DataFrame,
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    totals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    totals = _expand_totals(df)
+    if totals is None:
+        totals = _expand_totals(df)
     if totals.empty or "edge" not in totals.columns:
         return pd.DataFrame()
 
-    upcoming = totals[totals["won"].isna()]
+    upcoming = totals[totals["won"].isna()].copy()
     
     # Filter out past games
     now = pd.Timestamp.now(tz="UTC")
@@ -1514,8 +1586,10 @@ def get_overunder_completed(
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    totals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    totals = _expand_totals(df, stake=stake)
+    if totals is None:
+        totals = _expand_totals(df, stake=stake)
     if totals.empty:
         return pd.DataFrame()
         
@@ -1523,7 +1597,16 @@ def get_overunder_completed(
     # won.notna() means completed. won.isna() means pending/ongoing.
     # We need to check commence_time for ongoing games.
     
-    mask = totals["edge"].notna() & (totals["edge"] >= edge_threshold)
+    # For completed games (won.notna()), we want to show them even if edge is missing (historical data)
+    # For pending games, we enforce the edge threshold
+    
+    is_completed = totals["won"].notna()
+    has_edge = totals["edge"].notna() & (totals["edge"] >= edge_threshold)
+    
+    # Show if:
+    # 1. It has a valid edge (standard case)
+    # We no longer include all completed games regardless of edge, as we have backfilled data.
+    mask = has_edge
     
     if "commence_time" in totals.columns:
         # Ensure UTC comparison
@@ -1748,6 +1831,7 @@ def get_performance_by_league(
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    bets: Optional[pd.DataFrame] = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Calculate cumulative profit over time for each league.
@@ -1755,7 +1839,8 @@ def get_performance_by_league(
     if df.empty:
         return {}
         
-    bets = _expand_predictions(df, stake=stake)
+    if bets is None:
+        bets = _expand_predictions(df, stake=stake)
     if bets.empty or "won" not in bets.columns:
         return {}
         
@@ -1808,6 +1893,7 @@ def get_totals_performance_by_league(
     *,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     stake: float = DEFAULT_STAKE,
+    totals: Optional[pd.DataFrame] = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Calculate cumulative profit over time for each league for totals (over/under) bets.
@@ -1815,7 +1901,8 @@ def get_totals_performance_by_league(
     if df.empty:
         return {}
         
-    totals = _expand_totals(df, stake=stake)
+    if totals is None:
+        totals = _expand_totals(df, stake=stake)
     if totals.empty or "won" not in totals.columns:
         return {}
         
@@ -1979,6 +2066,10 @@ def build_prediction_comparison(df: pd.DataFrame) -> pd.DataFrame:
         else:
             outcome = "Both wrong"
 
+        if book_side is None:
+            # Skip games where we can't determine what the book thinks (e.g. no odds)
+            continue
+            
         records.append(
             {
                 "game_id": row.get("game_id"),
@@ -2291,6 +2382,72 @@ def get_game_odds(game_id: str) -> pd.DataFrame:
     return df
 
 
+def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
+    """Get all sportsbook odds for multiple game IDs in a single batch query."""
+    if not game_ids:
+        return pd.DataFrame()
+        
+    # unique ids only
+    game_ids = list(set(game_ids))
+    
+    # Logic to resolve DB IDs from prediction IDs if necessary
+    # For now, assume prediction IDs map to DB IDs or are DB IDs.
+    # The existing single get_game_odds assumes this.
+    # If we need mapping we'd do it here in batch.
+    
+    placeholders = ",".join("?" for _ in game_ids)
+    
+    query = f"""
+        WITH latest_snapshot AS (
+            SELECT
+                o.game_id,
+                o.book_id,
+                o.market,
+                o.outcome,
+                MAX(s.fetched_at_utc) AS max_fetched
+            FROM odds o
+            JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+            WHERE o.game_id IN ({placeholders})
+            GROUP BY o.game_id, o.book_id, o.market, o.outcome
+        )
+        SELECT
+            o.game_id,
+            o.market,
+            o.outcome,
+            o.line,
+            o.price_american AS moneyline,
+            b.name AS book,
+            s.fetched_at_utc
+        FROM odds o
+        JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+        JOIN books b ON o.book_id = b.book_id
+        JOIN latest_snapshot ls
+          ON ls.game_id = o.game_id
+         AND ls.book_id = o.book_id
+         AND ls.market = o.market
+         AND ls.outcome = o.outcome
+         AND ls.max_fetched = s.fetched_at_utc
+        WHERE o.game_id IN ({placeholders})
+          AND o.price_american IS NOT NULL
+    """
+    
+    params = game_ids + game_ids # twice because of WITH clause and main query
+    
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+        
+    if not rows:
+        return pd.DataFrame()
+        
+    df = pd.DataFrame(rows, columns=["game_id", "market", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    
+    # Add book_url
+    if "book" in df.columns:
+        df["book_url"] = df["book"].apply(lambda x: get_sportsbook_url(x) if pd.notna(x) else "")
+        
+    return df
+
+
 def get_accuracy_over_time_by_league(comparison_df: pd.DataFrame) -> pd.DataFrame:
     """Calculate cumulative accuracy over time for each league, aggregated by day."""
     if comparison_df.empty or "actual_winner_side" not in comparison_df.columns:
@@ -2431,4 +2588,40 @@ __all__ = [
     "get_version_options",
     "get_default_version_value",
     "filter_by_version",
+    "get_all_games",
 ]
+
+
+def get_all_games(limit: int = 2000) -> pd.DataFrame:
+    """
+    Fetch games table with resolved team names and results.
+    
+    Args:
+        limit: Maximum number of rows to return (default 2000 to prevent UI performance issues).
+    """
+    with connect() as conn:
+        query = f"""
+            SELECT 
+                g.*,
+                s.league,
+                ht.name as home_team,
+                at.name as away_team,
+                gr.home_score,
+                gr.away_score,
+                gr.home_moneyline_close,
+                gr.away_moneyline_close,
+                gr.spread_close,
+                gr.total_close,
+                gr.source_version
+            FROM games g
+            JOIN sports s ON g.sport_id = s.sport_id
+            LEFT JOIN teams ht ON g.home_team_id = ht.team_id
+            LEFT JOIN teams at ON g.away_team_id = at.team_id
+            LEFT JOIN game_results gr ON g.game_id = gr.game_id
+            ORDER BY g.start_time_utc DESC
+            LIMIT {limit}
+        """
+        df = pd.read_sql_query(query, conn)
+        
+    return df
+

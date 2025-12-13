@@ -1,13 +1,12 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Runs the full training pipeline: Ingestion -> Dataset Build -> Model Training.
+    Runs the training pipeline: Dataset Build -> Model Training.
     Logs all output to logs/train_pipeline_YYYYMMDD_HHmmss.log.
 #>
 
 param(
-    [switch]$SoccerOnly = $false,
-    [switch]$SkipIngestion = $false
+    [switch]$SoccerOnly = $false
 )
 
 $ErrorActionPreference = "Continue"
@@ -47,25 +46,8 @@ if (-not $targetLeagues.Count) {
 
 Write-Log ("Processing leagues: " + ($targetLeagues -join ", "))
 
-# Step 1: Ingestion
-if (-not $SkipIngestion) {
-    Write-Log "Step 1: Data Ingestion..."
-    try {
-        $leagueArgs = $targetLeagues -join " "
-        Write-Log "Running smart ingestion for: $leagueArgs"
-        & poetry run python -m src.data.ingest_manager --leagues $targetLeagues 2>&1 | ForEach-Object { "$_" }
-        if ($LASTEXITCODE -ne 0) { throw "Ingest manager failed" }
-        
-    } catch {
-        Write-Log "ERROR: Data ingestion failed: $_"
-        exit 1
-    }
-} else {
-    Write-Log "Skipping data ingestion (SkipIngestion enabled)"
-}
-
-# Step 2: Build Datasets
-Write-Log "Step 2: Building Datasets..."
+# Step 1: Build Datasets
+Write-Log "Step 1: Building Datasets..."
 try {
     # Define seasons to include in training
     # Using a broad range to ensure historical data is captured
@@ -87,8 +69,8 @@ try {
     exit 1
 }
 
-# Step 3: Train Models
-Write-Log "Step 3: Training Models..."
+# Step 2: Train Models
+Write-Log "Step 2: Training Models..."
 try {
     $modelTypes = @("ensemble", "random_forest", "gradient_boosting")
     

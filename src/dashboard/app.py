@@ -43,6 +43,7 @@ from .data import (
     get_accuracy_over_time_by_league,
     get_accuracy_difference_over_time_by_league,
     get_cumulative_accuracy_by_model,
+    get_all_games,
 )
 from .components import (
     bankroll_cards,
@@ -73,6 +74,7 @@ from .components import (
     accuracy_by_league_chart,
     accuracy_difference_by_league_chart,
     cumulative_accuracy_by_model_chart,
+    raw_data_table,
 )
 
 EXTERNAL_STYLESHEETS = [dbc.themes.FLATLY]
@@ -254,6 +256,7 @@ def _navbar(pathname: Optional[str]) -> dbc.Nav:
             dbc.NavLink("Moneyline", href="/", active=pathname == "/" or pathname == ""),
             dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
             dbc.NavLink("Over/Under", href="/overunder", active=pathname == "/overunder"),
+            dbc.NavLink("Raw Data", href="/data", active=pathname == "/data"),
         ],
         pills=True,
         className="mb-4 gap-2",
@@ -585,8 +588,37 @@ def _comparison_layout(pathname: Optional[str]) -> dbc.Container:
             html.Br(),
             dcc.Loading(html.Div(id="comparison-table"), type="circle"),
         ],
+    )
+
+
+def _data_layout(pathname: Optional[str]) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            dbc.Row(
+                [
+                    dbc.Col(html.H2("Raw Data Browser"), md=10),
+                    dbc.Col(
+                         dbc.Button("Refresh Data", id="refresh-data-btn", color="secondary"),
+                         md=2,
+                         className="text-end"
+                    ),
+                ],
+                className="align-items-center mb-3"
+            ),
+            dcc.Tabs(
+                id="data-tabs",
+                value="games",
+                children=[
+                    dcc.Tab(label="All Games", value="games"),
+                ],
+            ),
+            html.Br(),
+            dcc.Loading(html.Div(id="raw-data-content"), type="circle"),
+        ],
         fluid=True,
     )
+
 
 
 def _overunder_layout(pathname: Optional[str]) -> dbc.Container:
@@ -798,6 +830,8 @@ def render_page(pathname: Optional[str]):
         return _predictions_layout(pathname)
     if pathname == "/overunder":
         return _overunder_layout(pathname)
+    if pathname == "/data":
+        return _data_layout(pathname)
     return _dashboard_layout(pathname)
 
 
@@ -806,9 +840,11 @@ def render_page(pathname: Optional[str]):
     Output("last-updated-text", "children"),
     Input("refresh-button", "n_clicks"),
     Input("model-type-dropdown", "value"),
+    Input("date-range-picker", "start_date"),
+    Input("date-range-picker", "end_date"),
     prevent_initial_call=False,
 )
-def refresh_data(n_clicks: Optional[int], model_type: str) -> tuple[str, str]:
+def refresh_data(n_clicks: Optional[int], model_type: str, start_date: str, end_date: str) -> tuple[str, str]:
     """Refresh the cached predictions when the manual refresh button is clicked or model type changes."""
     force_refresh = bool(n_clicks)
     # If triggered by dropdown (n_clicks is None or unchanged), we might not need force_refresh, 
@@ -818,7 +854,13 @@ def refresh_data(n_clicks: Optional[int], model_type: str) -> tuple[str, str]:
     # Use a default if model_type is None (initial load)
     model_type = model_type or "ensemble"
     
-    df = load_forward_test_data(force_refresh=force_refresh, league=None, model_type=model_type)
+    df = load_forward_test_data(
+        force_refresh=force_refresh, 
+        league=None, 
+        model_type=model_type,
+        start_date=start_date,
+        end_date=end_date
+    )
     metrics = calculate_summary_metrics(df)
     return _df_to_json(df), _format_timestamp(metrics.last_updated)
 
@@ -906,9 +948,60 @@ def update_dashboard(
     league: str,
     version: str,
 ):
-    df = _df_from_json(data_json)
-    df = filter_by_version(df, version)
+    import time
+    t0 = time.time()
     
+    # Load ALL models at once to avoid repeated DB calls and expansions
+    # We ignore the data_json passed from the store because we want to batch load everything newly here
+    # This is a deviation from the previous architecture but necessary for performance
+    
+    all_models = ["ensemble", "random_forest", "gradient_boosting"]
+    # We don't have model_type in arguments here! 
+    # Wait, the callback signature DOES NOT have model_type. 
+    # It has start_date, end_date, edge_threshold, period, league, version.
+    # Ah, the model_type is NOT passed to update_dashboard?
+    # Let me check the signature.
+    # The callback inputs are:
+    # Input("forward-data-store", "data"),
+    # Input("date-range-picker", "start_date"),
+    # Input("date-range-picker", "end_date"),
+    # Input("edge-threshold-slider", "value"),
+    # Input("period-select", "value"),
+    # Input("league-select", "value"),
+    # Input("version-select", "value"),
+    
+    # It does NOT take model_type. The main dashboard is implicitly for "ensemble" or whatever was loaded?
+    # Actually, the main dashboard usually shows "ensemble" vs books.
+    # But wait, looking at my previous edit attempt (Step 9226), I used `model_type` variable.
+    # Where did `model_type` come from? It wasn't in the arguments!
+    # That explains why it might have failed or been weird.
+    
+    # The main dashboard ("Overview") is primarily for the Ensemble model (or whatever data_json contained).
+    # But now we want to load everything.
+    
+    # Let's assume the main view is for "ensemble".
+    model_type = "ensemble"
+    
+    all_models = ["ensemble", "random_forest", "gradient_boosting"]
+    
+    df_all = load_forward_test_data(
+        force_refresh=False, 
+        league=None, 
+        model_type=all_models,
+        start_date=start_date,
+        end_date=end_date
+    )
+    df_all = filter_by_version(df_all, version)
+    
+    # Filter for the SELECTED model (Ensemble) for the main dashboard view
+    if df_all.empty:
+        df = pd.DataFrame()
+    else:
+        df = df_all[df_all["model_type"] == model_type].copy()
+    
+    t1 = time.time()
+    print(f"DEBUG: SQL Batch Load & Version Filter: {t1-t0:.4f}s")
+
     # Add or fix league column if missing/None (for backward compatibility)
     if not df.empty:
         if "league" not in df.columns:
@@ -964,46 +1057,95 @@ def update_dashboard(
                 df["league"] = df["league"].fillna("NBA")
                 df.loc[df["league"].astype(str).str.lower() == "none", "league"] = "NBA"
     
-    # Filter by league if not "all"
-    if league != "all" and not df.empty and "league" in df.columns:
+    # Apply league filters to MAIN df
+    if not df.empty and league != "all" and "league" in df.columns:
         # Handle None/NaN values in league column
         df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
     
     df = _filter_by_date(df, start_date, end_date)
+    
+    t2 = time.time()
+    print(f"DEBUG: Logic & Filters: {t2-t1:.4f}s")
 
-    metrics: SummaryMetrics = calculate_summary_metrics(df, edge_threshold=edge_threshold)
-    performance_df = get_performance_over_time(df, edge_threshold=edge_threshold)
-    threshold_df = get_performance_by_threshold(df, stake=DEFAULT_STAKE)
-    recommended_df = get_recommended_bets(df, edge_threshold=edge_threshold)
-    completed_bets_df = get_completed_bets(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    # OPTIMIZATION: Expand predictions ONCE for ALL models
+    # This avoids repeating the expensive expansion logic for performance/threshold/rec/completed calculations
+    # AND for the multi-model comparison loop
+    from .data import _expand_predictions
+    t_exp = time.time()
+    
+    bets_all = None
+    if not df_all.empty:
+        bets_all = _expand_predictions(df_all, stake=DEFAULT_STAKE)
+        
+    # Slice bets for the selected model
+    bets = None
+    if bets_all is not None and not bets_all.empty:
+         bets = bets_all[bets_all["model_type"] == (model_type or "ensemble")].copy()
+         
+         # Apply league filter to bets as well (since we filtered df above)
+         if league != "all" and "league" in bets.columns:
+             bets = bets[bets["league"].notna() & (bets["league"].str.upper() == league.upper())].copy()
+             
+    print(f"DEBUG: _expand_predictions (once for ALL models): {time.time()-t_exp:.4f}s")
+    
+    metrics: SummaryMetrics = calculate_summary_metrics(df, edge_threshold=edge_threshold, bets=bets)
+    t3 = time.time()
+    print(f"DEBUG: calculate_summary_metrics: {t3-t2:.4f}s")
+
+    performance_df = get_performance_over_time(df, edge_threshold=edge_threshold, bets=bets)
+    t4 = time.time()
+    print(f"DEBUG: get_performance_over_time: {t4-t3:.4f}s")
+    
+    threshold_df = get_performance_by_threshold(df, stake=DEFAULT_STAKE, bets=bets)
+    recommended_df = get_recommended_bets(df, edge_threshold=edge_threshold, bets=bets)
+    completed_bets_df = get_completed_bets(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, bets=bets)
+    
+    t5 = time.time()
+    print(f"DEBUG: threshold/rec/completed: {t5-t4:.4f}s")
     
     # Load performance data for all models for the multi-model cumulative profit chart
+    # NOW OPTIMIZED: Reuse the already loaded and expanded `bets_all` dataframe
     model_performance = {}
-    for model_type in ["ensemble", "random_forest", "gradient_boosting"]:
+    for model_type_iter in all_models:
         try:
-            model_df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type)
-            model_df = filter_by_version(model_df, version)
+            # Slice from bets_all instead of reloading/expanding
+            if bets_all is None or bets_all.empty:
+                model_perf = pd.DataFrame()
+            else:
+                model_bets = bets_all[bets_all["model_type"] == model_type_iter].copy()
+                
+                # Apply league filter
+                if league != "all" and not model_bets.empty and "league" in model_bets.columns:
+                    model_bets = model_bets[model_bets["league"].notna() & (model_bets["league"].astype(str).str.upper() == league.upper())].copy()
+                
+                # We already filtered dates in SQL load
+                
+                # Get performance using the sliced bets
+                # Note: We need a corresponding 'df' for get_performance_over_time signature, 
+                # but since we pass 'bets', the 'df' is ignored for calculation.
+                # efficiently we can pass an empty df or the sliced df (sliced df is safer)
+                model_df_slice = df_all[df_all["model_type"] == model_type_iter]
+                model_perf = get_performance_over_time(model_df_slice, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, bets=model_bets)
+                
+            model_performance[model_type_iter] = model_perf
             
-            # Apply same filters as main data
-            if league != "all" and not model_df.empty and "league" in model_df.columns:
-                model_df = model_df[model_df["league"].notna() & (model_df["league"].astype(str).str.upper() == league.upper())].copy()
-            
-            model_df = _filter_by_date(model_df, start_date, end_date)
-            
-            # Get performance over time for this model
-            model_perf = get_performance_over_time(model_df, edge_threshold=edge_threshold)
-            model_performance[model_type] = model_perf
-        except Exception:
-            # If model data doesn't exist or fails to load, skip it
-            model_performance[model_type] = pd.DataFrame()
+        except Exception as e:
+            print(f"DEBUG: Error processing model {model_type_iter}: {e}")
+            model_performance[model_type_iter] = pd.DataFrame()
+
+    t6 = time.time()
+    print(f"DEBUG: Multi-model loop (optimized): {t6-t5:.4f}s")
 
     # Calculate performance by league for the current model
-    league_performance = get_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    league_performance = get_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, bets=bets)
 
     book_odds_json = ""
     recommended_display_df = recommended_df
     if not recommended_df.empty:
+        t_odds = time.time()
         book_odds_df = get_moneylines_for_recommended(recommended_df)
+        print(f"DEBUG: get_moneylines_for_recommended: {time.time()-t_odds:.4f}s")
+        
         if not book_odds_df.empty:
             recommended_df = _apply_best_moneylines(recommended_df, book_odds_df)
             book_odds_json = book_odds_df.to_json(date_format="iso", orient="records")
@@ -1015,6 +1157,9 @@ def update_dashboard(
             )
     else:
         book_odds_json = ""
+    
+    t7 = time.time()
+    print(f"DEBUG: Total Update Time: {t7-t0:.4f}s")
 
     period_chart_component = components.empty_state("No performance data yet.")
     if not performance_df.empty:
@@ -1119,44 +1264,79 @@ def update_overunder_page(
     version: str, 
     edge_threshold: float
 ):
-    # Load data for the selected model type
-    df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type or "ensemble")
-    df = filter_by_version(df, version)
+    # Load ALL models at once to avoid repeated DB calls and expansions
+    all_models = ["ensemble", "random_forest", "gradient_boosting"]
+    if model_type and model_type not in all_models:
+        all_models.append(model_type)
+        
+    df_all = load_forward_test_data(
+        force_refresh=False, 
+        league=None, 
+        model_type=all_models,
+        start_date=start_date,
+        end_date=end_date
+    )
+    df_all = filter_by_version(df_all, version)
+    
+    # Filter for the SELECTED model for the main dashboard view
+    if df_all.empty:
+        df = pd.DataFrame()
+    else:
+        df = df_all[df_all["model_type"] == (model_type or "ensemble")].copy()
+    
     if not df.empty and league != "all" and "league" in df.columns:
         df = df[df["league"].notna() & (df["league"].astype(str).str.upper() == league.upper())].copy()
-    df = _filter_by_date(df, start_date, end_date)
 
     if df.empty:
         empty = components.empty_state("No totals data available yet.")
         return empty, empty, empty, empty, empty, empty, empty, empty, empty, empty, ""
-    metrics = calculate_totals_metrics(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
-    performance_df = get_totals_performance_over_time(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
-    threshold_df = get_totals_performance_by_threshold(df, stake=DEFAULT_STAKE)
-    recommended = get_overunder_recommendations(df, edge_threshold=edge_threshold)
-    completed = get_overunder_completed(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+        
+    # OPTIMIZATION: Expand totals ONCE for ALL models
+    from .data import _expand_totals
+    totals_all = None
+    if not df_all.empty:
+        totals_all = _expand_totals(df_all, stake=DEFAULT_STAKE)
+        
+    # Slice totals for the selected model
+    totals = None
+    if totals_all is not None and not totals_all.empty:
+        totals = totals_all[totals_all["model_type"] == (model_type or "ensemble")].copy()
+        
+        # Apply league filter
+        if league != "all" and "league" in totals.columns:
+            totals = totals[totals["league"].notna() & (totals["league"].str.upper() == league.upper())].copy()
+
+    metrics = calculate_totals_metrics(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=totals)
+    performance_df = get_totals_performance_over_time(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=totals)
+    threshold_df = get_totals_performance_by_threshold(df, stake=DEFAULT_STAKE, totals=totals)
+    recommended = get_overunder_recommendations(df, edge_threshold=edge_threshold, totals=totals)
+    completed = get_overunder_completed(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=totals)
     
     # Load performance data for all models for the multi-model cumulative profit chart
+    # NOW OPTIMIZED: Reuse the already loaded and expanded `totals_all` dataframe
     model_performance = {}
-    for model_type_iter in ["ensemble", "random_forest", "gradient_boosting"]:
+    for model_type_iter in all_models:
         try:
-            model_df = load_forward_test_data(force_refresh=False, league=None, model_type=model_type_iter)
-            model_df = filter_by_version(model_df, version)
-            
-            # Apply same filters as main data
-            if league != "all" and not model_df.empty and "league" in model_df.columns:
-                model_df = model_df[model_df["league"].notna() & (model_df["league"].astype(str).str.upper() == league.upper())].copy()
-            
-            model_df = _filter_by_date(model_df, start_date, end_date)
-            
-            # Get performance over time for this model
-            model_perf = get_totals_performance_over_time(model_df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+            # Slice from totals_all
+            if totals_all is None or totals_all.empty:
+                model_perf = pd.DataFrame()
+            else:
+                model_totals = totals_all[totals_all["model_type"] == model_type_iter].copy()
+                
+                # Apply league filter
+                if league != "all" and not model_totals.empty and "league" in model_totals.columns:
+                    model_totals = model_totals[model_totals["league"].notna() & (model_totals["league"].astype(str).str.upper() == league.upper())].copy()
+                
+                # Use sliced totals
+                model_df_slice = df_all[df_all["model_type"] == model_type_iter]
+                model_perf = get_totals_performance_over_time(model_df_slice, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=model_totals)
+                
             model_performance[model_type_iter] = model_perf
         except Exception:
-            # If model data doesn't exist or fails to load, skip it
             model_performance[model_type_iter] = pd.DataFrame()
 
     # Calculate performance by league for the current model (using totals-specific function)
-    league_performance = get_totals_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE)
+    league_performance = get_totals_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=totals)
 
     totals_odds_json = ""
     totals_odds_df = get_totals_odds_for_recommended(recommended)
@@ -1400,42 +1580,68 @@ def update_overunder_page(
                 suffixes=('', '_sportsbook')
             )
             
-            # Handle book column
-            if 'book' not in completed.columns:
-                completed['book'] = ""
-            if 'book_sportsbook' in completed.columns:
-                completed['book'] = completed['book_sportsbook'].fillna(completed['book'])
-                completed = completed.drop(columns=['book_sportsbook'], errors='ignore')
+            # Deduplicate columns to prevent indexing errors
+            completed = completed.loc[:, ~completed.columns.duplicated()]
 
-            # Handle moneyline column
-            if 'moneyline_sportsbook' in completed.columns:
-                completed['moneyline'] = completed['moneyline_sportsbook'].fillna(completed['moneyline'])
-                completed = completed.drop(columns=['moneyline_sportsbook'], errors='ignore')
+            # Determine if games have started (User Request: Freeze odds at kickoff)
+            now = pd.Timestamp.now(tz=DISPLAY_TIMEZONE)
+            
+            if 'commence_time' in completed.columns:
+                # Convert to datetime if not already
+                if not pd.api.types.is_datetime64_any_dtype(completed['commence_time']):
+                    completed['commence_time'] = pd.to_datetime(completed['commence_time'], errors='coerce', utc=True)
+                
+                # Convert to display timezone
+                commence_time_tz = completed['commence_time'].dt.tz_convert(DISPLAY_TIMEZONE)
+                
+                # Check if game is in the future (has not started)
+                is_future = commence_time_tz > now
+            else:
+                # Fallback: assume NOT future (freeze) to be safe
+                is_future = pd.Series(False, index=completed.index)
 
             # Handle line column
             line_col = 'line_sportsbook' if 'line_sportsbook' in completed.columns else 'line'
             if line_col in completed.columns:
-                # Ensure the source column is numeric too
                 completed[line_col] = pd.to_numeric(completed[line_col], errors="coerce")
-                
                 has_sportsbook_data = completed[line_col].notna()
-                completed.loc[has_sportsbook_data, 'total_line'] = completed.loc[has_sportsbook_data, line_col]
+                
+                # Ensure mask is 1D
+                if isinstance(has_sportsbook_data, pd.DataFrame):
+                    has_sportsbook_data = has_sportsbook_data.iloc[:, 0]
+                
+                # Update mask: Only update if we have data AND the game hasn't started
+                mask_update = has_sportsbook_data & is_future
+                
+                # Update line
+                completed.loc[mask_update, 'total_line'] = completed.loc[mask_update, line_col]
+                
+                # Update moneyline if available
+                if 'moneyline_sportsbook' in completed.columns:
+                    completed.loc[mask_update, 'moneyline'] = completed.loc[mask_update, 'moneyline_sportsbook']
+                
+                # Update book if available
+                if 'book_sportsbook' in completed.columns:
+                    completed.loc[mask_update, 'book'] = completed.loc[mask_update, 'book_sportsbook']
                 
                 # Regenerate description
                 if 'description' in completed.columns and 'side' in completed.columns:
-                    completed.loc[has_sportsbook_data, 'description'] = completed.loc[has_sportsbook_data].apply(
+                    completed.loc[mask_update, 'description'] = completed.loc[mask_update].apply(
                         lambda row: f"{row['side'].title()} {row['total_line']:.1f}" if pd.notna(row['total_line']) else row['side'].title(),
                         axis=1
                     )
                 
-                # Update team names
+                # Update team names (optional, but good to keep consistent)
                 if 'home_team_full' in completed.columns:
-                    completed.loc[has_sportsbook_data, 'home_team'] = completed.loc[has_sportsbook_data, 'home_team_full'].fillna(completed.loc[has_sportsbook_data, 'home_team'])
+                    completed.loc[mask_update, 'home_team'] = completed.loc[mask_update, 'home_team_full'].fillna(completed.loc[mask_update, 'home_team'])
                 if 'away_team_full' in completed.columns:
-                    completed.loc[has_sportsbook_data, 'away_team'] = completed.loc[has_sportsbook_data, 'away_team_full'].fillna(completed.loc[has_sportsbook_data, 'away_team'])
+                    completed.loc[mask_update, 'away_team'] = completed.loc[mask_update, 'away_team_full'].fillna(completed.loc[mask_update, 'away_team'])
 
-                # Drop the line column after using it
-                completed = completed.drop(columns=[line_col, 'home_team_full', 'away_team_full'], errors='ignore')
+            # Cleanup: Drop sportsbook columns now that we're done with them
+            cols_to_drop = ['book_sportsbook', 'moneyline_sportsbook', 'line_sportsbook', 'line', 'forward_game_id', 'outcome', 'home_team_full', 'away_team_full']
+            completed = completed.drop(columns=cols_to_drop, errors='ignore')
+
+
             
             # RE-CALCULATE WON and PROFIT based on new line and moneyline
             # We need to do this because the line might have changed from the predicted line
@@ -1800,6 +2006,27 @@ def toggle_overunder_completed_modal(active_cell, close_clicks, table_data, book
         content = components.totals_detail_table(matchup_df, home_team=home_team, away_team=away_team)
 
     return True, title, content
+
+
+    return True, title, content
+
+
+@app.callback(
+    Output("raw-data-content", "children"),
+    Input("url", "pathname"),
+    Input("refresh-data-btn", "n_clicks"),
+)
+def update_raw_data(pathname: Optional[str], n_clicks: Optional[int]):
+    if pathname != "/data":
+        return no_update
+        
+    # Fetch raw data
+    try:
+        df = get_all_games(limit=5000)
+    except Exception as e:
+        return components.empty_state(f"Error fetching data: {e}")
+        
+    return components.raw_data_table(df)
 
 
 def run(debug: bool = False, port: int = 8050, host: str = "0.0.0.0") -> None:

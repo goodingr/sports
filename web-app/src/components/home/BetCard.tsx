@@ -87,10 +87,12 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                     {/* Center: Bet Details */}
                     <div className="flex flex-col items-center justify-center min-w-[80px] md:min-w-[100px] z-10 shrink-0 pt-1">
                         {isLocked ? (
-                            <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                                <Lock className="h-4 w-4" />
-                                <span className="text-[10px] uppercase tracking-wider font-medium">Premium</span>
-                            </div>
+                            <a href="/pricing" onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-1 text-primary hover:text-primary/80 transition-colors z-20">
+                                <div className="bg-primary/10 p-1.5 rounded-full ring-1 ring-primary/20">
+                                    <Lock className="h-3 w-3" />
+                                </div>
+                                <span className="text-[10px] uppercase tracking-wider font-black">Unlock</span>
+                            </a>
                         ) : !isCompleted && bet.book_url ? (
                             // Clickable button for upcoming bets with sportsbook link
                             <a
@@ -164,6 +166,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                 gameId={bet.game_id}
                 homeTeam={bet.home_team}
                 awayTeam={bet.away_team}
+                commenceTime={bet.commence_time}
                 predictionInfo={{
                     predicted_total_points: bet.predicted_total_points,
                     recommended_bet: bet.recommended_bet,

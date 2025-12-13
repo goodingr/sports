@@ -27,6 +27,11 @@ Write-Host "Step 1: Smart History Ingestion..."
 try {
     $leagueArgs = $targetLeagues -join " "
     & poetry run python -m src.data.ingest_manager --leagues $targetLeagues 2>&1 | ForEach-Object { "$_" }
+    
+    if ($targetLeagues -contains "NBA") {
+        Write-Host "Calculating NBA rolling metrics..."
+        & poetry run python -m src.data.sources.nba_rolling_metrics --seasons 2024 2025 2>&1 | ForEach-Object { "$_" }
+    }
 } catch {
     Write-Host "WARNING: Smart ingestion failed: $_"
 }
@@ -54,6 +59,7 @@ if (-not $SkipOdds) {
     try {
         $commaLeagues = $targetLeagues -join ","
         & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env 2>&1 | ForEach-Object { "$_" }
+        
     } catch {
         Write-Host "WARNING: Score ingestion failed: $_"
     }

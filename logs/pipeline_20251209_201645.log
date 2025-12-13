@@ -1,0 +1,1229 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20251209201645
+Username: GAMING-PC\Bobby
+RunAs User: GAMING-PC\Bobby
+Configuration Name: 
+Machine: GAMING-PC (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noexit -command try { . "c:\Users\Bobby\AppData\Local\Programs\Antigravity\resources\app\out\vs\workbench\contrib\terminal\common\scripts\shellIntegration.ps1" } catch {}
+Process ID: 1907472
+PSVersion: 5.1.26100.7309
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7309
+BuildVersion: 10.0.26100.7309
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is logs/pipeline_20251209_201645.log
+=== Starting Data Backup ===
+Creating backup in backups\2025-12-09_20-16-45...
+  Copying data\betting.db -> backups\2025-12-09_20-16-45\betting.db
+  Copying data\forward_test\ensemble\predictions_master.parquet -> backups\2025-12-09_20-16-45\predictions_mas
+ter.parquet
+Cleaning up backups older than 7 days...
+  Deleting old backup: backups\2025-12-04_19-36-45
+Backup completed successfully.
+Data backup completed.
+=== Starting Data Ingestion ===
+=== Starting Data Ingestion ===
+Step 1: Smart History Ingestion...
+INFO:__main__:[NFL] Found history up to 2026-01-04. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_nfl --seasons 2024
+INFO:__main__:Downloading schedules (with betting lines) for seasons: [2024]
+INFO:__main__:Saved schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2024_2024.parquet
+INFO:__main__:Saved betting snapshot (derived from schedules) to C:\Users\Bobby\Desktop\sports\data\raw\results\betting_2024_2024.parquet
+INFO:src.db.loaders:Stored 285 schedule rows into database
+INFO:__main__:[NBA] Found history up to 2025-12-11. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_nba --seasons 2024 --days-back 7
+INFO:__main__:Limiting NBA results download to 12/03/2025-12/10/2025 (last 7 days)
+INFO:__main__:Downloading NBA Regular Season data for 2024-25
+WARNING:__main__:No NBA games found for seasons [2024]
+INFO:__main__:[CFB] Found history up to 2025-12-22. Running update for current season...
+INFO:__main__:[NCAAB] Found history up to 2025-12-10. Running update for current season...
+INFO:__main__:[NHL] Found history up to 2025-12-10. Running update for current season...
+INFO:__main__:[EPL] Found history up to 2025-12-30. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_soccer --leagues EPL --days-back 14
+INFO:__main__:Fetching soccer matches from ESPN scoreboard...
+INFO:__main__:Processed 30 ESPN matches
+INFO:__main__:Processing 30 EPL games
+INFO:__main__:Saved EPL schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_epl_espn_api_20251209_201720.parquet
+INFO:src.db.loaders:Stored 30 schedule rows into database
+INFO:__main__:[LALIGA] Found history up to 2026-05-24. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_soccer --leagues LALIGA --days-back 14
+INFO:__main__:Fetching soccer matches from ESPN scoreboard...
+INFO:__main__:Processed 23 ESPN matches
+INFO:__main__:Processing 23 LALIGA games
+INFO:__main__:Saved LALIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_laliga_espn_api_20251209_201738.parquet
+INFO:src.db.loaders:Stored 23 schedule rows into database
+INFO:__main__:[BUNDESLIGA] Found history up to 2026-05-16. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_soccer --leagues BUNDESLIGA --days-back 14
+INFO:__main__:Fetching soccer matches from ESPN scoreboard...
+INFO:__main__:Processed 19 ESPN matches
+INFO:__main__:Processing 19 BUNDESLIGA games
+INFO:__main__:Saved BUNDESLIGA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_bundesliga_espn_api_20251209_201800.parquet
+INFO:src.db.loaders:Stored 19 schedule rows into database
+INFO:__main__:[SERIEA] Found history up to 2026-05-24. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_soccer --leagues SERIEA --days-back 14
+INFO:__main__:Fetching soccer matches from ESPN scoreboard...
+INFO:__main__:Processed 21 ESPN matches
+INFO:__main__:Processing 21 SERIEA games
+INFO:__main__:Saved SERIEA schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_seriea_espn_api_20251209_201818.parquet
+INFO:src.db.loaders:Stored 21 schedule rows into database
+INFO:__main__:[LIGUE1] Found history up to 2026-05-16. Running update for current season...
+INFO:__main__:Running: C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Scripts\python.exe -m src.data.backfill_soccer --leagues LIGUE1 --days-back 14
+INFO:__main__:Fetching soccer matches from ESPN scoreboard...
+INFO:__main__:Processed 19 ESPN matches
+INFO:__main__:Processing 19 LIGUE1 games
+INFO:__main__:Saved LIGUE1 schedules to C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_ligue1_espn_api_20251209_201835.parquet
+INFO:src.db.loaders:Stored 19 schedule rows into database
+Calculating NBA rolling metrics...
+INFO:__main__:Fetching NBA game logs for 2024-25 to calculate rolling metrics
+INFO:__main__:Calculated rolling metrics for 2460 games in season 2024-25
+INFO:__main__:Fetching NBA game logs for 2025-26 to calculate rolling metrics
+INFO:__main__:Calculated rolling metrics for 714 games in season 2025-26
+Step 2: Fetching Live Odds...
+Fetching odds for NFL...
+INFO:src.db.loaders:Stored odds snapshot aa4a13b2ba1b4c9c9c5c5f73831e20ee with 32 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\americanfootball_nfl\odds_2025-12-10T01-18-47Z.json
+DEBUG: Creating new game NFL_ac7881cc5a498c5b72680498d3fa8f6e
+DEBUG: Creating new game NFL_18fe4528a0bc43d9cd64bd09c0d5019f
+DEBUG: Creating new game NFL_9f70d98bc6918dc8e21f329405b649fe
+Fetching odds for NBA...
+INFO:src.db.loaders:Stored odds snapshot 07851bb9b82a4e8f8397f24b129eff93 with 4 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\basketball_nba\odds_2025-12-10T01-18-51Z.json
+Fetching odds for CFB...
+INFO:src.db.loaders:Stored odds snapshot a8bb873227ac4ef0b9f6c547fd3cc139 with 15 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\americanfootball_ncaaf\odds_2025-12-10T01-18-55Z.json
+DEBUG: Creating new game CFB_c49986aa8731de6e3c1723d9f8e91e02
+DEBUG: Creating new game CFB_cb6e1250fee631fee65cd81bba1a2a0a
+Fetching odds for NCAAB...
+INFO:src.db.loaders:Stored odds snapshot 71a56c90e5d5431e9d16a22dfcbb67c6 with 47 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\basketball_ncaab\odds_2025-12-10T01-18-59Z.json
+DEBUG: Creating new game NCAAB_ccdd72400ba94036a16db9caf698000c
+DEBUG: Creating new game NCAAB_f67cabd322f54073f06ef8066e8b6577
+DEBUG: Creating new game NCAAB_ec456dfde436befec7099f2fe5ef72af
+DEBUG: Creating new game NCAAB_c251120d5e9f3bd5405d5aba5c0aef4b
+DEBUG: Creating new game NCAAB_668fcf9e398716b2f033c1b5440b6016
+DEBUG: Creating new game NCAAB_10577d0593794a50356f172aa5fcdb60
+DEBUG: Creating new game NCAAB_7cd5d9c08464ddf6213ae4522eb74599
+DEBUG: Creating new game NCAAB_bb9738712b16a47eb6b257eaaf3720ba
+DEBUG: Creating new game NCAAB_af22e567917832eef1cff3a555614b69
+DEBUG: Creating new game NCAAB_0effc21419cde2cebea13a9cad57409c
+DEBUG: Creating new game NCAAB_48bf903aea576a91fb54e58168df78a4
+DEBUG: Creating new game NCAAB_269b347289dd48be99dfce671a97d33a
+DEBUG: Creating new game NCAAB_4ba931836e82b946233a63876adf6a1c
+DEBUG: Creating new game NCAAB_35a0507d3c13c24e971b6d677811a69a
+DEBUG: Creating new game NCAAB_1cdf59bddf203a746c2f03cd6b307596
+DEBUG: Creating new game NCAAB_cecc18012ac01f8143d6d6364929c919
+DEBUG: Creating new game NCAAB_23107c56e89e0cb223965aa87f8934c2
+DEBUG: Creating new game NCAAB_5fec574f2df7c3c3fe44c97d9184deaf
+DEBUG: Creating new game NCAAB_909b7cd4cb3bfb33267f1459d822de20
+DEBUG: Creating new game NCAAB_4c3eb1944a1cc524de65982fcf065355
+DEBUG: Creating new game NCAAB_47963ce135fdd3ac9edb8a3650e920a5
+DEBUG: Creating new game NCAAB_84034a4922368a451048dfe2653844bf
+DEBUG: Creating new game NCAAB_349adca6e155a924b819976bca5311e1
+DEBUG: Creating new game NCAAB_606b8a7a13ce70da4363651d1560554f
+DEBUG: Creating new game NCAAB_97b9bb44d4f73a62901fb522c90d1bbb
+DEBUG: Creating new game NCAAB_68bf0b4aa84be93307bff00b34696ceb
+DEBUG: Creating new game NCAAB_dda35afdca761892f8e35ad702a08677
+Fetching odds for NHL...
+INFO:src.db.loaders:Stored odds snapshot 581ab62234be4e65b04484aad6ad61a7 with 14 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\icehockey_nhl\odds_2025-12-10T01-19-06Z.json
+DEBUG: Creating new game NHL_a3bcd2ca334ed3d3a01c016cc52711c4
+DEBUG: Creating new game NHL_202f57d6e482d0f3d3797da82db719d6
+DEBUG: Creating new game NHL_2be1b677ff458a1c0fb64fe5a892b279
+DEBUG: Creating new game NHL_9ac3d02ca1ed3b525d8475a2b269e03e
+Fetching odds for EPL...
+INFO:src.db.loaders:Stored odds snapshot f46a1dad9c7c4d1ea8ff46d844636a98 with 20 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\soccer_epl\odds_2025-12-10T01-19-10Z.json
+Fetching odds for LALIGA...
+INFO:src.db.loaders:Stored odds snapshot 8c22458d80d148798f9703a5c0a7fcac with 20 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\soccer_spain_la_liga\odds_2025-12-10T01-19-14Z.json
+Fetching odds for BUNDESLIGA...
+INFO:src.db.loaders:Stored odds snapshot 8403608d3189447aba2bde03bbf3068d with 18 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\soccer_germany_bundesliga\odds_2025-12-10T01-19-18Z.json
+Fetching odds for SERIEA...
+INFO:src.db.loaders:Stored odds snapshot 3071f57a753b406b92c23cea1a38e295 with 16 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\soccer_italy_serie_a\odds_2025-12-10T01-19-22Z.json
+Fetching odds for LIGUE1...
+INFO:src.db.loaders:Stored odds snapshot a4598382467f463a984332cec57b9933 with 9 events
+INFO:__main__:Saved odds snapshot to C:\Users\Bobby\Desktop\sports\data\raw\odds\soccer_france_ligue_one\odds_2025-12-10T01-19-27Z.json
+Step 3: Fetching Live Scores...
+INFO:__main__:Fetching scores for NFL...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\NFL\scores_2025-12-10T01-19-32Z.json
+INFO:__main__:Updated 13 games for NFL
+INFO:__main__:Fetching scores for NBA...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\NBA\scores_2025-12-10T01-19-32Z.json
+INFO:__main__:Updated 11 games for NBA
+INFO:__main__:Fetching scores for CFB...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\CFB\scores_2025-12-10T01-19-33Z.json
+INFO:__main__:Updated 1 games for CFB
+INFO:__main__:Fetching scores for NCAAB...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\NCAAB\scores_2025-12-10T01-19-33Z.json
+INFO:__main__:Updated 66 games for NCAAB
+INFO:__main__:Fetching scores for NHL...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\NHL\scores_2025-12-10T01-19-33Z.json
+INFO:__main__:Updated 25 games for NHL
+INFO:__main__:Fetching scores for EPL...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\EPL\scores_2025-12-10T01-19-34Z.json
+INFO:__main__:Updated 3 games for EPL
+INFO:__main__:Fetching scores for LALIGA...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\LALIGA\scores_2025-12-10T01-19-34Z.json
+INFO:__main__:Updated 5 games for LALIGA
+INFO:__main__:Fetching scores for BUNDESLIGA...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\BUNDESLIGA\scores_2025-12-10T01-19-35Z.json
+INFO:__main__:Updated 2 games for BUNDESLIGA
+INFO:__main__:Fetching scores for SERIEA...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\SERIEA\scores_2025-12-10T01-19-35Z.json
+INFO:__main__:Updated 7 games for SERIEA
+INFO:__main__:Fetching scores for LIGUE1...
+INFO:__main__:Saved raw scores to C:\Users\Bobby\Desktop\sports\data\raw\scores\LIGUE1\scores_2025-12-10T01-19-36Z.json
+INFO:__main__:Updated 4 games for LIGUE1
+INFO:__main__:Total games updated: 137
+=== Data Ingestion Completed ===
+=== Starting Training Pipeline ===
+Transcript started, output file is logs/train_pipeline_20251209_201936.log
+[2025-12-09 20:19:36] =========================================
+[2025-12-09 20:19:36] Starting TRAINING pipeline
+[2025-12-09 20:19:36] =========================================
+[2025-12-09 20:19:36] Processing leagues: NFL, NBA, CFB, NCAAB, NHL, EPL, LALIGA, BUNDESLIGA, SERIEA, LIGUE1
+[2025-12-09 20:19:36] Step 1: Building Datasets...
+[2025-12-09 20:19:36] Building dataset for NFL (Seasons: 2015-2025)...
+INFO:src.features.dataset.nfl:Loading cached schedules data from C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2015_2026.parquet
+INFO:src.features.dataset.nfl:Loading cached team metrics from C:\Users\Bobby\Desktop\sports\data\processed\intermediate\team_metrics_2015_2026.parquet
+INFO:src.features.dataset.nfl:Loading cached injury reports from C:\Users\Bobby\Desktop\sports\data\raw\results\injuries_2015_2026.parquet
+INFO:src.features.dataset.nfl:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nfl_2015_2026.parquet
+[2025-12-09 20:19:44] Building dataset for NBA (Seasons: 2015-2025)...
+INFO:src.features.dataset.nba:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nba_2015_2026.parquet
+[2025-12-09 20:20:05] Building dataset for CFB (Seasons: 2015-2025)...
+INFO:src.features.dataset.cfb:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_cfb_2015_2026.parquet
+[2025-12-09 20:20:11] Building dataset for NCAAB (Seasons: 2015-2025)...
+INFO:src.features.dataset.ncaab:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_ncaab_2015_2026.parquet
+[2025-12-09 20:20:17] Building dataset for NHL (Seasons: 2015-2025)...
+INFO:src.features.dataset.nhl:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nhl_2015_2026.parquet
+[2025-12-09 20:20:20] Building dataset for EPL (Seasons: 2015-2025)...
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_epl_2015_2026.parquet
+[2025-12-09 20:20:28] Building dataset for LALIGA (Seasons: 2015-2025)...
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_laliga_2015_2026.parquet
+[2025-12-09 20:20:33] Building dataset for BUNDESLIGA (Seasons: 2015-2025)...
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_bundesliga_2015_2026.parquet
+[2025-12-09 20:20:38] Building dataset for SERIEA (Seasons: 2015-2025)...
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_seriea_2015_2026.parquet
+[2025-12-09 20:20:44] Building dataset for LIGUE1 (Seasons: 2015-2025)...
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_ligue1_2015_2026.parquet
+[2025-12-09 20:20:49] Step 2: Training Models...
+[2025-12-09 20:20:49] Training NFL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NFL random_forest from config\tuned_params\nfl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 5 kept (threshold=0.050, best_log_loss=0.622)
+INFO:src.db.models:Persisted 1575 predictions for model ensemble_calibrated_a3d4e890
+INFO:__main__:Saved model to models\nfl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_ensemble_calibrated_metrics.json
+[2025-12-09 20:21:36] Training NFL random_forest model...
+INFO:__main__:Loaded tuned params for NFL random_forest from config\tuned_params\nfl_random_forest.json
+INFO:src.db.models:Persisted 1575 predictions for model random_forest_calibrated_e111b8cd
+INFO:__main__:Saved model to models\nfl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_random_forest_calibrated_metrics.json
+[2025-12-09 20:21:44] Training NFL random_forest totals model...
+Totals model saved to models\nfl_totals_random_forest.pkl
+Metrics written to reports\backtests\nfl_totals_random_forest_metrics.json
+[2025-12-09 20:21:50] Training NFL gradient_boosting model...
+INFO:src.db.models:Persisted 1575 predictions for model gradient_boosting_calibrated_d558b7cc
+INFO:__main__:Saved model to models\nfl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:21:58] Training NFL gradient_boosting totals model...
+Totals model saved to models\nfl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nfl_totals_gradient_boosting_metrics.json
+[2025-12-09 20:22:03] Training NBA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NBA random_forest from config\tuned_params\nba_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.602)
+INFO:src.db.models:Persisted 3491 predictions for model ensemble_calibrated_0e7b47f4
+INFO:__main__:Saved model to models\nba_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_ensemble_calibrated_metrics.json
+[2025-12-09 20:22:27] Training NBA random_forest model...
+INFO:__main__:Loaded tuned params for NBA random_forest from config\tuned_params\nba_random_forest.json
+INFO:src.db.models:Persisted 3491 predictions for model random_forest_calibrated_267915f0
+INFO:__main__:Saved model to models\nba_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_random_forest_calibrated_metrics.json
+[2025-12-09 20:22:33] Training NBA random_forest totals model...
+Totals model saved to models\nba_totals_random_forest.pkl
+Metrics written to reports\backtests\nba_totals_random_forest_metrics.json
+[2025-12-09 20:22:38] Training NBA gradient_boosting model...
+INFO:src.db.models:Persisted 3491 predictions for model gradient_boosting_calibrated_bd4c1fb9
+INFO:__main__:Saved model to models\nba_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:22:48] Training NBA gradient_boosting totals model...
+Totals model saved to models\nba_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nba_totals_gradient_boosting_metrics.json
+[2025-12-09 20:22:53] Training CFB ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for CFB random_forest from config\tuned_params\cfb_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 4 kept (threshold=0.050, best_log_loss=0.509)
+INFO:src.db.models:Persisted 217 predictions for model ensemble_calibrated_397d1faa
+INFO:__main__:Saved model to models\cfb_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_ensemble_calibrated_metrics.json
+[2025-12-09 20:23:06] Training CFB random_forest model...
+INFO:__main__:Loaded tuned params for CFB random_forest from config\tuned_params\cfb_random_forest.json
+INFO:src.db.models:Persisted 217 predictions for model random_forest_calibrated_cf32e764
+INFO:__main__:Saved model to models\cfb_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_random_forest_calibrated_metrics.json
+[2025-12-09 20:23:15] Training CFB random_forest totals model...
+Totals model saved to models\cfb_totals_random_forest.pkl
+Metrics written to reports\backtests\cfb_totals_random_forest_metrics.json
+[2025-12-09 20:23:21] Training CFB gradient_boosting model...
+INFO:src.db.models:Persisted 217 predictions for model gradient_boosting_calibrated_f6649787
+INFO:__main__:Saved model to models\cfb_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:23:29] Training CFB gradient_boosting totals model...
+Totals model saved to models\cfb_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\cfb_totals_gradient_boosting_metrics.json
+[2025-12-09 20:23:33] Training NCAAB ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NCAAB random_forest from config\tuned_params\ncaab_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.640)
+INFO:src.db.models:Persisted 42160 predictions for model ensemble_calibrated_34bf6f7d
+INFO:__main__:Saved model to models\ncaab_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_ensemble_calibrated_metrics.json
+[2025-12-09 20:25:24] Training NCAAB random_forest model...
+INFO:__main__:Loaded tuned params for NCAAB random_forest from config\tuned_params\ncaab_random_forest.json
+INFO:src.db.models:Persisted 42160 predictions for model random_forest_calibrated_01af241b
+INFO:__main__:Saved model to models\ncaab_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_random_forest_calibrated_metrics.json
+[2025-12-09 20:25:40] Training NCAAB random_forest totals model...
+Totals model saved to models\ncaab_totals_random_forest.pkl
+Metrics written to reports\backtests\ncaab_totals_random_forest_metrics.json
+[2025-12-09 20:25:45] Training NCAAB gradient_boosting model...
+INFO:src.db.models:Persisted 42160 predictions for model gradient_boosting_calibrated_eddab978
+INFO:__main__:Saved model to models\ncaab_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:26:02] Training NCAAB gradient_boosting totals model...
+Totals model saved to models\ncaab_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\ncaab_totals_gradient_boosting_metrics.json
+[2025-12-09 20:26:06] Training NHL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NHL random_forest from config\tuned_params\nhl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.665)
+INFO:src.db.models:Persisted 83 predictions for model ensemble_calibrated_05d9f9cc
+INFO:__main__:Saved model to models\nhl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_ensemble_calibrated_metrics.json
+[2025-12-09 20:26:21] Training NHL random_forest model...
+INFO:__main__:Loaded tuned params for NHL random_forest from config\tuned_params\nhl_random_forest.json
+INFO:src.db.models:Persisted 83 predictions for model random_forest_calibrated_6d628d0f
+INFO:__main__:Saved model to models\nhl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_random_forest_calibrated_metrics.json
+[2025-12-09 20:26:28] Training NHL random_forest totals model...
+Totals model saved to models\nhl_totals_random_forest.pkl
+Metrics written to reports\backtests\nhl_totals_random_forest_metrics.json
+[2025-12-09 20:26:33] Training NHL gradient_boosting model...
+INFO:src.db.models:Persisted 83 predictions for model gradient_boosting_calibrated_5de803fd
+INFO:__main__:Saved model to models\nhl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:26:42] Training NHL gradient_boosting totals model...
+Totals model saved to models\nhl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nhl_totals_gradient_boosting_metrics.json
+[2025-12-09 20:26:48] Training EPL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for EPL random_forest from config\tuned_params\epl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.605)
+INFO:src.db.models:Persisted 1013 predictions for model ensemble_calibrated_d25e95cc
+INFO:__main__:Saved model to models\epl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_ensemble_calibrated_metrics.json
+[2025-12-09 20:27:00] Training EPL random_forest model...
+INFO:__main__:Loaded tuned params for EPL random_forest from config\tuned_params\epl_random_forest.json
+INFO:src.db.models:Persisted 1013 predictions for model random_forest_calibrated_05d6e01d
+INFO:__main__:Saved model to models\epl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_random_forest_calibrated_metrics.json
+[2025-12-09 20:27:06] Training EPL random_forest totals model...
+Totals model saved to models\epl_totals_random_forest.pkl
+Metrics written to reports\backtests\epl_totals_random_forest_metrics.json
+[2025-12-09 20:27:11] Training EPL gradient_boosting model...
+INFO:src.db.models:Persisted 1013 predictions for model gradient_boosting_calibrated_149f5812
+INFO:__main__:Saved model to models\epl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:27:19] Training EPL gradient_boosting totals model...
+Totals model saved to models\epl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\epl_totals_gradient_boosting_metrics.json
+[2025-12-09 20:27:23] Training LALIGA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for LALIGA random_forest from config\tuned_params\laliga_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.540)
+INFO:src.db.models:Persisted 1013 predictions for model ensemble_calibrated_a3d18d43
+INFO:__main__:Saved model to models\laliga_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_ensemble_calibrated_metrics.json
+[2025-12-09 20:27:37] Training LALIGA random_forest model...
+INFO:__main__:Loaded tuned params for LALIGA random_forest from config\tuned_params\laliga_random_forest.json
+INFO:src.db.models:Persisted 1013 predictions for model random_forest_calibrated_58299e15
+INFO:__main__:Saved model to models\laliga_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_random_forest_calibrated_metrics.json
+[2025-12-09 20:27:45] Training LALIGA random_forest totals model...
+Totals model saved to models\laliga_totals_random_forest.pkl
+Metrics written to reports\backtests\laliga_totals_random_forest_metrics.json
+[2025-12-09 20:27:50] Training LALIGA gradient_boosting model...
+INFO:src.db.models:Persisted 1013 predictions for model gradient_boosting_calibrated_e3df0c3d
+INFO:__main__:Saved model to models\laliga_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:27:58] Training LALIGA gradient_boosting totals model...
+Totals model saved to models\laliga_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\laliga_totals_gradient_boosting_metrics.json
+[2025-12-09 20:28:03] Training BUNDESLIGA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for BUNDESLIGA random_forest from config\tuned_params\bundesliga_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.589)
+INFO:src.db.models:Persisted 815 predictions for model ensemble_calibrated_2ff9bb54
+INFO:__main__:Saved model to models\bundesliga_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_ensemble_calibrated_metrics.json
+[2025-12-09 20:28:18] Training BUNDESLIGA random_forest model...
+INFO:__main__:Loaded tuned params for BUNDESLIGA random_forest from config\tuned_params\bundesliga_random_forest.json
+INFO:src.db.models:Persisted 815 predictions for model random_forest_calibrated_f16d8449
+INFO:__main__:Saved model to models\bundesliga_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_random_forest_calibrated_metrics.json
+[2025-12-09 20:28:25] Training BUNDESLIGA random_forest totals model...
+Totals model saved to models\bundesliga_totals_random_forest.pkl
+Metrics written to reports\backtests\bundesliga_totals_random_forest_metrics.json
+[2025-12-09 20:28:30] Training BUNDESLIGA gradient_boosting model...
+INFO:src.db.models:Persisted 815 predictions for model gradient_boosting_calibrated_4840ee08
+INFO:__main__:Saved model to models\bundesliga_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:28:37] Training BUNDESLIGA gradient_boosting totals model...
+Totals model saved to models\bundesliga_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\bundesliga_totals_gradient_boosting_metrics.json
+[2025-12-09 20:28:42] Training SERIEA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for SERIEA random_forest from config\tuned_params\seriea_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.585)
+INFO:src.db.models:Persisted 1003 predictions for model ensemble_calibrated_5e1883c1
+INFO:__main__:Saved model to models\seriea_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_ensemble_calibrated_metrics.json
+[2025-12-09 20:28:54] Training SERIEA random_forest model...
+INFO:__main__:Loaded tuned params for SERIEA random_forest from config\tuned_params\seriea_random_forest.json
+INFO:src.db.models:Persisted 1003 predictions for model random_forest_calibrated_52101483
+INFO:__main__:Saved model to models\seriea_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_random_forest_calibrated_metrics.json
+[2025-12-09 20:29:00] Training SERIEA random_forest totals model...
+Totals model saved to models\seriea_totals_random_forest.pkl
+Metrics written to reports\backtests\seriea_totals_random_forest_metrics.json
+[2025-12-09 20:29:06] Training SERIEA gradient_boosting model...
+INFO:src.db.models:Persisted 1003 predictions for model gradient_boosting_calibrated_633279b7
+INFO:__main__:Saved model to models\seriea_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:29:16] Training SERIEA gradient_boosting totals model...
+Totals model saved to models\seriea_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\seriea_totals_gradient_boosting_metrics.json
+[2025-12-09 20:29:20] Training LIGUE1 ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for LIGUE1 random_forest from config\tuned_params\ligue1_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.592)
+INFO:src.db.models:Persisted 1012 predictions for model ensemble_calibrated_56fe9215
+INFO:__main__:Saved model to models\ligue1_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_ensemble_calibrated_metrics.json
+[2025-12-09 20:29:33] Training LIGUE1 random_forest model...
+INFO:__main__:Loaded tuned params for LIGUE1 random_forest from config\tuned_params\ligue1_random_forest.json
+INFO:src.db.models:Persisted 1012 predictions for model random_forest_calibrated_bc5479b6
+INFO:__main__:Saved model to models\ligue1_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_random_forest_calibrated_metrics.json
+[2025-12-09 20:29:39] Training LIGUE1 random_forest totals model...
+Totals model saved to models\ligue1_totals_random_forest.pkl
+Metrics written to reports\backtests\ligue1_totals_random_forest_metrics.json
+[2025-12-09 20:29:45] Training LIGUE1 gradient_boosting model...
+INFO:src.db.models:Persisted 1012 predictions for model gradient_boosting_calibrated_431f7f24
+INFO:__main__:Saved model to models\ligue1_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_gradient_boosting_calibrated_metrics.json
+[2025-12-09 20:29:52] Training LIGUE1 gradient_boosting totals model...
+Totals model saved to models\ligue1_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\ligue1_totals_gradient_boosting_metrics.json
+[2025-12-09 20:29:57] =========================================
+[2025-12-09 20:29:57] TRAINING pipeline completed
+[2025-12-09 20:29:57] =========================================
+Transcript stopped, output file is C:\Users\Bobby\Desktop\sports\logs\train_pipeline_20251209_201936.log
+=== Starting Prediction Pipeline ===
+[2025-12-09 20:29:57] =========================================
+[2025-12-09 20:29:57] Starting PREDICTION pipeline
+[2025-12-09 20:29:57] =========================================
+[2025-12-09 20:29:57] Processing leagues: NFL, NBA, CFB, NCAAB, NHL, EPL, LALIGA, BUNDESLIGA, SERIEA, LIGUE1
+[2025-12-09 20:29:57] Step 0: Creating backups...
+[2025-12-09 20:29:57] Backing up database...
+
+[2025-12-09 20:30:00] Backing up prediction files...
+
+[2025-12-09 20:30:04] Step 1: Generating predictions...
+[2025-12-09 20:30:04] Generating predictions for NFL with ensemble model...
+INFO:__main__:Running predictions for NFL...
+INFO:src.predict.engine:Loaded ensemble model for NFL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NFL (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 17 games for NFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TB, away=ATL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LA, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=CLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CIN, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HOU, away=ARI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=JAX, away=NYJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KC, away=LAC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NE, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYG, away=WAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=LV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LAR, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DEN, away=GB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NO, away=CAR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=IND
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SF, away=TEN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DAL, away=MIN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=MIA
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 17 predictions to database for ensemble
+[2025-12-09 20:30:11] Generating predictions for NFL with random_forest model...
+INFO:__main__:Running predictions for NFL...
+INFO:src.predict.engine:Loaded random_forest model for NFL
+INFO:src.predict.engine:Loaded random_forest totals model for NFL (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 17 games for NFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TB, away=ATL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LA, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=CLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CIN, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HOU, away=ARI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=JAX, away=NYJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KC, away=LAC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NE, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYG, away=WAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=LV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LAR, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DEN, away=GB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NO, away=CAR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=IND
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SF, away=TEN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DAL, away=MIN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=MIA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 17 predictions to database for random_forest
+[2025-12-09 20:30:16] Generating predictions for NFL with gradient_boosting model...
+INFO:__main__:Running predictions for NFL...
+INFO:src.predict.engine:Loaded gradient_boosting model for NFL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NFL (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 17 games for NFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TB, away=ATL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LA, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=CLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CIN, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HOU, away=ARI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=JAX, away=NYJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KC, away=LAC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NE, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYG, away=WAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=LV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LAR, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DEN, away=GB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NO, away=CAR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=IND
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SF, away=TEN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DAL, away=MIN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=MIA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 17 predictions to database for gradient_boosting
+[2025-12-09 20:30:22] Generating predictions for NBA with ensemble model...
+INFO:__main__:Running predictions for NBA...
+INFO:src.predict.engine:Loaded ensemble model for NBA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NBA (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 3 games for NBA
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 3 predictions to database for ensemble
+[2025-12-09 20:30:29] Generating predictions for NBA with random_forest model...
+INFO:__main__:Running predictions for NBA...
+INFO:src.predict.engine:Loaded random_forest model for NBA
+INFO:src.predict.engine:Loaded random_forest totals model for NBA (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 3 games for NBA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 3 predictions to database for random_forest
+[2025-12-09 20:30:34] Generating predictions for NBA with gradient_boosting model...
+INFO:__main__:Running predictions for NBA...
+INFO:src.predict.engine:Loaded gradient_boosting model for NBA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NBA (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 3 games for NBA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 3 predictions to database for gradient_boosting
+[2025-12-09 20:30:40] Generating predictions for CFB with ensemble model...
+INFO:__main__:Running predictions for CFB...
+INFO:src.predict.engine:Loaded ensemble model for CFB
+INFO:src.predict.engine:Loaded gradient_boosting totals model for CFB (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 2 games for CFB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAVY, away=ARMY
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UW, away=BOISE
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 2 predictions to database for ensemble
+[2025-12-09 20:30:48] Generating predictions for CFB with random_forest model...
+INFO:__main__:Running predictions for CFB...
+INFO:src.predict.engine:Loaded random_forest model for CFB
+INFO:src.predict.engine:Loaded random_forest totals model for CFB (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 2 games for CFB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAVY, away=ARMY
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UW, away=BOISE
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 2 predictions to database for random_forest
+[2025-12-09 20:30:53] Generating predictions for CFB with gradient_boosting model...
+INFO:__main__:Running predictions for CFB...
+INFO:src.predict.engine:Loaded gradient_boosting model for CFB
+INFO:src.predict.engine:Loaded gradient_boosting totals model for CFB (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 2 games for CFB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAVY, away=ARMY
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UW, away=BOISE
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 2 predictions to database for gradient_boosting
+[2025-12-09 20:31:00] Generating predictions for NCAAB with ensemble model...
+INFO:__main__:Running predictions for NCAAB...
+INFO:src.predict.engine:Loaded ensemble model for NCAAB
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NCAAB (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 45 games for NCAAB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WMO, away=ATR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KWI, away=NEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VCA, away=MHA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RBR, away=BBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SHA, away=CEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RRA, away=MCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAG, away=HBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BCA, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSE, away=CLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PFR, away=BBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OBU, away=IIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DDE, away=MBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IHO, away=PLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WCO, away=SCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UHU, away=FGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ADE, away=NLU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRA, away=DGR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STO, away=UTR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSP, away=L49
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBE, away=NSP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=YBU, away=ADA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PTI, away=MWA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBU, away=MRE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MMI, away=BEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IGA, away=BBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBU, away=CCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBO, away=CRA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GRE, away=DHE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=FKN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NIR, away=IVA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NWO, away=LFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MHE, away=WHI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PBO, away=MGO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VRA, away=NLO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THU, away=ALI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FMA, away=EEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HCO, away=JTI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UWO, away=IBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSA, away=TSK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UKA, away=WWI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TBO, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBR, away=DDU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NCO, away=WBA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CMA, away=FBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SAZ, away=LCA
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 45 predictions to database for ensemble
+[2025-12-09 20:31:08] Generating predictions for NCAAB with random_forest model...
+INFO:__main__:Running predictions for NCAAB...
+INFO:src.predict.engine:Loaded random_forest model for NCAAB
+INFO:src.predict.engine:Loaded random_forest totals model for NCAAB (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 45 games for NCAAB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WMO, away=ATR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KWI, away=NEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VCA, away=MHA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RBR, away=BBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SHA, away=CEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RRA, away=MCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAG, away=HBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BCA, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSE, away=CLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PFR, away=BBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OBU, away=IIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DDE, away=MBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IHO, away=PLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WCO, away=SCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UHU, away=FGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ADE, away=NLU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRA, away=DGR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STO, away=UTR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSP, away=L49
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBE, away=NSP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=YBU, away=ADA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PTI, away=MWA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBU, away=MRE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MMI, away=BEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IGA, away=BBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBU, away=CCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBO, away=CRA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GRE, away=DHE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=FKN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NIR, away=IVA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NWO, away=LFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MHE, away=WHI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PBO, away=MGO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VRA, away=NLO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THU, away=ALI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FMA, away=EEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HCO, away=JTI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UWO, away=IBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSA, away=TSK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UKA, away=WWI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TBO, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBR, away=DDU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NCO, away=WBA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CMA, away=FBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SAZ, away=LCA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 45 predictions to database for random_forest
+[2025-12-09 20:31:16] Generating predictions for NCAAB with gradient_boosting model...
+INFO:__main__:Running predictions for NCAAB...
+INFO:src.predict.engine:Loaded gradient_boosting model for NCAAB
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NCAAB (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 45 games for NCAAB
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WMO, away=ATR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=KWI, away=NEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VCA, away=MHA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RBR, away=BBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SHA, away=CEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RRA, away=MCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NAG, away=HBI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BCA, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSE, away=CLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PFR, away=BBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OBU, away=IIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=DDE, away=MBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IHO, away=PLI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WCO, away=SCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UHU, away=FGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ADE, away=NLU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRA, away=DGR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STO, away=UTR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSP, away=L49
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBE, away=NSP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=YBU, away=ADA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PTI, away=MWA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBU, away=MRE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MMI, away=BEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=IGA, away=BBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBU, away=CCO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SBO, away=CRA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GRE, away=DHE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=FKN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NIR, away=IVA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NWO, away=LFL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MHE, away=WHI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PBO, away=MGO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=VRA, away=NLO
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THU, away=ALI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FMA, away=EEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=HCO, away=JTI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UWO, away=IBE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SSA, away=TSK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UKA, away=WWI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TBO, away=SJA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BBR, away=DDU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NCO, away=WBA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CMA, away=FBU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SAZ, away=LCA
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 45 predictions to database for gradient_boosting
+[2025-12-09 20:31:23] Generating predictions for NHL with ensemble model...
+INFO:__main__:Running predictions for NHL...
+INFO:src.predict.engine:Loaded ensemble model for NHL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NHL (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 14 games for NHL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYI, away=VGK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=ANA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MCA, away=TBL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=SJS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OTT, away=NJD
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CAR, away=CBJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WPG, away=DAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STL, away=BOS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=EDM, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NSH, away=COL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=NYR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CGY, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UMA, away=FLA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=LAK
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 14 predictions to database for ensemble
+[2025-12-09 20:31:30] Generating predictions for NHL with random_forest model...
+INFO:__main__:Running predictions for NHL...
+INFO:src.predict.engine:Loaded random_forest model for NHL
+INFO:src.predict.engine:Loaded random_forest totals model for NHL (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 14 games for NHL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYI, away=VGK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=ANA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MCA, away=TBL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=SJS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OTT, away=NJD
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CAR, away=CBJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WPG, away=DAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STL, away=BOS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=EDM, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NSH, away=COL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=NYR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CGY, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UMA, away=FLA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=LAK
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 14 predictions to database for random_forest
+[2025-12-09 20:31:36] Generating predictions for NHL with gradient_boosting model...
+INFO:__main__:Running predictions for NHL...
+INFO:src.predict.engine:Loaded gradient_boosting model for NHL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for NHL (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 14 games for NHL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NYI, away=VGK
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PIT, away=ANA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MCA, away=TBL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PHI, away=SJS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=OTT, away=NJD
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CAR, away=CBJ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WPG, away=DAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STL, away=BOS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=EDM, away=BUF
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NSH, away=COL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHI, away=NYR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CGY, away=DET
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UMA, away=FLA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEA, away=LAK
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 14 predictions to database for gradient_boosting
+[2025-12-09 20:31:43] Generating predictions for EPL with ensemble model...
+INFO:__main__:Running predictions for EPL...
+INFO:src.predict.engine:Loaded ensemble model for EPL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for EPL (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 20 games for EPL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHE, away=EVE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LIV, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=FUL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ARS, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SUN, away=NEW
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WHU, away=AVL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NFO, away=TOT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRY, away=MCI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BRENTFORD, away=LUN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MUN, away=BOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 20 predictions to database for ensemble
+[2025-12-09 20:31:50] Generating predictions for EPL with random_forest model...
+INFO:__main__:Running predictions for EPL...
+INFO:src.predict.engine:Loaded random_forest model for EPL
+INFO:src.predict.engine:Loaded random_forest totals model for EPL (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 20 games for EPL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHE, away=EVE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LIV, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=FUL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ARS, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SUN, away=NEW
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WHU, away=AVL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NFO, away=TOT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRY, away=MCI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BRENTFORD, away=LUN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MUN, away=BOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 20 predictions to database for random_forest
+[2025-12-09 20:31:56] Generating predictions for EPL with gradient_boosting model...
+INFO:__main__:Running predictions for EPL...
+INFO:src.predict.engine:Loaded gradient_boosting model for EPL
+INFO:src.predict.engine:Loaded gradient_boosting totals model for EPL (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 20 games for EPL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CHE, away=EVE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LIV, away=BAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=FUL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ARS, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SUN, away=NEW
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WHU, away=AVL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=NFO, away=TOT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CRY, away=MCI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BRENTFORD, away=LUN
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MUN, away=BOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BUR, away=BUR
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 20 predictions to database for gradient_boosting
+[2025-12-09 20:32:03] Generating predictions for LALIGA with ensemble model...
+INFO:__main__:Running predictions for LALIGA...
+INFO:src.predict.engine:Loaded ensemble model for LALIGA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for LALIGA (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 10 games for LALIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RSO, away=GIRONA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATM, away=VAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MALLORCA, away=ELC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BAR, away=OSA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GETAFE, away=ESPANYOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEV, away=ROV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CVI, away=ATH
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEVANTE, away=VIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ALAV╔S, away=RMA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RAY, away=BET
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for ensemble
+[2025-12-09 20:32:11] Generating predictions for LALIGA with random_forest model...
+INFO:__main__:Running predictions for LALIGA...
+INFO:src.predict.engine:Loaded random_forest model for LALIGA
+INFO:src.predict.engine:Loaded random_forest totals model for LALIGA (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 10 games for LALIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RSO, away=GIRONA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATM, away=VAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MALLORCA, away=ELC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BAR, away=OSA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GETAFE, away=ESPANYOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEV, away=ROV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CVI, away=ATH
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEVANTE, away=VIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ALAV╔S, away=RMA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RAY, away=BET
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for random_forest
+[2025-12-09 20:32:17] Generating predictions for LALIGA with gradient_boosting model...
+INFO:__main__:Running predictions for LALIGA...
+INFO:src.predict.engine:Loaded gradient_boosting model for LALIGA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for LALIGA (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 10 games for LALIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RSO, away=GIRONA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATM, away=VAL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MALLORCA, away=ELC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BAR, away=OSA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GETAFE, away=ESPANYOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=SEV, away=ROV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=CVI, away=ATH
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEVANTE, away=VIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ALAV╔S, away=RMA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=RAY, away=BET
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for gradient_boosting
+[2025-12-09 20:32:25] Generating predictions for BUNDESLIGA with ensemble model...
+INFO:__main__:Running predictions for BUNDESLIGA...
+INFO:src.predict.engine:Loaded ensemble model for BUNDESLIGA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for BUNDESLIGA (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 9 games for BUNDESLIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBE, away=RLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MGL, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STP, away=118
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=AUGSBURG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THO, away=HAM
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEV, away=KOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRE, away=DOR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BMU, away=MAI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WER, away=STU
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for ensemble
+[2025-12-09 20:32:33] Generating predictions for BUNDESLIGA with random_forest model...
+INFO:__main__:Running predictions for BUNDESLIGA...
+INFO:src.predict.engine:Loaded random_forest model for BUNDESLIGA
+INFO:src.predict.engine:Loaded random_forest totals model for BUNDESLIGA (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 9 games for BUNDESLIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBE, away=RLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MGL, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STP, away=118
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=AUGSBURG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THO, away=HAM
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEV, away=KOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRE, away=DOR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BMU, away=MAI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WER, away=STU
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for random_forest
+[2025-12-09 20:32:38] Generating predictions for BUNDESLIGA with gradient_boosting model...
+INFO:__main__:Running predictions for BUNDESLIGA...
+INFO:src.predict.engine:Loaded gradient_boosting model for BUNDESLIGA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for BUNDESLIGA (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 9 games for BUNDESLIGA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UBE, away=RLE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MGL, away=WOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STP, away=118
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRA, away=AUGSBURG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=THO, away=HAM
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEV, away=KOL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FRE, away=DOR
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BMU, away=MAI
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=WER, away=STU
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for gradient_boosting
+[2025-12-09 20:32:47] Generating predictions for SERIEA with ensemble model...
+INFO:__main__:Running predictions for SERIEA...
+INFO:src.predict.engine:Loaded ensemble model for SERIEA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for SERIEA (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 10 games for SERIEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEC, away=PISA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TOR, away=CREMONESE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PAR, away=LAZ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATA, away=CAG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MIL, away=SAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FIO, away=VER
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UDI, away=NAP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GEN, away=INT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BOL, away=JUV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ROM, away=COMO
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for ensemble
+[2025-12-09 20:32:54] Generating predictions for SERIEA with random_forest model...
+INFO:__main__:Running predictions for SERIEA...
+INFO:src.predict.engine:Loaded random_forest model for SERIEA
+INFO:src.predict.engine:Loaded random_forest totals model for SERIEA (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 10 games for SERIEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEC, away=PISA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TOR, away=CREMONESE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PAR, away=LAZ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATA, away=CAG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MIL, away=SAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FIO, away=VER
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UDI, away=NAP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GEN, away=INT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BOL, away=JUV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ROM, away=COMO
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for random_forest
+[2025-12-09 20:32:59] Generating predictions for SERIEA with gradient_boosting model...
+INFO:__main__:Running predictions for SERIEA...
+INFO:src.predict.engine:Loaded gradient_boosting model for SERIEA
+INFO:src.predict.engine:Loaded gradient_boosting totals model for SERIEA (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 10 games for SERIEA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEC, away=PISA
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=TOR, away=CREMONESE
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PAR, away=LAZ
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ATA, away=CAG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MIL, away=SAS
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=FIO, away=VER
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=UDI, away=NAP
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=GEN, away=INT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=BOL, away=JUV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ROM, away=COMO
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 10 predictions to database for gradient_boosting
+[2025-12-09 20:33:07] Generating predictions for LIGUE1 with ensemble model...
+INFO:__main__:Running predictions for LIGUE1...
+INFO:src.predict.engine:Loaded ensemble model for LIGUE1
+INFO:src.predict.engine:Loaded gradient_boosting totals model for LIGUE1 (ensemble)
+INFO:src.predict.engine:prepare_features: Processing 9 games for LIGUE1
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ANG, away=NANTES
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=REN, away=BREST
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=METZ, away=PSG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PARIS FC, away=TOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LYO, away=HAV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STRASBOURG, away=LORIENT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=AUX, away=LIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEN, away=NIC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MAR, away=ASM
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for ensemble
+[2025-12-09 20:33:15] Generating predictions for LIGUE1 with random_forest model...
+INFO:__main__:Running predictions for LIGUE1...
+INFO:src.predict.engine:Loaded random_forest model for LIGUE1
+INFO:src.predict.engine:Loaded random_forest totals model for LIGUE1 (random_forest)
+INFO:src.predict.engine:prepare_features: Processing 9 games for LIGUE1
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ANG, away=NANTES
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=REN, away=BREST
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=METZ, away=PSG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PARIS FC, away=TOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LYO, away=HAV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STRASBOURG, away=LORIENT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=AUX, away=LIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEN, away=NIC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MAR, away=ASM
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for random_forest
+[2025-12-09 20:33:20] Generating predictions for LIGUE1 with gradient_boosting model...
+INFO:__main__:Running predictions for LIGUE1...
+INFO:src.predict.engine:Loaded gradient_boosting model for LIGUE1
+INFO:src.predict.engine:Loaded gradient_boosting totals model for LIGUE1 (gradient_boosting)
+INFO:src.predict.engine:prepare_features: Processing 9 games for LIGUE1
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=ANG, away=NANTES
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=REN, away=BREST
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=METZ, away=PSG
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=PARIS FC, away=TOU
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LYO, away=HAV
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=STRASBOURG, away=LORIENT
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=AUX, away=LIL
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=LEN, away=NIC
+WARNING:src.predict.engine:Skipping rolling stats: empty=True, home=MAR, away=ASM
+C:\Users\Bobby\Desktop\sports\src\predict\engine.py:375: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  totals_X = totals_X.fillna(0.0)
+INFO:src.predict.storage:Saved 9 predictions to database for gradient_boosting
+[2025-12-09 20:33:26] Prediction generation complete
+[2025-12-09 20:33:26] Step 2: Result syncing is now handled by ingestion pipeline.
+[2025-12-09 20:33:26] =========================================
+[2025-12-09 20:33:26] PREDICTION pipeline completed
+[2025-12-09 20:33:26] =========================================
+=== Master Pipeline Completed ===
+**********************
+Windows PowerShell transcript end
+End time: 20251209203326
+**********************

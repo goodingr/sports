@@ -1,0 +1,13 @@
+0: is_home
+1: moneyline
+2: implied_prob
+3: spread_line
+4: total_line
+5: espn_moneyline_open
+6: espn_moneyline_close
+7: espn_spread_open
+8: espn_spread_close
+9: espn_total_open
+10: espn_total_close
+11: rolling_win_pct_3
+12: rolling_point_diff_3

@@ -12,6 +12,9 @@ Scores are wrong for games Nov 22 and earlier after trying to recover from data 
 free prediction of the day
 ongoing games in dashboard and webapp
 /data page on dashboard that shows all data
+harden API for production
+dashboard loading times/ pagination
+pipeline speed up / multithreading
 
 more sports
 golf

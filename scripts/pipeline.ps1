@@ -46,8 +46,7 @@ if ($LASTEXITCODE -ne 0) {
 # 2. Train (Default, unless skipped)
 if (-not $SkipTraining) {
     Write-Host "=== Starting Training Pipeline ==="
-    # Skip ingestion since we just did it
-    & "$scriptDir/train.ps1" -SoccerOnly:$SoccerOnly -SkipIngestion
+    & "$scriptDir/train.ps1" -SoccerOnly:$SoccerOnly
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Training pipeline failed. Aborting."
         exit $LASTEXITCODE
@@ -59,7 +58,7 @@ if (-not $SkipTraining) {
 # 3. Predict
 Write-Host "=== Starting Prediction Pipeline ==="
 # Skip history and odds since we just did them
-& "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly -SkipHistory -SkipOdds
+& "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Prediction pipeline failed."
     exit $LASTEXITCODE

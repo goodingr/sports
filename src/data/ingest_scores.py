@@ -11,7 +11,13 @@ import requests
 import json
 from src.data.config import OddsAPISettings, OddsAPIKeyManager, RAW_DATA_DIR
 from src.db.core import connect
-from src.models.forward_test import _get_sport_key, SUPPORTED_LEAGUES
+from src.predict.config import LEAGUE_SPORT_KEYS, SUPPORTED_LEAGUES
+
+def _get_sport_key(league: str) -> str:
+    try:
+        return LEAGUE_SPORT_KEYS[league.upper()]
+    except KeyError as exc:
+        raise ValueError(f"Unknown league: {league}") from exc
 
 LOGGER = logging.getLogger(__name__)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 from datetime import datetime
 from typing import Iterable, List
@@ -193,5 +194,27 @@ def ingest(*, seasons: Iterable[int] | None = None, timeout: int = 30) -> str:  
     return output_dir
 
 
-__all__ = ["ingest"]
+    return output_dir
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Calculate NBA rolling metrics")
+    parser.add_argument(
+        "--seasons",
+        nargs="+",
+        help="List of NBA seasons (e.g., 2023 for 2023-24 season)",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+    seasons = [int(s) for s in args.seasons] if args.seasons else None
+    ingest(seasons=seasons)
+
+
+if __name__ == "__main__":
+    main()
+
 

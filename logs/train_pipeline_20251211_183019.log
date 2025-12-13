@@ -1,0 +1,390 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20251211183019
+Username: GAMING-PC\Bobby
+RunAs User: GAMING-PC\Bobby
+Configuration Name: 
+Machine: GAMING-PC (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command Import-Module 'c:\Users\Bobby\.antigravity\extensions\ms-vscode.powershell-2025.4.0-universal\modules\PowerShellEditorServices\PowerShellEditorServices.psd1'; Start-EditorServices -HostName 'Visual Studio Code Host' -HostProfileId 'Microsoft.VSCode' -HostVersion '2025.4.0' -BundledModulesPath 'c:\Users\Bobby\.antigravity\extensions\ms-vscode.powershell-2025.4.0-universal\modules' -EnableConsoleRepl -StartupBanner "PowerShell Extension v2025.4.0
+Copyright (c) Microsoft Corporation.
+
+https://aka.ms/vscode-powershell
+Type 'help' to get help.
+" -LogLevel 'Warning' -LogPath 'c:\Users\Bobby\AppData\Roaming\Antigravity\logs\20251210T082526\window1\exthost\ms-vscode.powershell' -SessionDetailsPath 'c:\Users\Bobby\AppData\Roaming\Antigravity\User\globalStorage\ms-vscode.powershell\sessions\PSES-VSCode-41000-324204.json' -FeatureFlags @() 
+Process ID: 25188
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is logs/train_pipeline_20251211_183019.log
+[2025-12-11 18:30:19] =========================================
+[2025-12-11 18:30:19] Starting TRAINING pipeline
+[2025-12-11 18:30:19] =========================================
+[2025-12-11 18:30:19] Processing leagues: NFL, NBA, CFB, NCAAB, NHL, EPL, LALIGA, BUNDESLIGA, SERIEA, LIGUE1
+[2025-12-11 18:30:19] Step 1: Building Datasets...
+[2025-12-11 18:30:19] Building dataset for NFL (Seasons: 2015-2025)...
+INFO:src.features.dataset.nfl:Loading cached schedules data from C:\Users\Bobby\Desktop\sports\data\raw\results\schedules_2015_2026.parquet
+INFO:src.features.dataset.nfl:Loading cached team metrics from C:\Users\Bobby\Desktop\sports\data\processed\intermediate\team_metrics_2015_2026.parquet
+INFO:src.features.dataset.nfl:Loading cached injury reports from C:\Users\Bobby\Desktop\sports\data\raw\results\injuries_2015_2026.parquet
+INFO:src.features.dataset.nfl:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nfl_2015_2026.parquet
+[2025-12-11 18:30:23] Building dataset for NBA (Seasons: 2015-2025)...
+INFO:src.features.dataset.nba:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nba_2015_2026.parquet
+[2025-12-11 18:30:24] Building dataset for CFB (Seasons: 2015-2025)...
+INFO:src.features.dataset.cfb:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_cfb_2015_2026.parquet
+[2025-12-11 18:30:26] Building dataset for NCAAB (Seasons: 2015-2025)...
+INFO:src.features.dataset.ncaab:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_ncaab_2015_2026.parquet
+[2025-12-11 18:30:27] Building dataset for NHL (Seasons: 2015-2025)...
+INFO:src.features.dataset.nhl:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_nhl_2015_2026.parquet
+[2025-12-11 18:30:29] Building dataset for EPL (Seasons: 2015-2025)...
+WARNING:src.features.soccer_features:Unable to align Football-Data odds for EPL
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_epl_2015_2026.parquet
+[2025-12-11 18:30:30] Building dataset for LALIGA (Seasons: 2015-2025)...
+WARNING:src.features.soccer_features:Unable to align Football-Data odds for LALIGA
+WARNING:src.features.soccer_features:Unable to match Understat games to warehouse games for LALIGA
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_laliga_2015_2026.parquet
+[2025-12-11 18:30:32] Building dataset for BUNDESLIGA (Seasons: 2015-2025)...
+WARNING:src.features.soccer_features:Unable to align Football-Data odds for BUNDESLIGA
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_bundesliga_2015_2026.parquet
+[2025-12-11 18:30:33] Building dataset for SERIEA (Seasons: 2015-2025)...
+WARNING:src.features.soccer_features:Unable to align Football-Data odds for SERIEA
+WARNING:src.features.soccer_features:Unable to match Understat games to warehouse games for SERIEA
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_seriea_2015_2026.parquet
+[2025-12-11 18:30:35] Building dataset for LIGUE1 (Seasons: 2015-2025)...
+WARNING:src.features.soccer_features:Unable to align Football-Data odds for LIGUE1
+WARNING:src.features.soccer_features:Unable to match Understat games to warehouse games for LIGUE1
+INFO:src.features.dataset.soccer:Wrote processed dataset to C:\Users\Bobby\Desktop\sports\data\processed\model_input\moneyline_ligue1_2015_2026.parquet
+[2025-12-11 18:30:36] Step 2: Training Models...
+[2025-12-11 18:30:36] Training NFL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NFL random_forest from config\tuned_params\nfl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 5 kept (threshold=0.050, best_log_loss=0.622)
+INFO:src.db.models:Persisted 1575 predictions for model ensemble_calibrated_7cdc49cd
+INFO:__main__:Saved model to models\nfl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_ensemble_calibrated_metrics.json
+[2025-12-11 18:31:13] Training NFL random_forest model...
+INFO:__main__:Loaded tuned params for NFL random_forest from config\tuned_params\nfl_random_forest.json
+INFO:src.db.models:Persisted 1575 predictions for model random_forest_calibrated_bb7f675a
+INFO:__main__:Saved model to models\nfl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_random_forest_calibrated_metrics.json
+[2025-12-11 18:31:16] Training NFL random_forest totals model...
+Totals model saved to models\nfl_totals_random_forest.pkl
+Metrics written to reports\backtests\nfl_totals_random_forest_metrics.json
+[2025-12-11 18:31:18] Training NFL gradient_boosting model...
+INFO:src.db.models:Persisted 1575 predictions for model gradient_boosting_calibrated_8c4d08d4
+INFO:__main__:Saved model to models\nfl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nfl_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:31:21] Training NFL gradient_boosting totals model...
+Totals model saved to models\nfl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nfl_totals_gradient_boosting_metrics.json
+[2025-12-11 18:31:23] Training NBA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NBA random_forest from config\tuned_params\nba_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.602)
+INFO:src.db.models:Persisted 3491 predictions for model ensemble_calibrated_6d5fc4eb
+INFO:__main__:Saved model to models\nba_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_ensemble_calibrated_metrics.json
+[2025-12-11 18:31:36] Training NBA random_forest model...
+INFO:__main__:Loaded tuned params for NBA random_forest from config\tuned_params\nba_random_forest.json
+INFO:src.db.models:Persisted 3491 predictions for model random_forest_calibrated_07d7d4bc
+INFO:__main__:Saved model to models\nba_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_random_forest_calibrated_metrics.json
+[2025-12-11 18:31:39] Training NBA random_forest totals model...
+Totals model saved to models\nba_totals_random_forest.pkl
+Metrics written to reports\backtests\nba_totals_random_forest_metrics.json
+[2025-12-11 18:31:41] Training NBA gradient_boosting model...
+INFO:src.db.models:Persisted 3491 predictions for model gradient_boosting_calibrated_2a685ed8
+INFO:__main__:Saved model to models\nba_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nba_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:31:45] Training NBA gradient_boosting totals model...
+Totals model saved to models\nba_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nba_totals_gradient_boosting_metrics.json
+[2025-12-11 18:31:46] Training CFB ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for CFB random_forest from config\tuned_params\cfb_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 4 kept (threshold=0.050, best_log_loss=0.509)
+INFO:src.db.models:Persisted 217 predictions for model ensemble_calibrated_309894cc
+INFO:__main__:Saved model to models\cfb_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_ensemble_calibrated_metrics.json
+[2025-12-11 18:31:54] Training CFB random_forest model...
+INFO:__main__:Loaded tuned params for CFB random_forest from config\tuned_params\cfb_random_forest.json
+INFO:src.db.models:Persisted 217 predictions for model random_forest_calibrated_999c1517
+INFO:__main__:Saved model to models\cfb_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_random_forest_calibrated_metrics.json
+[2025-12-11 18:31:58] Training CFB random_forest totals model...
+Totals model saved to models\cfb_totals_random_forest.pkl
+Metrics written to reports\backtests\cfb_totals_random_forest_metrics.json
+[2025-12-11 18:31:59] Training CFB gradient_boosting model...
+INFO:src.db.models:Persisted 217 predictions for model gradient_boosting_calibrated_cc03174f
+INFO:__main__:Saved model to models\cfb_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\cfb_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:32:03] Training CFB gradient_boosting totals model...
+Totals model saved to models\cfb_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\cfb_totals_gradient_boosting_metrics.json
+[2025-12-11 18:32:05] Training NCAAB ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NCAAB random_forest from config\tuned_params\ncaab_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.640)
+INFO:src.db.models:Persisted 42160 predictions for model ensemble_calibrated_e993cf00
+INFO:__main__:Saved model to models\ncaab_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_ensemble_calibrated_metrics.json
+[2025-12-11 18:33:30] Training NCAAB random_forest model...
+INFO:__main__:Loaded tuned params for NCAAB random_forest from config\tuned_params\ncaab_random_forest.json
+INFO:src.db.models:Persisted 42160 predictions for model random_forest_calibrated_b34138ff
+INFO:__main__:Saved model to models\ncaab_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_random_forest_calibrated_metrics.json
+[2025-12-11 18:33:41] Training NCAAB random_forest totals model...
+Totals model saved to models\ncaab_totals_random_forest.pkl
+Metrics written to reports\backtests\ncaab_totals_random_forest_metrics.json
+[2025-12-11 18:33:43] Training NCAAB gradient_boosting model...
+INFO:src.db.models:Persisted 42160 predictions for model gradient_boosting_calibrated_8296c4d6
+INFO:__main__:Saved model to models\ncaab_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ncaab_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:33:51] Training NCAAB gradient_boosting totals model...
+Totals model saved to models\ncaab_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\ncaab_totals_gradient_boosting_metrics.json
+[2025-12-11 18:33:53] Training NHL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\neural_network\_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (500) reached and the optimization hasn't converged yet.
+  warnings.warn(
+INFO:__main__:Loaded tuned params for NHL random_forest from config\tuned_params\nhl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.665)
+INFO:src.db.models:Persisted 83 predictions for model ensemble_calibrated_a06fc354
+INFO:__main__:Saved model to models\nhl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_ensemble_calibrated_metrics.json
+[2025-12-11 18:34:00] Training NHL random_forest model...
+INFO:__main__:Loaded tuned params for NHL random_forest from config\tuned_params\nhl_random_forest.json
+INFO:src.db.models:Persisted 83 predictions for model random_forest_calibrated_619e3b53
+INFO:__main__:Saved model to models\nhl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_random_forest_calibrated_metrics.json
+[2025-12-11 18:34:03] Training NHL random_forest totals model...
+Totals model saved to models\nhl_totals_random_forest.pkl
+Metrics written to reports\backtests\nhl_totals_random_forest_metrics.json
+[2025-12-11 18:34:05] Training NHL gradient_boosting model...
+INFO:src.db.models:Persisted 83 predictions for model gradient_boosting_calibrated_59a4ed7c
+INFO:__main__:Saved model to models\nhl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\nhl_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:34:08] Training NHL gradient_boosting totals model...
+Totals model saved to models\nhl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\nhl_totals_gradient_boosting_metrics.json
+[2025-12-11 18:34:10] Training EPL ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for EPL random_forest from config\tuned_params\epl_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.605)
+INFO:src.db.models:Persisted 1013 predictions for model ensemble_calibrated_3fcb3c76
+INFO:__main__:Saved model to models\epl_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_ensemble_calibrated_metrics.json
+[2025-12-11 18:34:17] Training EPL random_forest model...
+INFO:__main__:Loaded tuned params for EPL random_forest from config\tuned_params\epl_random_forest.json
+INFO:src.db.models:Persisted 1013 predictions for model random_forest_calibrated_409c795b
+INFO:__main__:Saved model to models\epl_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_random_forest_calibrated_metrics.json
+[2025-12-11 18:34:20] Training EPL random_forest totals model...
+Totals model saved to models\epl_totals_random_forest.pkl
+Metrics written to reports\backtests\epl_totals_random_forest_metrics.json
+[2025-12-11 18:34:22] Training EPL gradient_boosting model...
+INFO:src.db.models:Persisted 1013 predictions for model gradient_boosting_calibrated_ae106365
+INFO:__main__:Saved model to models\epl_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\epl_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:34:26] Training EPL gradient_boosting totals model...
+Totals model saved to models\epl_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\epl_totals_gradient_boosting_metrics.json
+[2025-12-11 18:34:28] Training LALIGA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for LALIGA random_forest from config\tuned_params\laliga_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.540)
+INFO:src.db.models:Persisted 1013 predictions for model ensemble_calibrated_a6e2283d
+INFO:__main__:Saved model to models\laliga_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_ensemble_calibrated_metrics.json
+[2025-12-11 18:34:36] Training LALIGA random_forest model...
+INFO:__main__:Loaded tuned params for LALIGA random_forest from config\tuned_params\laliga_random_forest.json
+INFO:src.db.models:Persisted 1013 predictions for model random_forest_calibrated_67c45469
+INFO:__main__:Saved model to models\laliga_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_random_forest_calibrated_metrics.json
+[2025-12-11 18:34:39] Training LALIGA random_forest totals model...
+Totals model saved to models\laliga_totals_random_forest.pkl
+Metrics written to reports\backtests\laliga_totals_random_forest_metrics.json
+[2025-12-11 18:34:41] Training LALIGA gradient_boosting model...
+INFO:src.db.models:Persisted 1013 predictions for model gradient_boosting_calibrated_30620e10
+INFO:__main__:Saved model to models\laliga_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\laliga_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:34:45] Training LALIGA gradient_boosting totals model...
+Totals model saved to models\laliga_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\laliga_totals_gradient_boosting_metrics.json
+[2025-12-11 18:34:47] Training BUNDESLIGA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for BUNDESLIGA random_forest from config\tuned_params\bundesliga_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.589)
+INFO:src.db.models:Persisted 815 predictions for model ensemble_calibrated_e1839bbf
+INFO:__main__:Saved model to models\bundesliga_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_ensemble_calibrated_metrics.json
+[2025-12-11 18:34:55] Training BUNDESLIGA random_forest model...
+INFO:__main__:Loaded tuned params for BUNDESLIGA random_forest from config\tuned_params\bundesliga_random_forest.json
+INFO:src.db.models:Persisted 815 predictions for model random_forest_calibrated_b610fe52
+INFO:__main__:Saved model to models\bundesliga_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_random_forest_calibrated_metrics.json
+[2025-12-11 18:34:59] Training BUNDESLIGA random_forest totals model...
+Totals model saved to models\bundesliga_totals_random_forest.pkl
+Metrics written to reports\backtests\bundesliga_totals_random_forest_metrics.json
+[2025-12-11 18:35:01] Training BUNDESLIGA gradient_boosting model...
+INFO:src.db.models:Persisted 815 predictions for model gradient_boosting_calibrated_f343c7bb
+INFO:__main__:Saved model to models\bundesliga_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\bundesliga_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:35:04] Training BUNDESLIGA gradient_boosting totals model...
+Totals model saved to models\bundesliga_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\bundesliga_totals_gradient_boosting_metrics.json
+[2025-12-11 18:35:06] Training SERIEA ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for SERIEA random_forest from config\tuned_params\seriea_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.585)
+INFO:src.db.models:Persisted 1003 predictions for model ensemble_calibrated_4072248a
+INFO:__main__:Saved model to models\seriea_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_ensemble_calibrated_metrics.json
+[2025-12-11 18:35:14] Training SERIEA random_forest model...
+INFO:__main__:Loaded tuned params for SERIEA random_forest from config\tuned_params\seriea_random_forest.json
+INFO:src.db.models:Persisted 1003 predictions for model random_forest_calibrated_1d50c95a
+INFO:__main__:Saved model to models\seriea_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_random_forest_calibrated_metrics.json
+[2025-12-11 18:35:16] Training SERIEA random_forest totals model...
+Totals model saved to models\seriea_totals_random_forest.pkl
+Metrics written to reports\backtests\seriea_totals_random_forest_metrics.json
+[2025-12-11 18:35:18] Training SERIEA gradient_boosting model...
+INFO:src.db.models:Persisted 1003 predictions for model gradient_boosting_calibrated_e2903b16
+INFO:__main__:Saved model to models\seriea_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\seriea_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:35:22] Training SERIEA gradient_boosting totals model...
+Totals model saved to models\seriea_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\seriea_totals_gradient_boosting_metrics.json
+[2025-12-11 18:35:23] Training LIGUE1 ensemble model...
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+C:\Users\Bobby\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\Local\pypoetry\Cache\virtualenvs\sports-betting-analytics-w0RVEvSZ-py3.11\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+INFO:__main__:Loaded tuned params for LIGUE1 random_forest from config\tuned_params\ligue1_random_forest.json
+INFO:__main__:Ensemble pruning: 6 candidates, 6 kept (threshold=0.050, best_log_loss=0.592)
+INFO:src.db.models:Persisted 1012 predictions for model ensemble_calibrated_0634708a
+INFO:__main__:Saved model to models\ligue1_ensemble_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_ensemble_calibrated_metrics.json
+[2025-12-11 18:35:31] Training LIGUE1 random_forest model...
+INFO:__main__:Loaded tuned params for LIGUE1 random_forest from config\tuned_params\ligue1_random_forest.json
+INFO:src.db.models:Persisted 1012 predictions for model random_forest_calibrated_39d730cf
+INFO:__main__:Saved model to models\ligue1_random_forest_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_random_forest_calibrated_metrics.json
+[2025-12-11 18:35:34] Training LIGUE1 random_forest totals model...
+Totals model saved to models\ligue1_totals_random_forest.pkl
+Metrics written to reports\backtests\ligue1_totals_random_forest_metrics.json
+[2025-12-11 18:35:36] Training LIGUE1 gradient_boosting model...
+INFO:src.db.models:Persisted 1012 predictions for model gradient_boosting_calibrated_32e63fd1
+INFO:__main__:Saved model to models\ligue1_gradient_boosting_calibrated_moneyline.pkl
+INFO:__main__:Metrics written to reports\backtests\ligue1_gradient_boosting_calibrated_metrics.json
+[2025-12-11 18:35:39] Training LIGUE1 gradient_boosting totals model...
+Totals model saved to models\ligue1_totals_gradient_boosting.pkl
+Metrics written to reports\backtests\ligue1_totals_gradient_boosting_metrics.json
+[2025-12-11 18:35:41] =========================================
+[2025-12-11 18:35:41] TRAINING pipeline completed
+[2025-12-11 18:35:41] =========================================
+**********************
+Windows PowerShell transcript end
+End time: 20251211183541
+**********************

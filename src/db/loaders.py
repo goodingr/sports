@@ -19,11 +19,31 @@ from .core import connect
 LOGGER = logging.getLogger(__name__)
 
 
+import re
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+def _generate_internal_id(league: str, date_str: str, home_name: str, away_name: str) -> str:
+    """
+    Generate canonical ID: LEAGUE_YYYYMMDD_HOME_AWAY
+    """
+    def clean_slug(s):
+        s = re.sub(r'[^\w\s]', '', s)
+        s = re.sub(r'\s+', '_', s.strip())
+        return s.upper()
+
+    h_slug = clean_slug(home_name)
+    a_slug = clean_slug(away_name)
+    # Ensure date is just YYYYMMDD
+    if "T" in date_str:
+        date_str = date_str.split("T")[0]
+    d_slug = date_str.replace("-", "")
+    
+    return f"{league}_{d_slug}_{h_slug}_{a_slug}"
 
 
 def _ensure_odds_line_column(conn) -> None:
@@ -328,6 +348,9 @@ def load_schedules(
                 # If game exists, use the existing ID to update it instead of creating a new one
                 game_id = existing_id
                 LOGGER.debug("Matched existing game %s for %s vs %s", game_id, home_raw, away_raw)
+            else:
+                LOGGER.info("Skipping schedule for %s vs %s: no matching game found in DB", home_raw, away_raw)
+                continue
 
             conn.execute(
                 """
@@ -491,51 +514,38 @@ def load_ncaab_regular_season_results(
                     home_code, home_name, home_score = l_code, l_name, l_score
                     away_code, away_name, away_score = w_code, w_name, w_score
 
-            game_id = _build_killersports_game_id(
-                league_upper,
-                season_value,
-                game_timestamp,
-                away_code,
-                home_code,
+            # Find existing game (Update Only Mode)
+            game_id = _find_game_by_details(
+                conn,
+                sport_id=sport_id,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                start_iso=start_time,
+                odds_api_id=None
             )
+
+            if not game_id:
+                # Try generating internal ID to check for exact match
+                internal_id = _generate_internal_id(league_upper, start_time, home_name, away_name)
+                existing = conn.execute("SELECT game_id FROM games WHERE game_id = ?", (internal_id,)).fetchone()
+                if existing:
+                    game_id = existing[0]
+
+            if not game_id:
+                # LOGGER.debug("Skipping NCAAB result for %s vs %s: no matching game", home_name, away_name)
+                continue
+
             processed_game_ids.add(game_id)
-
-            home_team_id = _ensure_team_cached(conn, sport_id, home_code, home_name, team_cache)
-            away_team_id = _ensure_team_cached(conn, sport_id, away_code, away_name, team_cache)
-
+            
+            # Allow updating metadata for existing games (e.g. status, score)
             conn.execute(
                 """
-                INSERT INTO games (
-                    game_id, sport_id, season, game_type, week, start_time_utc,
-                    home_team_id, away_team_id, venue, status, gsis_id, pfr_id, is_neutral
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(game_id) DO UPDATE SET
-                    sport_id = excluded.sport_id,
-                    season = excluded.season,
-                    game_type = excluded.game_type,
-                    week = excluded.week,
-                    start_time_utc = excluded.start_time_utc,
-                    home_team_id = excluded.home_team_id,
-                    away_team_id = excluded.away_team_id,
-                    venue = excluded.venue,
-                    status = excluded.status,
-                    is_neutral = excluded.is_neutral
+                UPDATE games SET
+                    status = 'final',
+                    is_neutral = ?
+                WHERE game_id = ?
                 """,
-                (
-                    game_id,
-                    sport_id,
-                    season_value,
-                    "regular",
-                    None,
-                    start_time,
-                    home_team_id,
-                    away_team_id,
-                    None,
-                    "final",
-                    None,
-                    None,
-                    1 if neutral_site else 0,
-                ),
+                (1 if neutral_site else 0, game_id),
             )
 
             conn.execute(
@@ -1018,34 +1028,46 @@ def load_odds_snapshot(
             )
 
             if not game_id:
-                base_id = event.get("id") or uuid.uuid4().hex
-                game_id = f"{config['league']}_{base_id}" if not base_id.upper().startswith(config["league"]) else base_id
-                print(f"DEBUG: Creating new game {game_id}")
-                season = commence_iso and datetime.fromisoformat(commence_iso).year
-                conn.execute(
-                    """
-                    INSERT INTO games (
-                        game_id, sport_id, season, game_type, week, start_time_utc,
-                        home_team_id, away_team_id, venue, status, odds_api_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(game_id) DO UPDATE SET
-                        start_time_utc = excluded.start_time_utc,
-                        odds_api_id = excluded.odds_api_id
-                    """,
-                    (
-                        game_id,
-                        sport_id,
-                        season,
-                        event.get("sport_title"),
-                        None,
-                        commence_iso,
-                        home_team_id,
-                        away_team_id,
-                        None,
-                        "scheduled",
-                        event.get("id"),
-                    ),
-                )
+                # 1. Generate Canonical Internal ID
+                internal_id = _generate_internal_id(config['league'], commence_iso, event.get("home_team"), event.get("away_team"))
+                
+                # 2. Check if this Canonical ID already exists (from a previous ingestion or refactor)
+                existing_canonical = conn.execute("SELECT game_id FROM games WHERE game_id = ?", (internal_id,)).fetchone()
+                
+                if existing_canonical:
+                    game_id = existing_canonical[0]
+                    LOGGER.debug("Matched existing canonical game %s by Internal ID", game_id)
+                    # Update Odds API ID if missing
+                    conn.execute("UPDATE games SET odds_api_id = ? WHERE game_id = ? AND odds_api_id IS NULL", (event.get("id"), game_id))
+                else:
+                    # 3. Create NEW Game with Canonical ID
+                    game_id = internal_id
+                    print(f"DEBUG: Creating new game {game_id} (Internal ID)")
+                    season = commence_iso and datetime.fromisoformat(commence_iso).year
+                    conn.execute(
+                        """
+                        INSERT INTO games (
+                            game_id, sport_id, season, game_type, week, start_time_utc,
+                            home_team_id, away_team_id, venue, status, odds_api_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(game_id) DO UPDATE SET
+                            start_time_utc = excluded.start_time_utc,
+                            odds_api_id = excluded.odds_api_id
+                        """,
+                        (
+                            game_id,
+                            sport_id,
+                            season,
+                            event.get("sport_title"),
+                            None,
+                            commence_iso,
+                            home_team_id,
+                            away_team_id,
+                            None,
+                            "scheduled",
+                            event.get("id"),
+                        ),
+                    )
             else:
                 conn.execute(
                     """

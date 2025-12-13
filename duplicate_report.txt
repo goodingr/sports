@@ -1,0 +1,328 @@
+Duplicate Games Report
+Generated: 2025-12-10 12:23:16
+
+Found 46 duplicate pairs.
+================================================================================
+
+1. BUNDESLIGA - 2025-11-23 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746812                   | St. Pauli                 | Union Berlin              | 0     | 0
+BUNDESLIGA_04203a00935b804a5f20040d42921845 | FC St. Pauli              | 1. FC Union Berlin        | 576   | 1
+
+2. BUNDESLIGA - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746818                   | Bayern Munich             | St. Pauli                 | 0     | 0
+BUNDESLIGA_20251129_BAYERN_MUNICH_FC_ST._PAULI | Bayern Munich             | FC St. Pauli              | 108   | 1
+
+3. BUNDESLIGA - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746823                   | 1. FC Union Berlin        | 1. FC Heidenheim          | 108   | 0
+7f42e93ebff5aee1ef321e55c6a69436    | Union Berlin              | 1. FC Heidenheim          | 0     | 1
+
+4. BUNDESLIGA - 2025-11-30 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_9842                     | SC Freiburg               | FSV Mainz 05              | 622   | 1
+BUNDESLIGA_746819                   | SC Freiburg               | Mainz                     | 0     | 0
+
+5. BUNDESLIGA - 2025-12-13 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746839                   | TSG Hoffenheim            | Hamburg SV                | 0     | 0
+BUNDESLIGA_c9b02aceb847201529f44e4fd977533c | TSG Hoffenheim            | Hamburger SV              | 323   | 3
+
+6. BUNDESLIGA - 2025-12-13 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746835                   | St. Pauli                 | 1. FC Heidenheim          | 0     | 0
+BUNDESLIGA_f4e96250066c03f8777d5b23305ffc45 | FC St. Pauli              | 1. FC Heidenheim          | 323   | 3
+
+7. BUNDESLIGA - 2025-12-13 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746841                   | Eintracht Frankfurt       | FC Augsburg               | 0     | 0
+BUNDESLIGA_549978e8db8b1a3d3bfbb10c0bc4fa06 | Eintracht Frankfurt       | Augsburg                  | 323   | 3
+
+8. BUNDESLIGA - 2025-12-14 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746840                   | Bayern Munich             | Mainz                     | 0     | 0
+BUNDESLIGA_a48e4ff77f2aec7494593ad0ead98be2 | Bayern Munich             | FSV Mainz 05              | 323   | 3
+
+9. BUNDESLIGA - 2025-12-20 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746852                   | Hamburg SV                | Eintracht Frankfurt       | 0     | 0
+BUNDESLIGA_b8cc87f70b3d9a67a1921d7032a58c12 | Hamburger SV              | Eintracht Frankfurt       | 63    | 0
+
+10. BUNDESLIGA - 2025-12-20 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+BUNDESLIGA_746851                   | FC Augsburg               | Werder Bremen             | 0     | 0
+BUNDESLIGA_04c066e15a36c8db01e7dbcc69d3fc46 | Augsburg                  | Werder Bremen             | 63    | 0
+
+11. CFB - 2025-11-15 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401761653                       | UL Monroe                 | South Alabama             | 26    | 0
+CFB_746eede942625764b9f241da1ad51d66 | UL Monroe Warhawks        | South Alabama             | 18    | 0
+
+12. CFB - 2025-11-15 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401761654                       | Southern Miss             | Texas State               | 0     | 0
+CFB_e3d2cf0a6786b052ff011884e70e1a8d | Southern Mississippi Golden Eagles | Texas State               | 18    | 0
+
+13. CFB - 2025-11-22 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_e07a0fd751788ee54312e351723fba5f | Texas State               | UL Monroe Warhawks        | 466   | 0
+CFB_401761659                       | Texas State               | UL Monroe                 | 26    | 0
+
+14. CFB - 2025-11-22 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_9ecbb88fcab392aaa87a855d9b592269 | South Alabama             | Southern Mississippi Golden Eagles | 476   | 0
+CFB_401761658                       | South Alabama             | Southern Miss             | 22    | 1
+
+15. CFB - 2025-11-28 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401762442                       | North Texas Mean Green    | Temple                    | 422   | 0
+4ed54dc6116ec6373f9a1cf015ca6070    | North Texas Mean Green    | Temple Owls               | 0     | 1
+
+16. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401752918                       | Minnesota                 | Wisconsin                 | 444   | 0
+01a5a9e3a1d3ecea3295256c33dfef3e    | Minnesota Golden Gophers  | Wisconsin Badgers         | 0     | 1
+
+17. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401752791                       | Tennessee                 | Vanderbilt                | 434   | 0
+8ff0041fc39ed3aaabd78295aaa44ccc    | Tennessee Volunteers      | Vanderbilt Commodores     | 0     | 1
+
+18. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401757313                       | Liberty                   | Kennesaw State Owls       | 390   | 0
+884dea46381785292d51d8864de287c7    | Liberty Flames            | Kennesaw State Owls       | 0     | 1
+
+19. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_011ef17b2d5d53a4f74992fa28c703ce | Southern Mississippi Golden Eagles | Troy                      | 378   | 0
+CFB_401761666                       | Southern Miss             | Troy                      | 22    | 1
+
+20. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_12bd1537fbeb1dc2a7c5bffa180a01bc | Louisiana Ragin Cajuns    | UL Monroe Warhawks        | 424   | 1
+12bd1537fbeb1dc2a7c5bffa180a01bc    | Louisiana Ragin Cajuns    | UL Monroe Warhawks        | 0     | 0
+
+21. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_12bd1537fbeb1dc2a7c5bffa180a01bc | Louisiana Ragin Cajuns    | UL Monroe Warhawks        | 424   | 1
+CFB_401761665                       | Louisiana                 | UL Monroe                 | 26    | 0
+
+22. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+12bd1537fbeb1dc2a7c5bffa180a01bc    | Louisiana Ragin Cajuns    | UL Monroe Warhawks        | 0     | 0
+CFB_401761665                       | Louisiana                 | UL Monroe                 | 26    | 0
+
+23. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_0bf97e02f7764b89a22261ca0e26867a | Jacksonville State Gamecocks | Western Kentucky Hilltoppers | 424   | 0
+0bf97e02f7764b89a22261ca0e26867a    | Jacksonville State Gamecocks | Western Kentucky Hilltoppers | 0     | 1
+
+24. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401761663                       | Marshall                  | Georgia Southern          | 424   | 0
+6888a4fdeae90f5ab2eb0051e9b20ed4    | Marshall Thundering Herd  | Georgia Southern Eagles   | 0     | 1
+
+25. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_56a84e83bd6d308bd7e7639bcb7b5879 | Miami (OH) RedHawks       | Ball State                | 108   | 0
+CFB_401762875                       | Miami (OH) RedHawks       | Ball State Cardinals      | 0     | 1
+
+26. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_09d90f3370c02dea5e1eac347ffe476f | Baylor                    | Houston                   | 108   | 0
+09d90f3370c02dea5e1eac347ffe476f    | Baylor Bears              | Houston Cougars           | 0     | 1
+
+27. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_254de28063691b5c8d711686691d3c90 | Florida Atlantic          | East Carolina             | 108   | 0
+254de28063691b5c8d711686691d3c90    | Florida Atlantic Owls     | East Carolina Pirates     | 0     | 1
+
+28. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_8f08d4462c8cbc09b866893ca21ae406 | Pittsburgh                | Miami Hurricanes          | 108   | 0
+8f08d4462c8cbc09b866893ca21ae406    | Pittsburgh Panthers       | Miami Hurricanes          | 0     | 1
+
+29. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_a17c0bb6637ad2192754d6d1059f7e92 | Michigan Wolverines       | Ohio State Buckeyes       | 108   | 1
+a17c0bb6637ad2192754d6d1059f7e92    | Michigan Wolverines       | Ohio State Buckeyes       | 0     | 0
+
+30. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_9328f7960f57736e8da4b90cb2bdd826 | West Virginia             | Texas Tech Red Raiders    | 102   | 0
+CFB_401756968                       | West Virginia Mountaineers | Texas Tech Red Raiders    | 0     | 1
+
+31. CFB - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_401752792                       | Texas                     | Texas A&M Aggies          | 472   | 0
+031eaf298fe62f9cc1ee593ebf867ad2    | Texas Longhorns           | Texas A&M Aggies          | 0     | 1
+
+32. CFB - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_87fe86f5fa1edd149d6cc5f8bcb82be2 | Texas Tech Red Raiders    | BYU Cougars               | 264   | 3
+87fe86f5fa1edd149d6cc5f8bcb82be2    | Texas Tech Red Raiders    | BYU Cougars               | 0     | 3
+
+33. CFB - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_825ab37366030db2e15565370bfc0104 | Western Michigan Broncos  | Miami (OH) RedHawks       | 252   | 3
+825ab37366030db2e15565370bfc0104    | Western Michigan Broncos  | Miami (OH) RedHawks       | 0     | 3
+
+34. CFB - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_bcda84050f6f1fe4756756124d40f116 | Tulane Green Wave         | North Texas Mean Green    | 248   | 3
+bcda84050f6f1fe4756756124d40f116    | Tulane Green Wave         | North Texas Mean Green    | 0     | 3
+
+35. CFB - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_05574125db5d3bc8c0a9f0ce97971957 | Boise State Broncos       | UNLV Rebels               | 228   | 3
+05574125db5d3bc8c0a9f0ce97971957    | Boise State Broncos       | UNLV Rebels               | 0     | 3
+
+36. CFB - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+CFB_34fe27e86b995ea9e3cdc015d1ff5a46 | James Madison Dukes       | Troy Trojans              | 228   | 3
+34fe27e86b995ea9e3cdc015d1ff5a46    | James Madison Dukes       | Troy Trojans              | 0     | 3
+
+37. EPL - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_740724                          | Sunderland                | AFC Bournemouth           | 870   | 1
+EPL_4545                            | Sunderland                | Bournemouth               | 0     | 1
+
+38. EPL - 2025-11-29 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_08b50ad69ab9749cae69599e701880dd | Brentford                 | Burnley                   | 870   | 0
+EPL_740718                          | Brentford                 | Burnley                   | 0     | 1
+
+39. EPL - 2025-12-02 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_4440                            | Bournemouth               | Everton                   | 1211  | 1
+EPL_740733                          | AFC Bournemouth           | Everton                   | 0     | 0
+
+40. EPL - 2025-12-06 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_740741                          | Newcastle United          | Burnley                   | 272   | 3
+dcafed81f9b2b895db5594b0b22eb960    | Newcastle United          | Burnley                   | 0     | 3
+
+41. EPL - 2025-12-15 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_740751                          | Manchester United         | AFC Bournemouth           | 0     | 0
+EPL_da97163cda7b411e5e82540bbbc4a40b | Manchester United         | Bournemouth               | 201   | 3
+
+42. EPL - 2025-12-20 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+EPL_740764                          | AFC Bournemouth           | Burnley                   | 0     | 0
+EPL_796da52182daea1fe28085fe20a2c206 | Bournemouth               | Burnley                   | 91    | 0
+
+43. LALIGA - 2025-12-21 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+LALIGA_748313                       | Elche                     | Rayo Vallecano            | 0     | 0
+LALIGA_d1d2546c5bb9416d19d3bda0b7f407fa | Elche CF                  | Rayo Vallecano            | 65    | 0
+
+44. NCAAB - 2025-11-25 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+NCAAB_0df333d06881f3a4b50c049bc681535d | Ohio State Buckeyes       | Mt. St. Mary's Mountaineers | 74    | 1
+0df333d06881f3a4b50c049bc681535d    | Ohio State Buckeyes       | Mt. St. Mary's Mountaineers | 0     | 0
+
+45. NCAAB - 2025-11-25 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+NCAAB_be1c87f28714b3d07d2823b342af9be1 | Baylor Bears              | St. John's Red Storm      | 66    | 1
+be1c87f28714b3d07d2823b342af9be1    | Baylor Bears              | St. John's Red Storm      | 0     | 0
+
+46. NCAAB - 2025-11-26 (Direct)
+--------------------------------------------------------------------------------
+Game ID                             | Home Team                 | Away Team                 | Odds  | Preds
+--------------------------------------------------------------------------------
+NCAAB_bb28fdd9133ef8edc17f1b13199507a8 | Alabama Crimson Tide      | Michigan Wolverines       | 86    | 0
+bb28fdd9133ef8edc17f1b13199507a8    | Alabama Crimson Tide      | Michigan Wolverines       | 0     | 1
+
