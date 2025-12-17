@@ -938,6 +938,7 @@ def sync_date_range_controls(data_json: Optional[str]):
     Input("period-select", "value"),
     Input("league-select", "value"),
     Input("version-select", "value"),
+    Input("model-type-dropdown", "value"),
 )
 def update_dashboard(
     data_json: Optional[str],
@@ -947,6 +948,7 @@ def update_dashboard(
     period: str,
     league: str,
     version: str,
+    model_type: str,
 ):
     import time
     t0 = time.time()
@@ -955,32 +957,8 @@ def update_dashboard(
     # We ignore the data_json passed from the store because we want to batch load everything newly here
     # This is a deviation from the previous architecture but necessary for performance
     
-    all_models = ["ensemble", "random_forest", "gradient_boosting"]
-    # We don't have model_type in arguments here! 
-    # Wait, the callback signature DOES NOT have model_type. 
-    # It has start_date, end_date, edge_threshold, period, league, version.
-    # Ah, the model_type is NOT passed to update_dashboard?
-    # Let me check the signature.
-    # The callback inputs are:
-    # Input("forward-data-store", "data"),
-    # Input("date-range-picker", "start_date"),
-    # Input("date-range-picker", "end_date"),
-    # Input("edge-threshold-slider", "value"),
-    # Input("period-select", "value"),
-    # Input("league-select", "value"),
-    # Input("version-select", "value"),
-    
-    # It does NOT take model_type. The main dashboard is implicitly for "ensemble" or whatever was loaded?
-    # Actually, the main dashboard usually shows "ensemble" vs books.
-    # But wait, looking at my previous edit attempt (Step 9226), I used `model_type` variable.
-    # Where did `model_type` come from? It wasn't in the arguments!
-    # That explains why it might have failed or been weird.
-    
-    # The main dashboard ("Overview") is primarily for the Ensemble model (or whatever data_json contained).
-    # But now we want to load everything.
-    
-    # Let's assume the main view is for "ensemble".
-    model_type = "ensemble"
+    # The main dashboard ("Overview") is primarily for the selected model.
+    model_type = model_type or "ensemble"
     
     all_models = ["ensemble", "random_forest", "gradient_boosting"]
     
@@ -1135,8 +1113,27 @@ def update_dashboard(
 
     t6 = time.time()
     print(f"DEBUG: Multi-model loop (optimized): {t6-t5:.4f}s")
+    
+    # Calculate performance by league for ALL models for the profit chart
+    multi_model_league_performance = {}
+    for model_type_iter in all_models:
+        try:
+             # Reuse bets_all or reload if needed (logic similar to above)
+            if bets_all is None or bets_all.empty:
+                model_league_perf = pd.DataFrame()
+            else:
+                model_bets = bets_all[bets_all["model_type"] == model_type_iter].copy()
+                if league != "all" and not model_bets.empty and "league" in model_bets.columns:
+                     model_bets = model_bets[model_bets["league"].notna() & (model_bets["league"].astype(str).str.upper() == league.upper())].copy()
+                
+                model_df_slice = df_all[df_all["model_type"] == model_type_iter]
+                model_league_perf = get_performance_by_league(model_df_slice, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, bets=model_bets)
+            
+            multi_model_league_performance[model_type_iter] = model_league_perf
+        except Exception:
+             multi_model_league_performance[model_type_iter] = {}
 
-    # Calculate performance by league for the current model
+    # Calculate performance by league for the current model (for ROI chart)
     league_performance = get_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, bets=bets)
 
     book_odds_json = ""
@@ -1171,7 +1168,10 @@ def update_dashboard(
         components.bankroll_cards(metrics),
         components.cumulative_profit_chart(performance_df),
         components.multi_model_cumulative_profit_chart(model_performance),
-        components.cumulative_profit_by_league_chart(league_performance),
+        [
+            components.profit_by_league_chart(multi_model_league_performance),
+            components.cumulative_profit_by_league_chart(league_performance)
+        ],
         components.roi_by_league_chart(league_performance),
         components.roi_over_time_chart(performance_df),
         components.win_rate_over_time_chart(performance_df),
@@ -1335,7 +1335,25 @@ def update_overunder_page(
         except Exception:
             model_performance[model_type_iter] = pd.DataFrame()
 
-    # Calculate performance by league for the current model (using totals-specific function)
+    # Calculate performance by league for ALL models for the profit chart
+    multi_model_league_performance = {}
+    for model_type_iter in all_models:
+        try:
+            if totals_all is None or totals_all.empty:
+                model_league_perf = pd.DataFrame()
+            else:
+                model_totals = totals_all[totals_all["model_type"] == model_type_iter].copy()
+                if league != "all" and not model_totals.empty and "league" in model_totals.columns:
+                     model_totals = model_totals[model_totals["league"].notna() & (model_totals["league"].astype(str).str.upper() == league.upper())].copy()
+                
+                model_df_slice = df_all[df_all["model_type"] == model_type_iter]
+                model_league_perf = get_totals_performance_by_league(model_df_slice, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=model_totals)
+                
+            multi_model_league_performance[model_type_iter] = model_league_perf
+        except Exception:
+             multi_model_league_performance[model_type_iter] = {}
+
+    # Calculate performance by league for the current model (for ROI chart)
     league_performance = get_totals_performance_by_league(df, edge_threshold=edge_threshold, stake=DEFAULT_STAKE, totals=totals)
 
     totals_odds_json = ""
@@ -1750,7 +1768,10 @@ def update_overunder_page(
         bankroll_section,
         components.cumulative_profit_chart(performance_df),
         components.multi_model_cumulative_profit_chart(model_performance),
-        components.cumulative_profit_by_league_chart(league_performance),
+        [
+            components.profit_by_league_chart(multi_model_league_performance),
+            components.cumulative_profit_by_league_chart(league_performance)
+        ],
         components.roi_by_league_chart(league_performance),
         performance_section,
         recommended_table,

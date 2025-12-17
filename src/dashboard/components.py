@@ -341,47 +341,56 @@ def cumulative_profit_by_league_chart(
 
 def accuracy_by_league_chart(accuracy_df: pd.DataFrame) -> dcc.Graph:
     """
-    Create cumulative accuracy chart with separate lines for each league.
+    Create accuracy chart as a bar chart showing current accuracy by league.
     
     Args:
-        accuracy_df: DataFrame with 'commence_time', 'league', and 'accuracy' columns
+        accuracy_df: DataFrame with 'commence_time', 'league', 'accuracy', and 'game_count' columns
     """
     fig = go.Figure()
     
     if not accuracy_df.empty:
-        # Get unique leagues
+        # Get unique leagues and their latest values
         leagues = accuracy_df["league"].unique()
+        data = []
         
         for league in leagues:
             league_df = accuracy_df[accuracy_df["league"] == league]
-            plot_df = _extend_series_to_now(league_df, "commence_time")
+            if not league_df.empty:
+                # Sort by time to get latest
+                league_df = league_df.sort_values("commence_time")
+                latest = league_df.iloc[-1]
+                data.append({
+                    "league": league,
+                    "accuracy": latest["accuracy"],
+                    "count": int(latest["game_count"]) if "game_count" in latest else 0
+                })
+        
+        if data:
+            df = pd.DataFrame(data)
+            df = df.sort_values("accuracy", ascending=True)
+            
+            # Color scale or fixed color? Let's use a nice blue.
+            
             fig.add_trace(
-                go.Scatter(
-                    x=plot_df["commence_time"],
-                    y=plot_df["accuracy"],
-                    mode="lines+markers",
-                    name=league,
-                    line=dict(width=2.5),
-                    marker=dict(size=6),
-                    hovertemplate="Date: %{x}<br>Accuracy: %{y:.1%}<extra></extra>",
+                go.Bar(
+                    x=df["league"],
+                    y=df["accuracy"],
+                    marker_color="#1f77b4",
+                    text=df["accuracy"].apply(lambda x: f"{x:.1%}"),
+                    textposition="auto",
+                    customdata=df["count"],
+                    hovertemplate="League: %{x}<br>Accuracy: %{y:.1%}<br>Games: %{customdata}<extra></extra>",
                 )
             )
     
     fig.update_layout(
-        title="Cumulative Accuracy by League",
-        xaxis_title="Date",
+        title="Accuracy by League (Current)",
+        xaxis_title="League",
         yaxis_title="Accuracy",
         yaxis=dict(tickformat=".0%"),
         template="plotly_white",
         height=400,
-        hovermode="x unified",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
+        showlegend=False,
     )
     
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
@@ -389,56 +398,60 @@ def accuracy_by_league_chart(accuracy_df: pd.DataFrame) -> dcc.Graph:
 
 def accuracy_difference_by_league_chart(diff_df: pd.DataFrame) -> dcc.Graph:
     """
-    Create cumulative accuracy difference chart (Our - Book) with separate lines for each league.
+    Create accuracy difference chart as a bar chart showing current advantage by league.
     
     Args:
-        diff_df: DataFrame with 'commence_time', 'league', and 'accuracy_diff' columns
+        diff_df: DataFrame with 'commence_time', 'league', 'accuracy_diff', and 'game_count' columns
     """
     fig = go.Figure()
     
     if not diff_df.empty:
-        # Get unique leagues
+        # Get unique leagues and their latest values
         leagues = diff_df["league"].unique()
+        data = []
         
         for league in leagues:
             league_df = diff_df[diff_df["league"] == league]
-            plot_df = _extend_series_to_now(league_df, "commence_time")
+            if not league_df.empty:
+                # Sort by time to get latest
+                league_df = league_df.sort_values("commence_time")
+                latest = league_df.iloc[-1]
+                data.append({
+                    "league": league,
+                    "diff": latest["accuracy_diff"],
+                    "count": int(latest["game_count"]) if "game_count" in latest else 0
+                })
+        
+        if data:
+            df = pd.DataFrame(data)
+            df = df.sort_values("diff", ascending=True)
+            
+            # Color bars based on positive/negative advantage
+            colors = ["#2ca02c" if x >= 0 else "#d62728" for x in df["diff"]]
+            
             fig.add_trace(
-                go.Scatter(
-                    x=plot_df["commence_time"],
-                    y=plot_df["accuracy_diff"],
-                    mode="lines+markers",
-                    name=league,
-                    line=dict(width=2.5),
-                    marker=dict(size=6),
-                    hovertemplate="Date: %{x}<br>Advantage: %{y:+.1%}<extra></extra>",
+                go.Bar(
+                    x=df["league"],
+                    y=df["diff"],
+                    marker_color=colors,
+                    text=df["diff"].apply(lambda x: f"{x:+.1%}"),
+                    textposition="auto",
+                    customdata=df["count"],
+                    hovertemplate="League: %{x}<br>Advantage: %{y:+.1%}<br>Games: %{customdata}<extra></extra>",
                 )
             )
             
-        # Add zero line to indicate parity
-        fig.add_hline(
-            y=0, 
-            line_dash="dash", 
-            line_color="gray",
-            annotation_text="Parity (0%)",
-            annotation_position="bottom right"
-        )
+            # Add zero line
+            fig.add_hline(y=0, line_dash="dash", line_color="gray")
     
     fig.update_layout(
-        title="Accuracy Advantage vs Books (Cumulative)",
-        xaxis_title="Date",
+        title="Accuracy Advantage vs Books (Current)",
+        xaxis_title="League",
         yaxis_title="Accuracy Difference",
         yaxis=dict(tickformat="+.0%"),
         template="plotly_white",
         height=400,
-        hovermode="x unified",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
+        showlegend=False,
     )
     
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
@@ -448,7 +461,7 @@ def roi_by_league_chart(
     performance_by_league: dict[str, pd.DataFrame]
 ) -> dcc.Graph:
     """
-    Create ROI chart with separate lines for each league.
+    Create ROI chart as a bar chart showing current ROI by league.
     
     Args:
         performance_by_league: Dict mapping league names to their performance DataFrames
@@ -456,28 +469,149 @@ def roi_by_league_chart(
     """
     fig = go.Figure()
     
-    # Add a line for each league
+    league_data = []
+    
+    # Process data for each league
     for league, perf_df in performance_by_league.items():
         if perf_df is not None and not perf_df.empty and "roi" in perf_df.columns:
-            plot_df = _extend_series_to_now(perf_df, "date")
+            # Get the latest ROI value
+            current_roi = perf_df["roi"].iloc[-1]
+            
+            # Get game count if available
+            current_count = 0
+            if "bet_count" in perf_df.columns:
+                val = perf_df["bet_count"].iloc[-1]
+                if pd.notna(val):
+                    current_count = int(val)
+            
+            if pd.notna(current_roi):
+                league_data.append({
+                    "league": league, 
+                    "roi": current_roi, 
+                    "count": current_count
+                })
+                
+    if league_data:
+        # Create DataFrame and sort by ROI
+        df = pd.DataFrame(league_data)
+        df = df.sort_values("roi", ascending=True)  # Sort for bar chart (ascending puts highest on right/top)
+        
+        # Color bars based on positive/negative ROI
+        colors = ["#2ca02c" if x >= 0 else "#d62728" for x in df["roi"]]
+        
+        fig.add_trace(
+            go.Bar(
+                x=df["league"],
+                y=df["roi"],
+                marker_color=colors,
+                text=df["roi"].apply(lambda x: f"{x:.1%}"),
+                textposition="auto",
+                customdata=df["count"],
+                hovertemplate="League: %{x}<br>ROI: %{y:.1%}<br>Games: %{customdata}<extra></extra>",
+            )
+        )
+    
+    fig.update_layout(
+        title="ROI by League (Current)",
+        xaxis_title="League",
+        yaxis_title="ROI (%)",
+        yaxis=dict(tickformat=".0%"),
+        template="plotly_white",
+        height=400,
+        showlegend=False,
+    )
+    
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def profit_by_league_chart(
+    performance_by_league_by_model: dict[str, dict[str, pd.DataFrame]]
+) -> dcc.Graph:
+    """
+    Create Profit chart as a grouped bar chart showing current cumulative profit by league for multiple models.
+    
+    Args:
+        performance_by_league_by_model: Dict mapping model names to a Dict of league performance DataFrames.
+                                        Structure: { "model_name": { "league_name": df } }
+                                        Each DataFrame should have 'cumulative_profit' and 'bet_count' columns
+    """
+    fig = go.Figure()
+    
+    # Define colors for known models to keep consistency
+    model_colors = {
+        "ensemble": "#1f77b4",        # Blue
+        "random_forest": "#2ca02c",   # Green
+        "gradient_boosting": "#ff7f0e", # Orange
+        "logistic_regression": "#d62728" # Red
+    }
+    # Fallback colors
+    default_colors = ["#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    
+    # Collect all unique leagues to ensure consistent x-axis
+    all_leagues = set()
+    for model_perf in performance_by_league_by_model.values():
+        if model_perf:
+            all_leagues.update(model_perf.keys())
+            
+    sorted_leagues = sorted(list(all_leagues))
+    
+    # Iterate through models and add traces
+    model_names = sorted(performance_by_league_by_model.keys())
+    
+    for i, model_name in enumerate(model_names):
+        league_perf_map = performance_by_league_by_model[model_name]
+        
+        model_data = []
+        for league in sorted_leagues:
+            perf_df = league_perf_map.get(league)
+            profit = 0.0
+            count = 0
+            
+            if perf_df is not None and not perf_df.empty:
+                if "cumulative_profit" in perf_df.columns:
+                     profit = perf_df["cumulative_profit"].iloc[-1]
+                if "bet_count" in perf_df.columns:
+                     val = perf_df["bet_count"].iloc[-1]
+                     if pd.notna(val):
+                         count = int(val)
+            
+            model_data.append({
+                "league": league,
+                "profit": profit,
+                "count": count
+            })
+            
+        if model_data:
+            df = pd.DataFrame(model_data)
+            
+            # Format model name for display
+            display_name = model_name.replace("_", " ").title()
+            
+            # Select color
+            color = model_colors.get(model_name, default_colors[i % len(default_colors)])
+            
             fig.add_trace(
-                go.Scatter(
-                    x=plot_df["date"],
-                    y=plot_df["roi"],
-                    mode="lines+markers",
-                    name=league,
-                    line=dict(width=2.5),
-                    marker=dict(size=6),
+                go.Bar(
+                    name=display_name,
+                    x=df["league"],
+                    y=df["profit"],
+                    marker_color=color,
+                    text=df["profit"].apply(lambda x: f"${x:,.0f}"),
+                    textposition="auto",
+                    customdata=df["count"],
+                    hovertemplate=f"<b>{display_name}</b><br>League: %{{x}}<br>Profit: $%{{y:,.2f}}<br>Games: %{{customdata}}<extra></extra>",
                 )
             )
     
     fig.update_layout(
-        title="ROI by League",
-        xaxis_title="Date",
-        yaxis_title="ROI (%)",
+        title="Profit by League (Cumulative)",
+        xaxis_title="League",
+        yaxis_title="Profit ($)",
+        yaxis=dict(tickformat="$,.0f"),
         template="plotly_white",
         height=400,
-        hovermode="x unified",
+        barmode='group', # Grouped bars
+        showlegend=True,
         legend=dict(
             orientation="h",
             yanchor="bottom",

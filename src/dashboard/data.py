@@ -1871,7 +1871,7 @@ def get_performance_by_league(
         # Calculate ROI: (Cumulative Profit / Cumulative Stake) * 100
         league_bets["bet_count"] = range(1, len(league_bets) + 1)
         league_bets["cumulative_stake"] = league_bets["bet_count"] * stake
-        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"]) * 100.0
+        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"])
         
         # Create daily summary for the chart
         league_bets["date"] = league_bets["settled_at"].dt.date
@@ -1879,7 +1879,8 @@ def get_performance_by_league(
             league_bets.groupby("date")
             .agg(
                 cumulative_profit=("cumulative_profit", "last"),
-                roi=("roi", "last")
+                roi=("roi", "last"),
+                bet_count=("bet_count", "last")
             )
             .reset_index()
         )
@@ -1945,7 +1946,7 @@ def get_totals_performance_by_league(
         # Calculate ROI: (Cumulative Profit / Cumulative Stake) * 100
         league_bets["bet_count"] = range(1, len(league_bets) + 1)
         league_bets["cumulative_stake"] = league_bets["bet_count"] * stake
-        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"]) * 100.0
+        league_bets["roi"] = (league_bets["cumulative_profit"] / league_bets["cumulative_stake"])
         
         # Create daily summary for the chart
         league_bets["date"] = league_bets["settled_at"].dt.date
@@ -1953,7 +1954,8 @@ def get_totals_performance_by_league(
             league_bets.groupby("date")
             .agg(
                 cumulative_profit=("cumulative_profit", "last"),
-                roi=("roi", "last")
+                roi=("roi", "last"),
+                bet_count=("bet_count", "last")
             )
             .reset_index()
         )
@@ -2492,7 +2494,7 @@ def get_accuracy_over_time_by_league(comparison_df: pd.DataFrame) -> pd.DataFram
         daily_stats["league"] = league
         daily_stats["commence_time"] = pd.to_datetime(daily_stats["date"])
         
-        results.append(daily_stats[["commence_time", "league", "accuracy"]])
+        results.append(daily_stats[["commence_time", "league", "accuracy", "cumulative_total"]].rename(columns={"cumulative_total": "game_count"}))
 
     if not results:
         return pd.DataFrame()
@@ -2550,7 +2552,7 @@ def get_accuracy_difference_over_time_by_league(comparison_df: pd.DataFrame) -> 
         daily_stats["league"] = league
         daily_stats["commence_time"] = pd.to_datetime(daily_stats["date"])
         
-        results.append(daily_stats[["commence_time", "league", "accuracy_diff"]])
+        results.append(daily_stats[["commence_time", "league", "accuracy_diff", "cumulative_total"]].rename(columns={"cumulative_total": "game_count"}))
 
     if not results:
         return pd.DataFrame()

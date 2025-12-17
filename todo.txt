@@ -1,0 +1,32 @@
+web app link directly to sportsbook game page
+player level stats
+track moneyline over time
+track over under over time
+bug, data doesn't load when switching from dashboard to predictions with one league selected
+Safer: Backup database or hosted database
+Hoverable/tappable link on moneyline with popup linking to blog page
+blog improvements
+model filter on winner prediction page
+web app list filters (sportsbook, league, etc.)
+
+more sports
+golf
+tennis
+mls
+boxing
+rugby
+volleyball
+cricket
+hockey
+MMA
+field hockey
+table tennis	
+f1
+handball
+
+Machine Learning Framework for Sport result prediction
+https://www.sciencedirect.com/science/article/pii/S2210832717301485#b0115
+
+CRISP-DM Proven Data Mining Methodology
+https://www.udacity.com/blog/2025/03/crisp-dm-explained-a-proven-data-mining-methodology.html#:~:text=CRISP%2DDM%20stands%20for%20Cross,managed%2C%20and%20deliver%20valuable%20results.
+
