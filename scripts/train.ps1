@@ -53,7 +53,7 @@ try {
     # Using a broad range to ensure historical data is captured
     $currentYear = (Get-Date).Year
     $startYear = 2015
-    $seasons = $startYear..($currentYear + 1)
+    $seasons = $startYear..$currentYear
     $seasonArgs = $seasons -join " "
     
     foreach ($league in $targetLeagues) {
@@ -77,7 +77,7 @@ try {
     foreach ($league in $targetLeagues) {
         foreach ($modelType in $modelTypes) {
             Write-Log "Training $league $modelType model..."
-            & poetry run python -m src.models.train --league $league --model-type $modelType 2>&1 | ForEach-Object { "$_" }
+            & poetry run python -m src.models.train --league $league --model-type $modelType --seasons $seasons 2>&1 | ForEach-Object { "$_" }
             if ($LASTEXITCODE -ne 0) {
                 Write-Log "WARNING: Training failed for $league ($modelType)"
             }

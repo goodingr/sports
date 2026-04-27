@@ -10,13 +10,13 @@ export default function OverUnderPage() {
             <h1>What is Over/Under Betting?</h1>
 
             <p className="lead">
-                Over/Under betting, also called "totals" betting, is a wager on the combined score of both teams in a game. You're betting on whether the total points scored will be over or under a number set by the sportsbook.
+                Over/Under betting, also called &ldquo;totals&rdquo; betting, is a wager on the combined score of both teams in a game. You&apos;re betting on whether the total points scored will be over or under a number set by the sportsbook.
             </p>
 
             <h2>How Totals Work</h2>
 
             <p>
-                The sportsbook sets a "line" representing the predicted total points. You bet whether the actual total will be higher (over) or lower (under) than this line.
+                The sportsbook sets a &ldquo;line&rdquo; representing the predicted total points. You bet whether the actual total will be higher (over) or lower (under) than this line.
             </p>
 
             <h2>Example</h2>
@@ -35,13 +35,13 @@ export default function OverUnderPage() {
             <ul>
                 <li>If the final score is Lakers 110, Warriors 108 (total: 218), the <strong>Over</strong> wins</li>
                 <li>If the final score is Lakers 105, Warriors 107 (total: 212), the <strong>Under</strong> wins</li>
-                <li>The .5 ensures there's no push (tie)</li>
+                <li>The .5 ensures there&apos;s no push (tie)</li>
             </ul>
 
             <h2>Reading Total Lines</h2>
 
             <p>
-                Common notation you'll see:
+                Common notation you&apos;ll see:
             </p>
 
             <ul>
@@ -66,7 +66,7 @@ export default function OverUnderPage() {
             <h2>Our Prediction Approach</h2>
 
             <p>
-                Our system analyzes these factors and more to predict the actual total score. When we identify a significant difference between our prediction and the sportsbook's line, we flag it as a potential betting opportunity.
+                Our system analyzes these factors and more to predict the actual total score. When we identify a significant difference between our prediction and the sportsbook&apos;s line, we flag it as a potential betting opportunity.
             </p>
 
             <div className="mt-8 pt-8 border-t border-gray-700">

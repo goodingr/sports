@@ -20,8 +20,8 @@ export default function MoneylinePage() {
             </p>
 
             <ul>
-                <li><strong>Negative odds (e.g., -150)</strong>: This is the favorite. The number shows how much you need to bet to win $100. For example, at -150, you'd need to bet $150 to win $100.</li>
-                <li><strong>Positive odds (e.g., +130)</strong>: This is the underdog. The number shows how much you'd win on a $100 bet. For example, at +130, a $100 bet would win you $130.</li>
+                <li><strong>Negative odds (e.g., -150)</strong>: This is the favorite. The number shows how much you need to bet to win $100. For example, at -150, you&apos;d need to bet $150 to win $100.</li>
+                <li><strong>Positive odds (e.g., +130)</strong>: This is the underdog. The number shows how much you&apos;d win on a $100 bet. For example, at +130, a $100 bet would win you $130.</li>
             </ul>
 
             <h2>Example</h2>
@@ -59,7 +59,7 @@ export default function MoneylinePage() {
             <h2>Finding Value</h2>
 
             <p>
-                The key to successful betting is finding "value" - situations where your predicted probability of a team winning is higher than the implied probability from the odds. Our prediction system uses machine learning to identify these opportunities.
+                The key to successful betting is finding &ldquo;value&rdquo; - situations where your predicted probability of a team winning is higher than the implied probability from the odds. Our prediction system uses machine learning to identify these opportunities.
             </p>
 
             <div className="mt-8 pt-8 border-t border-gray-700">

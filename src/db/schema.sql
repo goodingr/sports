@@ -165,11 +165,15 @@ CREATE TABLE IF NOT EXISTS predictions (
     under_edge REAL,
     over_implied_prob REAL,
     under_implied_prob REAL,
-    UNIQUE (game_id, model_type, predicted_at)
+    predicted_total_points REAL,
+    UNIQUE (game_id, model_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_predictions_game_model
     ON predictions (game_id, model_type);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_predicted_at
+    ON predictions (predicted_at);
 
 CREATE TABLE IF NOT EXISTS recommendations (
     recommendation_id INTEGER PRIMARY KEY AUTOINCREMENT,

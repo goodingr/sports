@@ -29,6 +29,10 @@ DEFAULT_REST_DAYS = 7.0
 SHORT_WEEK_THRESHOLD = 5.0
 BYE_THRESHOLD = 10.0
 
+
+class FeatureContractError(RuntimeError):
+    """Raised when prediction features cannot satisfy a trained model contract."""
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
@@ -196,6 +200,64 @@ class PredictionEngine:
         # Fallback to the superset (might cause issues if model is strict)
         return FEATURE_COLUMNS
 
+    def _build_model_matrix(self, features_df: pd.DataFrame) -> pd.DataFrame:
+        """Return prediction features ordered exactly as the trained model expects."""
+        if not self.feature_columns:
+            numeric = features_df.select_dtypes(include=[np.number]).copy()
+            if numeric.empty:
+                raise FeatureContractError("No numeric prediction features were generated")
+            return numeric
+
+        contract = list(dict.fromkeys(self.feature_columns))
+        if len(contract) != len(self.feature_columns):
+            LOGGER.warning("Model feature contract contained duplicate columns; using first occurrence")
+
+        missing = [column for column in contract if column not in features_df.columns]
+        if missing:
+            LOGGER.warning(
+                "Prediction feature set is missing %d trained columns; filling with NaN. Sample: %s",
+                len(missing),
+                missing[:10],
+            )
+            features_df = features_df.copy()
+            for column in missing:
+                features_df[column] = np.nan
+
+        extra = sorted(set(features_df.select_dtypes(include=[np.number]).columns) - set(contract))
+        if extra:
+            LOGGER.debug("Ignoring %d numeric columns outside model contract. Sample: %s", len(extra), extra[:10])
+
+        matrix = features_df[contract]
+        if matrix.columns.tolist() != contract:
+            raise FeatureContractError("Prediction feature order does not match model contract")
+        return matrix
+
+    def _build_totals_matrix(self, features_df: pd.DataFrame) -> pd.DataFrame:
+        contract = self.totals_features or [
+            "total_close",
+            "spread_close",
+            "home_moneyline_close",
+            "away_moneyline_close",
+        ]
+        source_map = {
+            "total_close": "total_line",
+            "spread_close": "spread_line",
+            "home_moneyline_close": "home_moneyline",
+            "away_moneyline_close": "away_moneyline",
+        }
+        matrix = pd.DataFrame(index=features_df.index)
+        missing = []
+        for column in contract:
+            source_column = source_map.get(column, column)
+            if source_column in features_df.columns:
+                matrix[column] = features_df[source_column]
+            else:
+                missing.append(column)
+                matrix[column] = np.nan
+        if missing:
+            LOGGER.warning("Totals feature contract missing generated columns; filling with NaN: %s", missing)
+        return matrix.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
     def prepare_features(self, games_df: pd.DataFrame, league: str) -> pd.DataFrame:
         """
         Prepare features for a batch of games.
@@ -345,15 +407,8 @@ class PredictionEngine:
             return None
             
         # 4. Predict
-        if self.feature_columns:
-            for col in self.feature_columns:
-                if col not in X_df.columns:
-                    X_df[col] = np.nan
-            X = X_df[self.feature_columns]
-        else:
-            X = X_df.select_dtypes(include=[np.number])
-            
         try:
+            X = self._build_model_matrix(X_df)
             # Moneyline prediction
             probs = self.model.predict_proba(X)
             # Assuming class 1 is Win
@@ -367,13 +422,7 @@ class PredictionEngine:
             # Totals prediction
             if self.totals_model and self.totals_std:
                 try:
-                    totals_X = pd.DataFrame()
-                    totals_X["total_close"] = X_df["total_line"]
-                    totals_X["spread_close"] = X_df.get("spread_line", 0.0)
-                    totals_X["home_moneyline_close"] = X_df["home_moneyline"]
-                    totals_X["away_moneyline_close"] = X_df["away_moneyline"]
-                    totals_X = totals_X.fillna(0.0)
-                    
+                    totals_X = self._build_totals_matrix(X_df)
                     predicted_totals = self.totals_model.predict(totals_X)
                     X_df["predicted_total_points"] = predicted_totals
                     

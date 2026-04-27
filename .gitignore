@@ -10,6 +10,7 @@ env/
 env*/
 .env
 .env.*
+!.env.example
 
 ## Packaging / build
 build/
@@ -28,8 +29,13 @@ coverage.xml
 htmlcov/
 
 ## Logs
-# *.log
-# logs/
+*.log
+logs/
+errors.txt
+todo.txt
+.odds_api_key_index
+backups/
+temp_archive/
 
 ## IDE / Editor
 .vscode/

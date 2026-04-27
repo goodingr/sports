@@ -1,12 +1,7 @@
 import { useState, useEffect } from 'react';
-import { fetchAPI } from '@/lib/api';
+import { fetchAPI, type StatsResponse } from '@/lib/api';
 
-interface Stats {
-    roi: number;
-    win_rate: number;
-    total_profit: number;
-    total_bets: number;
-}
+export type Stats = StatsResponse;
 
 export function useStats() {
     const [stats, setStats] = useState<Stats | null>(null);
@@ -14,18 +9,22 @@ export function useStats() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         async function loadStats() {
             try {
                 const data = await fetchAPI<Stats>('/api/bets/stats');
-                setStats(data);
+                if (!cancelled) setStats(data);
             } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to load stats');
+                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load stats');
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         }
 
         loadStats();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     return { stats, loading, error };

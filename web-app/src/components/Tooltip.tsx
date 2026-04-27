@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 
 interface TooltipProps {
@@ -9,43 +9,46 @@ interface TooltipProps {
     href?: string
 }
 
+const ESTIMATED_TOOLTIP_HEIGHT = 80
+
 export default function Tooltip({ children, content, href }: TooltipProps) {
     const [isVisible, setIsVisible] = useState(false)
     const [position, setPosition] = useState<'top' | 'bottom'>('bottom')
     const triggerRef = useRef<HTMLSpanElement>(null)
-    const tooltipRef = useRef<HTMLDivElement>(null)
 
-    useEffect(() => {
-        if (isVisible && triggerRef.current && tooltipRef.current) {
-            const triggerRect = triggerRef.current.getBoundingClientRect()
-            const tooltipRect = tooltipRef.current.getBoundingClientRect()
+    const show = () => {
+        const trigger = triggerRef.current
+        if (trigger && typeof window !== 'undefined') {
+            const triggerRect = trigger.getBoundingClientRect()
             const spaceBelow = window.innerHeight - triggerRect.bottom
             const spaceAbove = triggerRect.top
-
-            // Show above if not enough space below
-            if (spaceBelow < tooltipRect.height + 10 && spaceAbove > tooltipRect.height + 10) {
-                setPosition('top')
-            } else {
-                setPosition('bottom')
-            }
+            setPosition(
+                spaceBelow < ESTIMATED_TOOLTIP_HEIGHT + 10 &&
+                    spaceAbove > ESTIMATED_TOOLTIP_HEIGHT + 10
+                    ? 'top'
+                    : 'bottom'
+            )
         }
-    }, [isVisible])
+        setIsVisible(true)
+    }
+
+    const hide = () => setIsVisible(false)
 
     const tooltipContent = (
         <div
-            ref={tooltipRef}
-            className={`absolute z-50 px-3 py-2 text-sm bg-gray-900 dark:bg-gray-800 text-white rounded-lg shadow-lg 
+            className={`absolute z-50 px-3 py-2 text-sm bg-gray-900 dark:bg-gray-800 text-white rounded-lg shadow-lg
         transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}
         ${position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
         left-1/2 transform -translate-x-1/2 whitespace-nowrap max-w-xs`}
             style={{ minWidth: '150px' }}
+            role="tooltip"
         >
             {content}
             {href && (
                 <Link
                     href={href}
                     className="block mt-2 text-blue-400 hover:text-blue-300 font-medium"
-                    onClick={() => setIsVisible(false)}
+                    onClick={hide}
                 >
                     Learn more →
                 </Link>
@@ -62,10 +65,10 @@ export default function Tooltip({ children, content, href }: TooltipProps) {
             <span
                 ref={triggerRef}
                 className="inline-flex items-center gap-1 cursor-help border-b border-dotted border-gray-400 dark:border-gray-600"
-                onMouseEnter={() => setIsVisible(true)}
-                onMouseLeave={() => setIsVisible(false)}
-                onFocus={() => setIsVisible(true)}
-                onBlur={() => setIsVisible(false)}
+                onMouseEnter={show}
+                onMouseLeave={hide}
+                onFocus={show}
+                onBlur={hide}
                 tabIndex={0}
             >
                 {children}
@@ -77,6 +80,7 @@ export default function Tooltip({ children, content, href }: TooltipProps) {
                     strokeWidth="2"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
+                    aria-hidden="true"
                 >
                     <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>

@@ -168,7 +168,14 @@ def update_database(scores_data: List[Dict], league: str) -> int:
                 
     return updated_count
 
-def run(leagues: List[str], days_from: int = 3, dotenv_path: Optional[Path] = None) -> None:
+def run(
+    leagues: List[str],
+    days_from: int = 3,
+    dotenv_path: Optional[Path] = None,
+    *,
+    resolve_stale: bool = False,
+    stale_lookback_days: int = 14,
+) -> None:
     """Run ingestion for specified leagues."""
     total_updated = 0
     for league in leagues:
@@ -184,12 +191,23 @@ def run(leagues: List[str], days_from: int = 3, dotenv_path: Optional[Path] = No
             
     LOGGER.info("Total games updated: %d", total_updated)
 
+    if resolve_stale:
+        try:
+            from src.data.score_backfill import resolve_stale_scores
+
+            stale_updated = resolve_stale_scores(leagues, lookback_days=stale_lookback_days)
+            LOGGER.info("Resolved %d stale games with ESPN score backfill", stale_updated)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Stale score resolution failed: %s", exc)
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest scores from The Odds API")
     parser.add_argument("--leagues", nargs="+", help="Specific leagues to update (default: all supported)")
     parser.add_argument("--days-from", type=int, default=3, help="Days back to fetch (max 3)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--dotenv", type=Path, default=None)
+    parser.add_argument("--resolve-stale", action="store_true", help="Use ESPN scoreboard backfill for stale past games")
+    parser.add_argument("--stale-lookback-days", type=int, default=14)
     
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
@@ -199,7 +217,13 @@ def main():
     if len(leagues) == 1 and "," in leagues[0]:
         leagues = [l.strip() for l in leagues[0].split(",")]
         
-    run(leagues, days_from=args.days_from, dotenv_path=args.dotenv)
+    run(
+        leagues,
+        days_from=args.days_from,
+        dotenv_path=args.dotenv,
+        resolve_stale=args.resolve_stale,
+        stale_lookback_days=args.stale_lookback_days,
+    )
 
 if __name__ == "__main__":
     main()

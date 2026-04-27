@@ -10,7 +10,7 @@ export default function BettingTypesPage() {
             <h1>Different Types of Sports Bets</h1>
 
             <p className="lead">
-                Sports betting offers many ways to wager beyond just picking a winner. Here's a comprehensive guide to the most common bet types.
+                Sports betting offers many ways to wager beyond just picking a winner. Here&apos;s a comprehensive guide to the most common bet types.
             </p>
 
             <h2>1. Moneyline</h2>
@@ -119,7 +119,7 @@ export default function BettingTypesPage() {
             </p>
 
             <p>
-                <strong>Pros:</strong> React to game flow, find value based on what you're watching.
+                <strong>Pros:</strong> React to game flow, find value based on what you&apos;re watching.
             </p>
 
             <p>

@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import Stripe from "stripe";
+import {
+    getAppUrl,
+    getOrCreateCustomer,
+    getStripe,
+    getStripePriceId,
+} from "@/lib/billing";
 
-// Initialize Stripe with a safe fallback for build time
-const stripeKey = process.env.STRIPE_SECRET_KEY || "sk_test_mock";
-const stripe = new Stripe(stripeKey, {
-    typescript: true,
-});
+export async function POST() {
+    let stripe;
+    let priceId: string;
+    let appUrl: string;
+    try {
+        stripe = getStripe();
+        priceId = getStripePriceId();
+        appUrl = getAppUrl();
+    } catch (error) {
+        console.error("[CHECKOUT_CONFIG_ERROR]", error);
+        return new NextResponse("Billing not configured", { status: 500 });
+    }
 
-export async function POST(req: Request) {
     try {
         const { userId } = await auth();
         const user = await currentUser();
@@ -17,40 +28,25 @@ export async function POST(req: Request) {
             return new NextResponse("Unauthorized", { status: 401 });
         }
 
-        const email = user.emailAddresses[0].emailAddress;
+        const email = user.emailAddresses[0]?.emailAddress;
+        if (!email) {
+            return new NextResponse("Email required", { status: 400 });
+        }
 
-        // Create Checkout Session
+        const customerId = await getOrCreateCustomer(userId, email);
+
         const session = await stripe.checkout.sessions.create({
-            success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?success=true`,
-            cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing?canceled=true`,
+            customer: customerId,
+            success_url: `${appUrl}/dashboard?success=true`,
+            cancel_url: `${appUrl}/pricing?canceled=true`,
             payment_method_types: ["card"],
             mode: "subscription",
             billing_address_collection: "auto",
-            customer_email: email,
-            line_items: [
-                {
-                    price_data: {
-                        currency: "usd",
-                        product_data: {
-                            name: "Sports Analytics Pro",
-                            description: "Unlimited access to premium betting insights",
-                        },
-                        unit_amount: 2900, // $29.00
-                        recurring: {
-                            interval: "month",
-                        },
-                    },
-                    quantity: 1,
-                },
-            ],
+            line_items: [{ price: priceId, quantity: 1 }],
             subscription_data: {
-                metadata: {
-                    userId,
-                },
+                metadata: { userId },
             },
-            metadata: {
-                userId,
-            },
+            metadata: { userId },
         });
 
         return NextResponse.json({ url: session.url });

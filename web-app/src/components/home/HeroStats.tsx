@@ -6,20 +6,17 @@ import { Container } from '@/components/ui/Container';
 import { TrendingUp, DollarSign, Percent, ChevronUp, ChevronDown } from 'lucide-react';
 
 export function HeroStats() {
-    const { stats, loading } = useStats();
-    const [isCollapsed, setIsCollapsed] = useState(false);
-
-    // Load persisted state on mount
-    useEffect(() => {
-        const savedState = localStorage.getItem('statsCollapsed');
-        if (savedState !== null) {
-            setIsCollapsed(savedState === 'true');
-        }
-    }, []);
+    const { stats, loading, error } = useStats();
+    const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem('statsCollapsed') === 'true';
+    });
 
     // Persist state on change
     useEffect(() => {
-        localStorage.setItem('statsCollapsed', String(isCollapsed));
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem('statsCollapsed', String(isCollapsed));
+        }
     }, [isCollapsed]);
 
     if (loading) {
@@ -36,7 +33,17 @@ export function HeroStats() {
         );
     }
 
-    if (!stats) return null;
+    if (error || !stats) {
+        return (
+            <div className="py-4 bg-black/50 border-b border-white/10">
+                <Container>
+                    <div className="max-w-2xl mx-auto text-center text-sm text-muted-foreground py-4">
+                        Performance stats are temporarily unavailable.
+                    </div>
+                </Container>
+            </div>
+        );
+    }
 
     return (
         <div className={`relative bg-black/50 border-b border-white/10 transition-[padding] duration-300 ease-in-out ${isCollapsed ? 'pb-8' : 'pb-0'}`}>

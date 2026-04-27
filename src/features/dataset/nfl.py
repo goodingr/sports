@@ -98,7 +98,9 @@ def load_pbp(paths: DatasetPaths, seasons: Iterable[int]) -> pd.DataFrame:
     skipped: List[int] = []
     for season in seasons:
         try:
+            LOGGER.info("  Downloading season %s...", season)
             season_data = nfl.import_pbp_data([season])
+            LOGGER.info("  Season %s downloaded successfully.", season)
         except Exception as exc:  # pragma: no cover - external dependency guard
             LOGGER.warning("Failed to download play-by-play for season %s: %s. Skipping.", season, exc)
             skipped.append(season)

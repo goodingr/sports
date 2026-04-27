@@ -5,11 +5,33 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 from src.data.team_mappings import normalize_team_code
 from src.data.config import RAW_DATA_DIR
 
 LOGGER = logging.getLogger(__name__)
+RAW_SOURCES_DIR = RAW_DATA_DIR / "sources"
+
+SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
+
+
+def _source_league_directory(league: str) -> str:
+    league_upper = league.upper()
+    if league_upper in SOCCER_LEAGUES:
+        return "soccer"
+    return league_upper.lower()
+
+
+def _latest_source_directory(league: str, source_name: str) -> Optional[Path]:
+    """Return the latest timestamped raw source directory for a league/source pair."""
+    base_dir = RAW_SOURCES_DIR / _source_league_directory(league) / source_name
+    if not base_dir.exists():
+        return None
+    candidates = [path for path in base_dir.iterdir() if path.is_dir()]
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda path: path.name)[-1]
 
 class FeatureLoader:
     """Loads features from the database at prediction time."""
@@ -133,12 +155,54 @@ class FeatureLoader:
         return pd.DataFrame()
 
     def load_advanced_stats(self) -> pd.DataFrame:
-         # Not migrated yet
-         return pd.DataFrame()
+         latest_dir = _latest_source_directory(self.league, "advanced_stats")
+         if latest_dir is None:
+             return pd.DataFrame()
+
+         frames = []
+         for path in sorted(latest_dir.glob("*.parquet")):
+             try:
+                 frame = pd.read_parquet(path)
+             except Exception as exc:  # noqa: BLE001
+                 LOGGER.warning("Failed to read advanced stats file %s: %s", path, exc)
+                 continue
+             if not frame.empty:
+                 frames.append(frame)
+
+         if not frames:
+             return pd.DataFrame()
+
+         df = pd.concat(frames, ignore_index=True)
+         if "league" in df.columns:
+             df = df[df["league"].astype(str).str.upper() == self.league].copy()
+         return df
 
     # Reuse helper methods but ensure they call the new load_* methods
     def get_advanced_metric(self, team: str, metric_name: str, season: Optional[int] = None, default: float = np.nan) -> float:
-        return default # Placeholder
+        stats_df = self.load_advanced_stats()
+        if stats_df.empty or metric_name not in stats_df.columns:
+            return default
+
+        target_code = normalize_team_code(self.league, team) or str(team).upper()
+        candidates = stats_df.copy()
+        if season is not None and "season" in candidates.columns:
+            candidates = candidates[candidates["season"].astype(str) == str(season)].copy()
+            if candidates.empty:
+                return default
+
+        team_mask = pd.Series(False, index=candidates.index)
+        if "team_code" in candidates.columns:
+            team_mask = team_mask | (candidates["team_code"].astype(str).str.upper() == target_code)
+        if "team" in candidates.columns:
+            normalized = candidates["team"].map(lambda value: normalize_team_code(self.league, str(value)) or str(value).upper())
+            team_mask = team_mask | (normalized == target_code)
+
+        matches = candidates[team_mask]
+        if matches.empty:
+            return default
+
+        value = matches.iloc[-1].get(metric_name)
+        return float(value) if pd.notnull(value) else default
 
     def get_team_metric(self, team: str, metric_name: str, season: Optional[int] = None, default: float = np.nan) -> float:
         metrics_df = self.load_team_metrics(season=season)

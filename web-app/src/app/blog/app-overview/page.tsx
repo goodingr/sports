@@ -18,11 +18,11 @@ export default function AppOverviewPage() {
             <h3>Overview Tab</h3>
 
             <p>
-                The Overview tab shows your model's overall performance:
+                The Overview tab shows your model&apos;s overall performance:
             </p>
 
             <ul>
-                <li><strong>Total Predictions</strong>: Number of games we've made predictions for</li>
+                <li><strong>Total Predictions</strong>: Number of games we&apos;ve made predictions for</li>
                 <li><strong>Completed Games</strong>: Games that have finished (with results)</li>
                 <li><strong>Pending Games</strong>: Upcoming games with predictions</li>
                 <li><strong>Recommended Bets</strong>: Predictions with edge above threshold (default 6%)</li>
@@ -49,9 +49,9 @@ export default function AppOverviewPage() {
                 <strong>Key Columns:</strong>
             </p>
             <ul>
-                <li><strong>Edge</strong>: The difference between our probability and the market's</li>
-                <li><strong>Predicted Prob</strong>: Our model's probability for the outcome</li>
-                <li><strong>Implied Prob</strong>: Market's implied probability from the odds</li>
+                <li><strong>Edge</strong>: The difference between our probability and the market&apos;s</li>
+                <li><strong>Predicted Prob</strong>: Our model&apos;s probability for the outcome</li>
+                <li><strong>Implied Prob</strong>: Market&apos;s implied probability from the odds</li>
                 <li><strong>Moneyline</strong>: The actual odds offered by sportsbooks</li>
             </ul>
 
@@ -114,7 +114,7 @@ export default function AppOverviewPage() {
             </p>
 
             <p>
-                <strong>What's good?</strong> Depends on average odds:
+                <strong>What&apos;s good?</strong> Depends on average odds:
             </p>
             <ul>
                 <li>Favorites (negative odds): Need &gt;55% to break even</li>
@@ -129,7 +129,7 @@ export default function AppOverviewPage() {
             </p>
 
             <p>
-                <strong>What's good?</strong>
+                <strong>What&apos;s good?</strong>
             </p>
             <ul>
                 <li>ROI &gt; 0%: Profitable</li>
@@ -148,7 +148,7 @@ export default function AppOverviewPage() {
             <ol>
                 <li><strong>Focus on edge, not just win probability</strong>: A 55% chance at +200 odds can be better value than a 70% chance at -300.</li>
                 <li><strong>Use the model filter</strong>: Compare Ensemble vs individual models to see which performs best for your preferred leagues.</li>
-                <li><strong>Don't chase losses</strong>: Even high-edge bets lose sometimes. Variance is normal.</li>
+                <li><strong>Don&apos;t chase losses</strong>: Even high-edge bets lose sometimes. Variance is normal.</li>
                 <li><strong>Check sportsbook odds</strong>: Our displayed odds might differ from current market. Always verify before betting.</li>
                 <li><strong>Track your own bets</strong>: The dashboard shows model performance, but track your actual bets separately.</li>
             </ol>

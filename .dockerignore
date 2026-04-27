@@ -1,0 +1,57 @@
+# VCS / IDE
+.git
+.github
+.vscode
+.idea
+*.code-workspace
+
+# Python caches
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.ipynb_checkpoints
+.cache
+
+# Virtual envs
+.venv
+.venv*
+env
+env*
+
+# Build output
+build
+dist
+.eggs
+*.egg-info
+
+# Local secrets / runtime artefacts (mounted at runtime, never baked in)
+.env
+.env.*
+!.env.example
+.odds_api_key_index
+
+# Data, models, logs (mounted via volumes; baking them blows up the image)
+data
+models
+backups
+logs
+reports
+notebooks
+temp_archive
+
+# Web app artefacts (web image builds its own bundle)
+web-app/node_modules
+web-app/.next
+web-app/.env*
+
+# Misc
+*.log
+errors.txt
+todo.txt
+debug_*.log
+log_v*.log
+*.zip
+.VSCodeCounter

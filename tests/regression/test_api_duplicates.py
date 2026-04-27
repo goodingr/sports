@@ -12,6 +12,19 @@ import pytest
 import pandas as pd
 import requests
 from datetime import datetime, timezone
+from pathlib import Path
+
+
+API_BASE_URL = "http://localhost:8000"
+
+
+def _get_upcoming_or_skip():
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/bets/upcoming", timeout=3)
+    except requests.RequestException as exc:
+        pytest.skip(f"local API is not running at {API_BASE_URL}: {exc}")
+    assert response.status_code == 200, f"API returned {response.status_code}"
+    return response
 
 
 def test_no_duplicate_games_in_api_response():
@@ -21,8 +34,7 @@ def test_no_duplicate_games_in_api_response():
     This test will FAIL before the fix and PASS after the fix.
     """
     # Fetch upcoming bets from API
-    response = requests.get("http://localhost:8000/api/bets/upcoming")
-    assert response.status_code == 200, f"API returned {response.status_code}"
+    response = _get_upcoming_or_skip()
     
     data = response.json()
     bets = data.get('data', [])
@@ -81,8 +93,7 @@ def test_cremonese_bologna_not_duplicated():
     
     This game is known to have both game_id and odds_api_id, which triggers the bug.
     """
-    response = requests.get("http://localhost:8000/api/bets/upcoming")
-    assert response.status_code == 200
+    response = _get_upcoming_or_skip()
     
     data = response.json()
     bets = data.get('data', [])
@@ -119,7 +130,11 @@ def test_prediction_file_has_no_duplicates():
     This test should PASS both before and after the fix, confirming that
     duplicates are NOT in the prediction file itself.
     """
-    df = pd.read_parquet('data/forward_test/predictions_master.parquet')
+    predictions_path = Path('data/forward_test/predictions_master.parquet')
+    if not predictions_path.exists():
+        pytest.skip(f"legacy forward-test artifact not found: {predictions_path}")
+
+    df = pd.read_parquet(predictions_path)
     
     if df.empty:
         pytest.skip("No predictions in file")

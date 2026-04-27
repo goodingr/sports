@@ -58,7 +58,7 @@ if (-not $SkipOdds) {
     Write-Host "Step 3: Fetching Live Scores..."
     try {
         $commaLeagues = $targetLeagues -join ","
-        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env 2>&1 | ForEach-Object { "$_" }
+        & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env --resolve-stale --stale-lookback-days 14 2>&1 | ForEach-Object { "$_" }
         
     } catch {
         Write-Host "WARNING: Score ingestion failed: $_"

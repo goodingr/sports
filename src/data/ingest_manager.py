@@ -8,7 +8,7 @@ import argparse
 import logging
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,15 +18,15 @@ from src.db.core import connect
 
 LOGGER = logging.getLogger(__name__)
 
-# Map leagues to their backfill modules and current season
+# Map leagues to their backfill modules. Current season is inferred at runtime.
 LEAGUE_CONFIG = {
-    "NFL": {"module": "src.data.backfill_nfl", "current_season": 2024, "start_year": 1999},
-    "NBA": {"module": "src.data.backfill_nba", "current_season": 2024, "start_year": 2015},
-    "CFB": {"module": "src.data.backfill_cfb", "current_season": 2024, "start_year": 2018},
-    "MLB": {"module": "src.data.backfill_mlb", "current_season": 2024, "start_year": 2015},
-    "SOCCER": {"module": "src.data.backfill_soccer", "current_season": 2024, "start_year": 2018}, # Generic for all soccer
-    "NCAAB": {"module": "src.data.backfill_killersports_seasons", "current_season": 2024, "start_year": 2018},
-    "NHL": {"module": "src.data.backfill_killersports_seasons", "current_season": 2024, "start_year": 2016},
+    "NFL": {"module": "src.data.backfill_nfl", "start_year": 1999},
+    "NBA": {"module": "src.data.backfill_nba", "start_year": 2015},
+    "CFB": {"module": "src.data.backfill_cfb", "start_year": 2018},
+    "MLB": {"module": "src.data.backfill_mlb", "start_year": 2015},
+    "SOCCER": {"module": "src.data.backfill_soccer", "start_year": 2018},
+    "NCAAB": {"module": "src.data.backfill_killersports_seasons", "start_year": 2018},
+    "NHL": {"module": "src.data.backfill_killersports_seasons", "start_year": 2016},
 }
 
 SOCCER_LEAGUES = ["EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"]
@@ -57,6 +57,18 @@ def run_module(module: str, args: List[str]):
     LOGGER.info(f"Running: {' '.join(cmd)}")
     subprocess.check_call(cmd)
 
+
+def infer_current_season(league: str, today: Optional[date] = None) -> int:
+    """Infer the active season label used by each league's backfill scripts."""
+    today = today or date.today()
+    league_upper = league.upper()
+    if league_upper in {"NBA", "NHL", "NCAAB"} or league_upper in SOCCER_LEAGUES:
+        return today.year if today.month >= 7 else today.year - 1
+    if league_upper in {"NFL", "CFB"}:
+        return today.year if today.month >= 3 else today.year - 1
+    return today.year
+
+
 def ingest_league(league: str, force_backfill: bool = False):
     """
     Ingest data for a league.
@@ -71,12 +83,8 @@ def ingest_league(league: str, force_backfill: bool = False):
         LOGGER.error(f"No configuration for league {league}")
         return
 
-    # User requested to unplug external sources to prevent duplicates
-    LOGGER.warning(f"Skipping ingestion for {league} to prevent duplicates (Source: User Request)")
-    return
-
     last_date = get_latest_game_date(league)
-    current_season = config["current_season"]
+    current_season = infer_current_season(league)
     start_year = config["start_year"]
     module = config["module"]
 
@@ -129,10 +137,12 @@ def main():
     logging.basicConfig(level=getattr(logging, args.log_level))
     
     leagues = args.leagues or ["NFL", "NBA", "CFB", "MLB"] + SOCCER_LEAGUES
+    if len(leagues) == 1 and "," in leagues[0]:
+        leagues = [league.strip() for league in leagues[0].split(",") if league.strip()]
     
     for league in leagues:
         try:
-            ingest_league(league, args.force_backfill)
+            ingest_league(league.upper(), args.force_backfill)
         except Exception as e:
             LOGGER.error(f"Failed to ingest {league}: {e}")
 

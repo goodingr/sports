@@ -345,12 +345,10 @@ def load_schedules(
             )
             
             if existing_id:
-                # If game exists, use the existing ID to update it instead of creating a new one
                 game_id = existing_id
                 LOGGER.debug("Matched existing game %s for %s vs %s", game_id, home_raw, away_raw)
             else:
-                LOGGER.info("Skipping schedule for %s vs %s: no matching game found in DB", home_raw, away_raw)
-                continue
+                LOGGER.debug("Creating schedule game %s for %s vs %s", game_id, home_raw, away_raw)
 
             conn.execute(
                 """
@@ -514,7 +512,9 @@ def load_ncaab_regular_season_results(
                     home_code, home_name, home_score = l_code, l_name, l_score
                     away_code, away_name, away_score = w_code, w_name, w_score
 
-            # Find existing game (Update Only Mode)
+            home_team_id = _ensure_team_cached(conn, sport_id, home_code, home_name, team_cache)
+            away_team_id = _ensure_team_cached(conn, sport_id, away_code, away_name, team_cache)
+
             game_id = _find_game_by_details(
                 conn,
                 sport_id=sport_id,
@@ -530,22 +530,41 @@ def load_ncaab_regular_season_results(
                 existing = conn.execute("SELECT game_id FROM games WHERE game_id = ?", (internal_id,)).fetchone()
                 if existing:
                     game_id = existing[0]
-
-            if not game_id:
-                # LOGGER.debug("Skipping NCAAB result for %s vs %s: no matching game", home_name, away_name)
-                continue
+                else:
+                    game_id = internal_id
 
             processed_game_ids.add(game_id)
-            
-            # Allow updating metadata for existing games (e.g. status, score)
+
             conn.execute(
                 """
-                UPDATE games SET
-                    status = 'final',
-                    is_neutral = ?
-                WHERE game_id = ?
+                INSERT INTO games (
+                    game_id, sport_id, season, game_type, week, start_time_utc,
+                    home_team_id, away_team_id, venue, status, is_neutral
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    sport_id = excluded.sport_id,
+                    season = excluded.season,
+                    game_type = excluded.game_type,
+                    week = excluded.week,
+                    start_time_utc = excluded.start_time_utc,
+                    home_team_id = excluded.home_team_id,
+                    away_team_id = excluded.away_team_id,
+                    status = excluded.status,
+                    is_neutral = excluded.is_neutral
                 """,
-                (1 if neutral_site else 0, game_id),
+                (
+                    game_id,
+                    sport_id,
+                    season_value,
+                    "regular",
+                    None,
+                    start_time,
+                    home_team_id,
+                    away_team_id,
+                    None,
+                    "final",
+                    1 if neutral_site else 0,
+                ),
             )
 
             conn.execute(
@@ -1071,10 +1090,10 @@ def load_odds_snapshot(
             else:
                 conn.execute(
                     """
-                    UPDATE games 
+                    UPDATE games
                     SET odds_api_id = COALESCE(?, odds_api_id),
                         start_time_utc = COALESCE(?, start_time_utc),
-                        status = 'scheduled'
+                        status = CASE WHEN status = 'final' THEN status ELSE 'scheduled' END
                     WHERE game_id = ?
                     """,
                     (event.get("id"), commence_iso, game_id),

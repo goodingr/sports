@@ -40,6 +40,7 @@ pytest = "^8.4.2"
 mypy = "^1.18.2"
 types-pyyaml = "^6.0.12.20250915"
 types-requests = "^2.32.4.20250913"
+httpx = "^0.28.1"
 
 [tool.black]
 line-length = 100
@@ -52,6 +53,10 @@ exclude = ["debug_team_matching.py", "validate_profitability.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
 
 [tool.mypy]
 python_version = "3.11"

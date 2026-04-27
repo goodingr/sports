@@ -1,0 +1,159 @@
+# ============================================================================
+# Sports Betting Analytics — production compose
+# ----------------------------------------------------------------------------
+# One host, four services:
+#   - proxy   : Caddy (TLS termination, vhost split between app & api)
+#   - api     : FastAPI / uvicorn
+#   - worker  : cron-driven ingest / predict / backup pipeline
+#   - web     : Next.js frontend
+#
+# State lives on three named volumes that are mounted into both `api` and
+# `worker` so the worker can write while the API reads:
+#   - sports_data    -> /app/data    (SQLite + parquet)
+#   - sports_models  -> /app/models  (serialized model artefacts)
+#   - sports_logs    -> /app/logs    (pipeline transcripts)
+#   - sports_backups -> /app/backups (local snapshots before remote push)
+#
+# Secrets come from `.env` at the repo root. Never commit it.
+# ============================================================================
+
+name: sports-betting
+
+x-python-image: &python-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: sports-betting/python:latest
+
+x-python-env: &python-env
+  PYTHONPATH: /app
+  TZ: UTC
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  SPORTS_DB_PATH: ${SPORTS_DB_PATH:-/app/data/betting.db}
+  MODELS_DIR: ${MODELS_DIR:-/app/models}
+
+services:
+  api:
+    <<: *python-image
+    container_name: sports-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *python-env
+    volumes:
+      # SQLite needs write access to maintain -shm/-wal sidecar files even
+      # for read-only queries, so /app/data stays rw. The application code
+      # is read-only against the warehouse by convention.
+      - sports_data:/app/data
+      - sports_models:/app/models:ro
+      - sports_logs:/app/logs
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - sports
+
+  worker:
+    <<: *python-image
+    container_name: sports-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *python-env
+      WORKER_PREDICT_CRON: ${WORKER_PREDICT_CRON:-15 * * * *}
+      WORKER_TRAIN_CRON: ${WORKER_TRAIN_CRON:-0 9 * * *}
+      WORKER_BACKUP_CRON: ${WORKER_BACKUP_CRON:-0 18 * * *}
+      WORKER_REMOTE_BACKUP_CRON: ${WORKER_REMOTE_BACKUP_CRON:-30 18 * * *}
+    volumes:
+      - sports_data:/app/data
+      - sports_models:/app/models
+      - sports_logs:/app/logs
+      - sports_backups:/app/backups
+    # Cron requires PID 1 + a writable /etc/cron.d. Drop tini's exec form,
+    # run as root (the worker drops to `app` per-job), and execute our
+    # entrypoint which seeds the crontab.
+    user: "0:0"
+    entrypoint: ["/usr/bin/tini", "--"]
+    command: ["/app/scripts/worker_entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "cron"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sports
+
+  web:
+    build:
+      context: ./web-app
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/login}
+        NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/signup}
+    image: sports-betting/web:latest
+    container_name: sports-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sports
+
+  proxy:
+    image: caddy:2.8-alpine
+    container_name: sports-proxy
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks:
+      - sports
+
+networks:
+  sports:
+    driver: bridge
+
+volumes:
+  sports_data:
+  sports_models:
+  sports_logs:
+  sports_backups:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,51 @@
+# Predeclared betting rules for subscriber-facing recommendations.
+#
+# Launch rule status:
+# - approved: may be shown only if the quality report says it passes launch gates.
+# - candidate: monitored and backtested, but not subscriber-facing.
+# - status: disabled or disabled: true: never subscriber-facing.
+#
+# Current default is intentionally conservative: no approved paid rules.
+
+launch_gate:
+  min_bets_narrow: 150
+  min_bets_multi_league: 300
+  min_roi: 0.05
+  min_bootstrap_roi_low: 0.0
+  bootstrap_samples: 3000
+  random_seed: 42
+
+approved_rules: []
+
+candidate_rules:
+  - id: laliga_totals_ensemble_edge_004
+    status: candidate
+    market: totals
+    league: LALIGA
+    model_type: ensemble
+    side: both
+    min_edge: 0.04
+
+  - id: laliga_totals_gradient_boosting_edge_004
+    status: candidate
+    market: totals
+    league: LALIGA
+    model_type: gradient_boosting
+    side: both
+    min_edge: 0.04
+
+  - id: laliga_totals_random_forest_edge_004
+    status: candidate
+    market: totals
+    league: LALIGA
+    model_type: random_forest
+    side: both
+    min_edge: 0.04
+
+  - id: nba_totals_random_forest_edge_020
+    status: candidate
+    market: totals
+    league: NBA
+    model_type: random_forest
+    side: both
+    min_edge: 0.20

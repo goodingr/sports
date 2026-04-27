@@ -1,0 +1,83 @@
+# Predeclared rolling-origin benchmark grid for betting rules.
+#
+# The runner may rank only combinations declared here. It must not tune free-form
+# thresholds or publish a rule that fails the strict gate.
+
+sweep:
+  markets:
+    - totals
+    - moneyline
+
+  leagues:
+    - NBA
+    - NHL
+    - EPL
+    - LALIGA
+    - BUNDESLIGA
+    - SERIEA
+    - LIGUE1
+
+  baselines:
+    - market_only
+    - line_movement
+
+  candidates:
+    - logistic
+    - gradient_boosting
+    - random_forest
+    - xgboost
+
+  min_edge_thresholds:
+    - 0.00
+    - 0.02
+    - 0.04
+    - 0.06
+    - 0.08
+    - 0.10
+
+  sides:
+    totals:
+      - over
+      - under
+      - both
+    moneyline:
+      - home
+      - away
+      - both
+
+  variants:
+    baselines:
+      - id: baseline
+        residual: false
+        shrinkage: 1.0
+        calibration: none
+
+    candidates:
+      - id: market_residual_shrink_025_sigmoid
+        residual: true
+        shrinkage: 0.25
+        calibration: sigmoid
+      - id: market_residual_shrink_050_sigmoid
+        residual: true
+        shrinkage: 0.50
+        calibration: sigmoid
+      - id: market_residual_shrink_075_sigmoid
+        residual: true
+        shrinkage: 0.75
+        calibration: sigmoid
+
+rolling_origin:
+  folds: 5
+  min_train_size: 100
+  calibration_folds: 3
+  min_calibration_size: 50
+
+strict_gate:
+  min_bets_narrow: 150
+  min_bets_multi_league: 300
+  min_roi: 0.05
+  min_bootstrap_roi_low: 0.0
+  bootstrap_samples: 3000
+  random_seed: 42
+  require_brier_beats_market: true
+  require_roi_beats_market_baseline: true

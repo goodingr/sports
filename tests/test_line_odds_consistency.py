@@ -1,6 +1,7 @@
 import pandas as pd
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 project_root = Path(__file__).resolve().parents[1]
@@ -26,14 +27,14 @@ def test_line_odds_consistency():
     
     if recommended.empty:
         print("❌ No recommendations found.")
-        return
+        pytest.skip("No recommendations found.")
     
     # Fetch fresh odds
     totals_odds_df = get_totals_odds_for_recommended(recommended)
     
     if totals_odds_df.empty:
         print("❌ No fresh odds found.")
-        return
+        pytest.skip("No fresh odds found.")
     
     print(f"\nTesting {len(recommended)} recommended bets for line/odds consistency...")
     
@@ -88,10 +89,10 @@ def test_line_odds_consistency():
         if len(mismatches) > 5:
             print(f"\n  ... and {len(mismatches) - 5} more mismatches")
         
-        return False
+        pytest.fail(f"Found {len(mismatches)} line mismatches")
     else:
         print(f"\n✅ All {len(merged)} bets have consistent lines and odds!")
-        return True
+        assert not mismatches
 
 if __name__ == "__main__":
     success = test_line_odds_consistency()

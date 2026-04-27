@@ -1,6 +1,7 @@
 import pandas as pd
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 project_root = Path(__file__).resolve().parents[1]
@@ -25,14 +26,14 @@ def test_all_bets_have_sportsbook_data():
     
     if recommended.empty:
         print("❌ No recommendations found.")
-        return False
+        pytest.skip("No recommendations found.")
     
     # Fetch fresh odds
     totals_odds_df = get_totals_odds_for_recommended(recommended)
     
     if totals_odds_df.empty:
         print("❌ No fresh odds found.")
-        return False
+        pytest.skip("No fresh odds found.")
     
     print(f"\nTesting {len(recommended)} recommended bets...")
     
@@ -67,7 +68,7 @@ def test_all_bets_have_sportsbook_data():
         if num_without_data > 3:
             print(f"\n  ... and {num_without_data - 3} more")
         
-        return False
+        pytest.fail(f"{num_without_data} bets have no sportsbook data")
     else:
         print(f"\n✅ ALL {len(merged)} bets have sportsbook data!")
         
@@ -75,14 +76,15 @@ def test_all_bets_have_sportsbook_data():
         print(f"\nExample bets:")
         for idx, row in merged.head(3).iterrows():
             pred_line = row['total_line']
-            sb_line = row['line_sportsbook']
+            sb_line = row.get('line_sportsbook', row.get('line'))
+            sb_book = row.get('book_sportsbook', row.get('book'))
             print(f"\n  {row.get('home_team')} vs {row.get('away_team')}")
             print(f"  Predicted line: {row['side'].title()} {pred_line}")
-            print(f"  Best available: {row['book_sportsbook']} {row['side'].title()} {sb_line} @ {row['moneyline_sportsbook']:+.0f}")
+            print(f"  Best available: {sb_book} {row['side'].title()} {sb_line} @ {row['moneyline_sportsbook']:+.0f}")
             if abs(pred_line - sb_line) > 0.5:
                 print(f"    (Line adjusted from {pred_line} to {sb_line})")
         
-        return True
+        assert num_without_data == 0
 
 if __name__ == "__main__":
     success = test_all_bets_have_sportsbook_data()

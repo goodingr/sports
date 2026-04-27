@@ -102,6 +102,38 @@ def _load_ncaab_team_mappings() -> tuple[Dict[str, str], Dict[str, str], Dict[st
 
 NCAAB_TEAM_CODES, NCAAB_ALIASES, NCAAB_TEAM_NAMES = _load_ncaab_team_mappings()
 
+NCAAB_OVERRIDES: Dict[str, str] = {
+    # Fix collisions
+    "baptist fl eagles": "BAPTIST_FL", # Avoid mapping to BEA (Boston College)
+    "baptist eagles": "BAPTIST_FL",
+    
+    # Map to DB codes
+    "mercer bears": "MERCER",
+    "mercer": "MERCER",
+    "maine black bears": "MAINE",
+    "maine": "MAINE",
+    "boston college": "BEA",
+    "boston college eagles": "BEA",
+    "stanford": "STA",
+    "stanford cardinal": "STA",
+    "csu northridge matadors": "CMA",
+    "csu northridge": "CMA",
+    "csun": "CMA",
+    "cal state northridge": "CMA",
+    
+    # Others from log
+    "bryant bulldogs": "BBU",
+    "bryant": "BBU",
+    "holy cross crusaders": "HCR",
+    "holy cross": "HCR",
+    "harvard crimson": "HARVARD", # Avoid HCR collision if any
+    "harvard": "HARVARD",
+}
+
+# Apply overrides to aliases
+for name, code in NCAAB_OVERRIDES.items():
+    _add_alias(NCAAB_ALIASES, name, code)
+
 
 NFL_ALIASES: Dict[str, str] = {
     "arizona cardinals": "ARI",
@@ -521,6 +553,9 @@ EPL_ALIASES: Dict[str, str] = {
     "manchester city": "MCI",
     "newcastle united": "NEW",
     "newcastle": "NEW",
+    "nottingham forest": "NFO",
+    "nottm forest": "NFO",
+    "sheffield united": "SHU",
 }
 
 LALIGA_ALIASES: Dict[str, str] = {
@@ -580,6 +615,7 @@ LALIGA_ALIASES: Dict[str, str] = {
     "getafe": "GETAFE",
     "mallorca": "MALLORCA",
     "osasuna": "OSA",
+    "girona": "GIRONA", # Explicit alias
 }
 
 BUNDESLIGA_ALIASES: Dict[str, str] = {
@@ -740,6 +776,7 @@ SERIEA_ALIASES: Dict[str, str] = {
     "cremonese": "CREMONESE",
     "pisa": "PISA",
     "abc": "ATA",
+    "internazionale": "INT",
 }
 
 LIGUE1_ALIASES: Dict[str, str] = {
@@ -801,6 +838,14 @@ LIGUE1_ALIASES: Dict[str, str] = {
     "lille": "LIL",
     "marseille": "MAR",
     "nantes": "NANTES",
+    "metz": "METZ",
+    "le havre": "HAV",
+    "clermont foot": "CFO",
+    "stade de reims": "REI",
+    "reims": "REI",
+    "strasbourg": "STR",
+    "lorient": "LOR",
+    "monaco": "ASM",
 }
 
 CFB_ALIASES: Dict[str, str] = {

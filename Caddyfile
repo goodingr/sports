@@ -1,0 +1,79 @@
+# Caddy reverse proxy for the sports-betting stack.
+#
+# Two vhosts:
+#   {$APP_DOMAIN} -> Next.js (web)
+#   {$API_DOMAIN} -> FastAPI (api)
+#
+# Caddy auto-provisions Let's Encrypt certs on the first inbound request once
+# DNS resolves to this host.
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment for the first dry run against staging to avoid LE rate limits:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+# ----------------------------------------------------------------------------
+# Web app
+# ----------------------------------------------------------------------------
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# HSTS: 1 year, include subdomains. Drop `preload` until you submit
+		# the apex to hstspreload.org.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+
+	reverse_proxy web:3000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ----------------------------------------------------------------------------
+# API
+# ----------------------------------------------------------------------------
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# CORS is enforced by FastAPI itself (see API_CORS_ORIGINS).
+	# Caddy stays out of the auth/cors path on purpose.
+
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+
+	@health path /health /ready
+	handle @health {
+		reverse_proxy api:8000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
