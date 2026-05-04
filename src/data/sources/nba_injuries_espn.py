@@ -124,6 +124,14 @@ def _get_athlete(
     return data
 
 
+def _athlete_id_from_ref(ref: Optional[str]) -> Optional[str]:
+    if not ref:
+        return None
+    clean = ref.split("?")[0].rstrip("/")
+    value = clean.rsplit("/", 1)[-1]
+    return value or None
+
+
 def _fetch_team_injuries(
     team: Dict[str, Any],
     *,
@@ -148,7 +156,8 @@ def _fetch_team_injuries(
         if not detail:
             continue
 
-        athlete = _get_athlete(detail.get("athlete", {}).get("$ref"), timeout=timeout, cache=athlete_cache)
+        athlete_ref = detail.get("athlete", {}).get("$ref")
+        athlete = _get_athlete(athlete_ref, timeout=timeout, cache=athlete_cache)
         player_name = athlete.get("displayName") or athlete.get("fullName")
         if not player_name:
             continue
@@ -168,6 +177,7 @@ def _fetch_team_injuries(
                 "team_code": team_code,
                 "team_name": team_name,
                 "player_name": player_name,
+                "player_id": athlete.get("id") or _athlete_id_from_ref(athlete_ref),
                 "position": position,
                 "status": status,
                 "practice_status": practice_status,
@@ -233,6 +243,7 @@ def ingest(*, timeout: int = 60) -> str:
                         "team_code": item["team"], # Use full name as code for now, normalization happens later
                         "team_name": item["team"],
                         "player_name": item["player_name"],
+                        "player_id": item.get("player_id"),
                         "position": item["position"],
                         "status": item["status"],
                         "practice_status": None,
@@ -277,6 +288,7 @@ def ingest(*, timeout: int = 60) -> str:
                     in {
                         "team_code",
                         "player_name",
+                        "player_id",
                         "position",
                         "status",
                         "practice_status",

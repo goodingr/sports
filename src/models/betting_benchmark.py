@@ -16,7 +16,7 @@ import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -25,12 +25,16 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss
 
+from src.data.availability_quality import warn_if_low_availability_coverage
 from src.db.core import DB_PATH
 from src.features.betting_model_input import DEFAULT_RELEASE_LEAGUES
+from src.models.benchmark_triage import build_benchmark_triage_report
 from src.models.prediction_quality import (
     DEFAULT_STAKE,
+    american_to_decimal,
     bootstrap_roi_interval,
     calibration_bins,
+    closing_line_value_summary,
     expected_value,
     max_drawdown,
     max_losing_streak,
@@ -74,6 +78,10 @@ class StrictGate:
     min_bets_multi_league: int = 300
     min_roi: float = 0.05
     min_bootstrap_roi_low: float = 0.0
+    min_avg_clv: float = 0.0
+    min_clv_win_rate: float = 0.5
+    max_hours_before_start: Optional[float] = 72.0
+    require_positive_clv: bool = True
     bootstrap_samples: int = 3000
     random_seed: int = 42
     require_brier_beats_market: bool = True
@@ -99,6 +107,7 @@ class BenchmarkArtifacts:
     report_path: Path
     best_rule_json_path: Path
     best_rule_yaml_path: Path
+    triage_report_path: Path
 
 
 @dataclass(frozen=True)
@@ -142,6 +151,14 @@ def _strict_gate_from_raw(raw: dict[str, Any]) -> StrictGate:
         min_bootstrap_roi_low=float(
             raw.get("min_bootstrap_roi_low", StrictGate.min_bootstrap_roi_low)
         ),
+        min_avg_clv=float(raw.get("min_avg_clv", StrictGate.min_avg_clv)),
+        min_clv_win_rate=float(raw.get("min_clv_win_rate", StrictGate.min_clv_win_rate)),
+        max_hours_before_start=(
+            None
+            if raw.get("max_hours_before_start") is None
+            else float(raw.get("max_hours_before_start", StrictGate.max_hours_before_start))
+        ),
+        require_positive_clv=bool(raw.get("require_positive_clv", StrictGate.require_positive_clv)),
         bootstrap_samples=int(raw.get("bootstrap_samples", StrictGate.bootstrap_samples)),
         random_seed=int(raw.get("random_seed", StrictGate.random_seed)),
         require_brier_beats_market=bool(
@@ -201,8 +218,7 @@ def load_benchmark_config(path: Path = DEFAULT_CONFIG_PATH) -> BenchmarkConfig:
     sides_raw = sweep.get("sides", {})
     return BenchmarkConfig(
         markets=tuple(
-            str(item).lower()
-            for item in _as_tuple(sweep.get("markets"), ["totals", "moneyline"])
+            str(item).lower() for item in _as_tuple(sweep.get("markets"), ["totals", "moneyline"])
         ),
         leagues=tuple(
             str(item).upper() for item in _as_tuple(sweep.get("leagues"), DEFAULT_RELEASE_LEAGUES)
@@ -457,6 +473,29 @@ def _best_or_selected(row: pd.Series, best_column: str, selected_column: str) ->
     return float(row[selected_column])
 
 
+def _selected_price_metadata(
+    row: pd.Series,
+    *,
+    best_moneyline_column: str,
+    selected_moneyline_column: str,
+    best_book_column: str,
+) -> dict[str, Any]:
+    best_moneyline = row.get(best_moneyline_column)
+    selected_moneyline = row.get(selected_moneyline_column)
+    selected_book = row.get("book")
+    best_book = row.get(best_book_column)
+    use_best = pd.notna(best_moneyline)
+    return {
+        "moneyline": float(best_moneyline if use_best else selected_moneyline),
+        "selected_moneyline": selected_moneyline,
+        "best_moneyline": best_moneyline,
+        "book": best_book if use_best and pd.notna(best_book) else selected_book,
+        "selected_book": selected_book,
+        "best_book": best_book,
+        "price_source": "best_book" if use_best else "selected_book",
+    }
+
+
 def _american_profit(
     moneyline: float | int | None,
     won: bool,
@@ -472,6 +511,44 @@ def _american_profit(
             return stake * (moneyline / 100.0)
         return stake * (100.0 / abs(moneyline))
     return -stake
+
+
+def _moneyline_clv(bet_moneyline: float | int | None, close_moneyline: float | int | None) -> float:
+    bet_decimal = american_to_decimal(bet_moneyline)
+    close_decimal = american_to_decimal(close_moneyline)
+    if bet_decimal is None or close_decimal is None:
+        return np.nan
+    return float(bet_decimal - close_decimal)
+
+
+def _totals_closing_line_value(
+    row: pd.Series,
+    side: str,
+    price_source: str,
+) -> tuple[float, float, str]:
+    """Return same-book totals CLV, close line, and source label."""
+    same_book_columns = {
+        "selected_book_total_close",
+        "best_over_book_total_close",
+        "best_under_book_total_close",
+    }
+    same_book_available = any(column in row.index for column in same_book_columns)
+    if price_source == "best_book":
+        close_line = row.get(f"best_{side}_book_total_close")
+        source = f"same_book_{side}_best_book"
+    else:
+        close_line = row.get("selected_book_total_close")
+        source = "same_book_selected_book"
+
+    if pd.isna(close_line) and not same_book_available:
+        close_line = row.get("total_close")
+        source = "legacy_game_results_total_close"
+    if pd.isna(close_line):
+        return np.nan, np.nan, source
+
+    line = float(row["line"])
+    closing_line_value = float(close_line) - line if side == "over" else line - float(close_line)
+    return closing_line_value, float(close_line), source
 
 
 def expand_benchmark_bets(predictions: pd.DataFrame, contract: FeatureContract) -> pd.DataFrame:
@@ -492,14 +569,25 @@ def expand_benchmark_bets(predictions: pd.DataFrame, contract: FeatureContract) 
                 market_prob = float(
                     row["over_no_vig_prob"] if side == "over" else row["under_no_vig_prob"]
                 )
-                moneyline = _best_or_selected(
+                price = _selected_price_metadata(
                     row,
-                    "best_over_moneyline" if side == "over" else "best_under_moneyline",
-                    "over_moneyline" if side == "over" else "under_moneyline",
+                    best_moneyline_column=(
+                        "best_over_moneyline" if side == "over" else "best_under_moneyline"
+                    ),
+                    selected_moneyline_column=(
+                        "over_moneyline" if side == "over" else "under_moneyline"
+                    ),
+                    best_book_column="best_over_book" if side == "over" else "best_under_book",
                 )
+                moneyline = price["moneyline"]
                 won = settle_total_side(total, line, side)
                 if won is None:
                     continue
+                closing_line_value, closing_total_line, clv_source = _totals_closing_line_value(
+                    row,
+                    side,
+                    price["price_source"],
+                )
                 rows.append(
                     {
                         "game_id": row.get("game_id"),
@@ -517,19 +605,36 @@ def expand_benchmark_bets(predictions: pd.DataFrame, contract: FeatureContract) 
                         "no_vig_market_prob": market_prob,
                         "edge": predicted_prob - market_prob,
                         "moneyline": moneyline,
+                        "selected_moneyline": price["selected_moneyline"],
+                        "best_moneyline": price["best_moneyline"],
+                        "book": price["book"],
+                        "selected_book": price["selected_book"],
+                        "best_book": price["best_book"],
+                        "price_source": price["price_source"],
                         "won": bool(won),
                         "profit": _american_profit(moneyline, bool(won)),
                         "expected_value": expected_value(predicted_prob, moneyline),
                         "actual_value": _american_profit(moneyline, bool(won)),
+                        "closing_line_value": closing_line_value,
+                        "closing_total_line": closing_total_line,
+                        "closing_line_value_source": clv_source,
                         "predicted_at": row["snapshot_time_utc"],
                         "start_time_utc": row["start_time_utc"],
+                        "hours_before_start": row.get("hours_before_start"),
                     }
                 )
     elif contract.market == "moneyline":
         for _, row in predictions.iterrows():
             predicted_prob = float(row["predicted_prob"])
             market_prob = float(row["no_vig_prob"])
-            moneyline = _best_or_selected(row, "best_moneyline", "moneyline")
+            price = _selected_price_metadata(
+                row,
+                best_moneyline_column="best_moneyline",
+                selected_moneyline_column="moneyline",
+                best_book_column="best_book",
+            )
+            moneyline = price["moneyline"]
+            close_moneyline = row.get("close_moneyline")
             won = bool(row["target_win"])
             rows.append(
                 {
@@ -548,12 +653,20 @@ def expand_benchmark_bets(predictions: pd.DataFrame, contract: FeatureContract) 
                     "no_vig_market_prob": market_prob,
                     "edge": predicted_prob - market_prob,
                     "moneyline": moneyline,
+                    "selected_moneyline": price["selected_moneyline"],
+                    "best_moneyline": price["best_moneyline"],
+                    "book": price["book"],
+                    "selected_book": price["selected_book"],
+                    "best_book": price["best_book"],
+                    "price_source": price["price_source"],
                     "won": won,
                     "profit": _american_profit(moneyline, won),
                     "expected_value": expected_value(predicted_prob, moneyline),
                     "actual_value": _american_profit(moneyline, won),
+                    "closing_line_value": _moneyline_clv(moneyline, close_moneyline),
                     "predicted_at": row["snapshot_time_utc"],
                     "start_time_utc": row["start_time_utc"],
+                    "hours_before_start": row.get("hours_before_start"),
                 }
             )
     else:
@@ -588,6 +701,9 @@ def _summarize_rule_bets(frame: pd.DataFrame, gate: StrictGate) -> dict[str, Any
             "market_brier_score": None,
             "brier_delta_vs_market": None,
             "model_beats_market_brier": False,
+            "closing_line_value_count": 0,
+            "avg_closing_line_value": None,
+            "closing_line_value_win_rate": None,
             "calibration_bins": [],
             "max_drawdown": 0.0,
             "losing_streak": 0,
@@ -604,6 +720,7 @@ def _summarize_rule_bets(frame: pd.DataFrame, gate: StrictGate) -> dict[str, Any
     )
     brier = _brier_or_none(clean, "predicted_prob")
     market_brier = _brier_or_none(clean, "no_vig_market_prob")
+    clv = closing_line_value_summary(clean)
     return {
         "sample_size": int(len(clean)),
         "bets": int(len(clean)),
@@ -623,32 +740,143 @@ def _summarize_rule_bets(frame: pd.DataFrame, gate: StrictGate) -> dict[str, Any
         "actual_value_per_bet": float(clean["actual_value"].mean()),
         "brier_score": brier,
         "market_brier_score": market_brier,
-        "brier_delta_vs_market": None
-        if brier is None or market_brier is None
-        else float(brier - market_brier),
+        "brier_delta_vs_market": (
+            None if brier is None or market_brier is None else float(brier - market_brier)
+        ),
         "model_beats_market_brier": bool(
             brier is not None and market_brier is not None and brier < market_brier
         ),
+        **clv,
         "calibration_bins": calibration_bins(clean),
         "max_drawdown": max_drawdown(clean.sort_values("start_time_utc")["profit"]),
         "losing_streak": max_losing_streak(clean.sort_values("start_time_utc")["won"]),
     }
 
 
-def _filter_rule_bets(bets: pd.DataFrame, rule: dict[str, Any]) -> pd.DataFrame:
+def _hours_bucket(hours: Any) -> str:
+    if pd.isna(hours):
+        return "missing"
+    value = float(hours)
+    if value < 1:
+        return "<1h"
+    if value < 6:
+        return "1-6h"
+    if value < 24:
+        return "6-24h"
+    if value < 72:
+        return "24-72h"
+    return ">=72h"
+
+
+def _filter_rule_bets(
+    bets: pd.DataFrame,
+    rule: dict[str, Any],
+    *,
+    max_hours_before_start: Optional[float] = None,
+) -> pd.DataFrame:
     frame = bets.copy()
     frame = frame[frame["market"] == str(rule["market"]).lower()]
     frame = frame[frame["league"].astype(str).str.upper() == str(rule["league"]).upper()]
     frame = frame[frame["model_type"] == str(rule["model_type"])]
     frame = frame[frame["prediction_variant"] == str(rule["prediction_variant"])]
+    for field in ("feature_variant", "price_mode", "timing_bucket"):
+        if rule.get(field) is not None:
+            if field not in frame.columns:
+                return frame.iloc[0:0].copy()
+            frame = frame[frame[field].astype(str) == str(rule[field])]
     if str(rule["side"]).lower() != "both":
         frame = frame[frame["side"] == str(rule["side"]).lower()]
     frame = frame[frame["edge"] >= float(rule["min_edge"])]
+    if max_hours_before_start is not None and "hours_before_start" in frame.columns:
+        hours = pd.to_numeric(frame["hours_before_start"], errors="coerce")
+        if hours.notna().any():
+            frame = frame[hours.notna() & (hours <= max_hours_before_start)].copy()
     return frame
+
+
+def _rule_timing_exclusion_count(
+    bets: pd.DataFrame,
+    rule: dict[str, Any],
+    max_hours_before_start: Optional[float],
+) -> int:
+    if max_hours_before_start is None or bets.empty or "hours_before_start" not in bets.columns:
+        return 0
+    raw = _filter_rule_bets(bets, rule, max_hours_before_start=None)
+    if raw.empty:
+        return 0
+    filtered = _filter_rule_bets(
+        bets,
+        rule,
+        max_hours_before_start=max_hours_before_start,
+    )
+    return int(len(raw) - len(filtered))
+
+
+def _rule_clv_slices(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame.empty or "closing_line_value" not in frame.columns:
+        return []
+    clean = frame.copy()
+    clean["closing_line_value"] = pd.to_numeric(clean["closing_line_value"], errors="coerce")
+    clean = clean[clean["closing_line_value"].notna()].copy()
+    if clean.empty:
+        return []
+    if "book" not in clean.columns:
+        clean["book"] = "unknown"
+    if "price_source" not in clean.columns:
+        clean["price_source"] = "unknown"
+    if "closing_line_value_source" not in clean.columns:
+        clean["closing_line_value_source"] = "unknown"
+    if "hours_before_start" not in clean.columns:
+        clean["hours_before_start"] = np.nan
+    clean["hours_bucket"] = clean["hours_before_start"].apply(_hours_bucket)
+
+    rows: list[dict[str, Any]] = []
+    group_columns = ["book", "price_source", "closing_line_value_source", "hours_bucket"]
+    for keys, group in clean.groupby(group_columns, dropna=False):
+        book, price_source, clv_source, hours_bucket = keys
+        total_staked = DEFAULT_STAKE * len(group)
+        roi = float(group["profit"].sum() / total_staked) if total_staked else None
+        clv = closing_line_value_summary(group)
+        rows.append(
+            {
+                "book": str(book) if pd.notna(book) else "unknown",
+                "price_source": str(price_source),
+                "closing_line_value_source": str(clv_source),
+                "hours_bucket": str(hours_bucket),
+                "bets": int(len(group)),
+                "roi": roi,
+                "avg_edge": float(group["edge"].mean()) if "edge" in group.columns else None,
+                **clv,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            row["bets"],
+            (
+                row.get("avg_closing_line_value")
+                if row.get("avg_closing_line_value") is not None
+                else -999.0
+            ),
+        ),
+        reverse=True,
+    )
+    return rows
 
 
 def _threshold_tag(value: float) -> str:
     return f"{value:.3f}".replace(".", "")
+
+
+def _sort_number(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if np.isnan(number):
+        return default
+    return number
 
 
 def build_predeclared_rules(config: BenchmarkConfig) -> list[dict[str, Any]]:
@@ -714,6 +942,9 @@ def _candidate_rule_yaml(rule: dict[str, Any], publishable: bool) -> str:
             "calibration": rule["calibration"],
         }
     }
+    for field in ("feature_variant", "price_mode", "timing_bucket"):
+        if rule.get(field) is not None:
+            block["candidate_rule"][field] = rule[field]
     return yaml.safe_dump(block, sort_keys=False)
 
 
@@ -740,7 +971,9 @@ def _compact_metrics(row: Optional[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _baseline_lookup_key(result: dict[str, Any]) -> tuple[str, str, str, float, str, str]:
+def _baseline_lookup_key(
+    result: dict[str, Any],
+) -> tuple[str, str, str, float, str, str, Any, Any, Any]:
     return (
         result["market"],
         result["league"],
@@ -748,11 +981,14 @@ def _baseline_lookup_key(result: dict[str, Any]) -> tuple[str, str, str, float, 
         float(result["min_edge"]),
         result["model_type"],
         result["prediction_variant"],
+        result.get("feature_variant"),
+        result.get("price_mode"),
+        result.get("timing_bucket"),
     )
 
 
 def _find_baseline_result(
-    lookup: dict[tuple[str, str, str, float, str, str], dict[str, Any]],
+    lookup: dict[tuple[str, str, str, float, str, str, Any, Any, Any], dict[str, Any]],
     result: dict[str, Any],
     baseline_model: str,
 ) -> Optional[dict[str, Any]]:
@@ -763,6 +999,9 @@ def _find_baseline_result(
         float(result["min_edge"]),
         baseline_model,
         "baseline",
+        result.get("feature_variant"),
+        result.get("price_mode"),
+        result.get("timing_bucket"),
     )
     baseline = lookup.get(same_threshold_key)
     if baseline is not None and baseline.get("bets", 0) > 0:
@@ -774,6 +1013,9 @@ def _find_baseline_result(
         0.0,
         baseline_model,
         "baseline",
+        result.get("feature_variant"),
+        result.get("price_mode"),
+        result.get("timing_bucket"),
     )
     return lookup.get(zero_threshold_key) or baseline
 
@@ -802,6 +1044,19 @@ def _gate_failures(
         failures.append(f"bootstrap_roi_low_not_above_{gate.min_bootstrap_roi_low}")
     if gate.require_brier_beats_market and not result.get("model_beats_market_brier"):
         failures.append("brier_does_not_beat_market")
+    if gate.require_positive_clv:
+        if int(result.get("closing_line_value_count") or 0) <= 0:
+            failures.append("missing_clv")
+        if (
+            result.get("avg_closing_line_value") is None
+            or float(result["avg_closing_line_value"]) <= gate.min_avg_clv
+        ):
+            failures.append(f"avg_clv_not_above_{gate.min_avg_clv}")
+        if (
+            result.get("closing_line_value_win_rate") is None
+            or float(result["closing_line_value_win_rate"]) <= gate.min_clv_win_rate
+        ):
+            failures.append(f"clv_win_rate_not_above_{gate.min_clv_win_rate}")
     baseline_roi = market_baseline.get("roi") if market_baseline else None
     if (
         gate.require_roi_beats_market_baseline
@@ -821,7 +1076,15 @@ def rank_predeclared_rules(
     """Evaluate predeclared rules and attach market baseline comparisons."""
     results: list[dict[str, Any]] = []
     for rule in rules:
-        filtered = _filter_rule_bets(bets, rule) if not bets.empty else pd.DataFrame()
+        filtered = (
+            _filter_rule_bets(
+                bets,
+                rule,
+                max_hours_before_start=gate.max_hours_before_start,
+            )
+            if not bets.empty
+            else pd.DataFrame()
+        )
         result = _summarize_rule_bets(filtered, gate)
         result.update(
             {
@@ -832,9 +1095,25 @@ def rank_predeclared_rules(
                 "league": rule["league"],
                 "model_type": rule["model_type"],
                 "prediction_variant": rule["prediction_variant"],
+                "feature_variant": rule.get("feature_variant"),
+                "price_mode": rule.get("price_mode"),
+                "timing_bucket": rule.get("timing_bucket"),
                 "side": rule["side"],
                 "min_edge": float(rule["min_edge"]),
                 "rule": rule,
+                "odds_timing_filter": {
+                    "max_hours_before_start": gate.max_hours_before_start,
+                    "stale_odds_excluded": (
+                        _rule_timing_exclusion_count(
+                            bets,
+                            rule,
+                            gate.max_hours_before_start,
+                        )
+                        if not bets.empty
+                        else 0
+                    ),
+                },
+                "clv_slices": _rule_clv_slices(filtered),
             }
         )
         results.append(result)
@@ -871,8 +1150,13 @@ def rank_predeclared_rules(
     results.sort(
         key=lambda row: (
             bool(row.get("publishable")),
-            row.get("bootstrap_roi_low") if row.get("bootstrap_roi_low") is not None else -999.0,
-            row.get("roi") if row.get("roi") is not None else -999.0,
+            bool(row.get("model_beats_market_brier")),
+            -_sort_number(row.get("brier_delta_vs_market"), 999.0),
+            _sort_number(row.get("bootstrap_roi_low"), -999.0),
+            _sort_number(row.get("avg_closing_line_value"), -999.0),
+            _sort_number(row.get("closing_line_value_win_rate"), -999.0),
+            _sort_number(row.get("roi"), -999.0),
+            -_sort_number(row.get("max_drawdown"), 999999.0),
             row.get("bets") or 0,
         ),
         reverse=True,
@@ -923,11 +1207,51 @@ def _best_candidate_payload(ranked_rules: list[dict[str, Any]]) -> dict[str, Any
             "market_brier_score": best.get("market_brier_score"),
             "win_rate": best.get("win_rate"),
             "sample_size": best.get("sample_size"),
+            "avg_closing_line_value": best.get("avg_closing_line_value"),
+            "closing_line_value_win_rate": best.get("closing_line_value_win_rate"),
+            "closing_line_value_count": best.get("closing_line_value_count"),
             "max_drawdown": best.get("max_drawdown"),
             "losing_streak": best.get("losing_streak"),
+            "odds_timing_filter": best.get("odds_timing_filter"),
+            "clv_slices": best.get("clv_slices", []),
         },
         "strict_gate_failures": best.get("strict_gate_failures", []),
     }
+
+
+def _candidate_rule_rankings(ranked_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in ranked_rules:
+        if row.get("kind") != "candidate":
+            continue
+        rows.append(
+            {
+                "rank": row.get("rank"),
+                "rule_id": row.get("rule_id"),
+                "market": row.get("market"),
+                "league": row.get("league"),
+                "model_type": row.get("model_type"),
+                "prediction_variant": row.get("prediction_variant"),
+                "side": row.get("side"),
+                "min_edge": row.get("min_edge"),
+                "bets": row.get("bets"),
+                "roi": row.get("roi"),
+                "bootstrap_roi_low": row.get("bootstrap_roi_low"),
+                "brier_delta_vs_market": row.get("brier_delta_vs_market"),
+                "model_beats_market_brier": row.get("model_beats_market_brier"),
+                "avg_closing_line_value": row.get("avg_closing_line_value"),
+                "closing_line_value_win_rate": row.get("closing_line_value_win_rate"),
+                "closing_line_value_count": row.get("closing_line_value_count"),
+                "max_drawdown": row.get("max_drawdown"),
+                "losing_streak": row.get("losing_streak"),
+                "required_min_bets": row.get("required_min_bets"),
+                "odds_timing_filter": row.get("odds_timing_filter"),
+                "clv_slices": row.get("clv_slices", []),
+                "passes_strict_gate": row.get("passes_strict_gate"),
+                "strict_gate_failures": row.get("strict_gate_failures", []),
+            }
+        )
+    return rows
 
 
 def run_betting_benchmark(
@@ -936,6 +1260,7 @@ def run_betting_benchmark(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
 ) -> BenchmarkArtifacts:
     config = load_benchmark_config(config_path)
+    warn_if_low_availability_coverage(db_path=db_path, leagues=config.leagues)
     output_dir.mkdir(parents=True, exist_ok=True)
     available_candidates = [model for model in config.candidates if _model_is_available(model)]
     skipped_models = [model for model in config.candidates if model not in available_candidates]
@@ -1006,11 +1331,15 @@ def run_betting_benchmark(
         if rule["model_type"] in {*config.baselines, *available_candidates}
     ]
     ranked_rules = rank_predeclared_rules(bets, rules, config.strict_gate)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    generated_at = datetime.now(timezone.utc)
+    timestamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    report_path = output_dir / f"betting_benchmark_{timestamp}.json"
+    triage_report_path = output_dir / f"triage_{timestamp}.json"
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at.isoformat(),
         "db_path": str(db_path),
         "config_path": str(config_path),
+        "triage_report_path": str(triage_report_path),
         "rolling_origin": asdict(config.rolling),
         "strict_gate": asdict(config.strict_gate),
         "sweep": {
@@ -1027,13 +1356,23 @@ def run_betting_benchmark(
         "dataset_counts": dataset_counts,
         "prediction_counts": prediction_counts,
         "ranked_rules": ranked_rules,
+        "candidate_rule_rankings": _candidate_rule_rankings(ranked_rules),
         "best_candidate": _best_candidate_payload(ranked_rules),
     }
+    triage_report = build_benchmark_triage_report(
+        ranked_rules,
+        strict_gate=asdict(config.strict_gate),
+        generated_at=report["generated_at"],
+        source_report_path=report_path,
+    )
 
-    report_path = output_dir / f"betting_benchmark_{timestamp}.json"
     best_rule_json_path = output_dir / "best_candidate_rule.json"
     best_rule_yaml_path = output_dir / "best_candidate_rule.yml"
     report_path.write_text(json.dumps(report, indent=2, default=_json_default), encoding="utf-8")
+    triage_report_path.write_text(
+        json.dumps(triage_report, indent=2, default=_json_default),
+        encoding="utf-8",
+    )
     best_payload = report["best_candidate"]
     best_rule_json_path.write_text(
         json.dumps(best_payload, indent=2, default=_json_default),
@@ -1041,12 +1380,18 @@ def run_betting_benchmark(
     )
     best_rule_yaml_path.write_text(yaml.safe_dump(best_payload, sort_keys=False), encoding="utf-8")
     LOGGER.info("Wrote ranked betting benchmark to %s", report_path)
+    LOGGER.info("Wrote betting benchmark triage report to %s", triage_report_path)
     LOGGER.info(
         "Wrote best candidate rule exports to %s and %s",
         best_rule_json_path,
         best_rule_yaml_path,
     )
-    return BenchmarkArtifacts(report_path, best_rule_json_path, best_rule_yaml_path)
+    return BenchmarkArtifacts(
+        report_path,
+        best_rule_json_path,
+        best_rule_yaml_path,
+        triage_report_path,
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -1083,6 +1428,7 @@ def main() -> None:
         output_dir=args.output_dir,
     )
     print(f"Ranked benchmark written to {artifacts.report_path}")
+    print(f"Triage report written to {artifacts.triage_report_path}")
     print(f"Best candidate JSON written to {artifacts.best_rule_json_path}")
     print(f"Best candidate YAML written to {artifacts.best_rule_yaml_path}")
 

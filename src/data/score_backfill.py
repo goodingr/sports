@@ -75,7 +75,16 @@ def parse_espn_event(event: Dict, league: str) -> Optional[Dict]:
     home_code = normalize_team_code(league, home_raw)
     away_code = normalize_team_code(league, away_raw)
     if not home_code or not away_code:
-        LOGGER.debug("Could not normalize ESPN teams for %s: %s vs %s", league, away_raw, home_raw)
+        # An unmapped team blocks backfill of every game involving that team.
+        # Log at WARNING so missing mappings surface in pipeline runs instead of
+        # silently leaving missing_scores rows behind.
+        LOGGER.warning(
+            "Could not normalize ESPN teams for %s on %s: away=%r home=%r",
+            league,
+            event.get("date"),
+            away_raw,
+            home_raw,
+        )
         return None
 
     try:
@@ -100,7 +109,14 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
         return 0
 
     updated = 0
+    unmatched: List[Dict] = []
     with connect() as conn:
+        team_columns = {row["name"] for row in conn.execute("PRAGMA table_info(teams)").fetchall()}
+        team_name_select = (
+            "ht.name AS home_name,\n                        at.name AS away_name,"
+            if "name" in team_columns
+            else "NULL AS home_name,\n                        NULL AS away_name,"
+        )
         for game in games:
             row = conn.execute(
                 """
@@ -119,6 +135,41 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
                 (league.upper(), game["home_team"], game["away_team"], game["date"], game["date"]),
             ).fetchone()
             if not row:
+                candidates = conn.execute(
+                    f"""
+                    SELECT
+                        g.game_id,
+                        ht.code AS home_code,
+                        at.code AS away_code,
+                        {team_name_select}
+                        g.start_time_utc
+                    FROM games g
+                    JOIN teams ht ON g.home_team_id = ht.team_id
+                    JOIN teams at ON g.away_team_id = at.team_id
+                    JOIN sports s ON g.sport_id = s.sport_id
+                    WHERE s.league = ?
+                      AND ABS(julianday(g.start_time_utc) - julianday(?)) < 1.0
+                    ORDER BY ABS(julianday(g.start_time_utc) - julianday(?))
+                    """,
+                    (league.upper(), game["date"], game["date"]),
+                ).fetchall()
+                for candidate in candidates:
+                    candidate_home = normalize_team_code(
+                        league,
+                        candidate["home_name"] or candidate["home_code"],
+                    )
+                    candidate_away = normalize_team_code(
+                        league,
+                        candidate["away_name"] or candidate["away_code"],
+                    )
+                    if (
+                        candidate_home == game["home_team"]
+                        and candidate_away == game["away_team"]
+                    ):
+                        row = candidate
+                        break
+            if not row:
+                unmatched.append(game)
                 continue
 
             game_id = row[0]
@@ -138,6 +189,21 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
                 (game.get("espn_id"), game_id),
             )
             updated += 1
+
+    if unmatched:
+        # Recent unresolved scores are the operationally interesting case — these
+        # are completed ESPN games whose teams parsed cleanly but did not match
+        # any games row by code+date. Surface them at WARNING with a small sample
+        # so the cause (e.g. missing schedule row, code drift) is investigable.
+        sample = ", ".join(
+            f"{g['away_team']}@{g['home_team']} {g.get('date')}" for g in unmatched[:3]
+        )
+        LOGGER.warning(
+            "%s: %d ESPN scoreboard game(s) had no matching games row (sample: %s)",
+            league,
+            len(unmatched),
+            sample,
+        )
     return updated
 
 

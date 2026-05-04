@@ -8,7 +8,10 @@ from src.models.prediction_quality import (
     QualityGate,
     american_profit,
     build_quality_report,
+    closing_line_value_summary,
+    expand_moneyline_bets,
     expand_totals_bets,
+    filter_bets_for_rule,
     load_totals_model_input,
     settle_total_side,
     summarize_bets,
@@ -43,6 +46,8 @@ def _create_quality_db(path):
                 game_id TEXT PRIMARY KEY,
                 home_score INTEGER,
                 away_score INTEGER,
+                home_moneyline_close REAL,
+                away_moneyline_close REAL,
                 total_close REAL
             );
             CREATE TABLE predictions (
@@ -75,7 +80,7 @@ def _create_quality_db(path):
             INSERT INTO games VALUES (
                 'GAME1', 1, '2026-01-01T20:00:00+00:00', 1, 2, 'final'
             );
-            INSERT INTO game_results VALUES ('GAME1', 120, 110, 221.5);
+            INSERT INTO game_results VALUES ('GAME1', 120, 110, -115, -105, 221.5);
             """
         )
         conn.executemany(
@@ -133,6 +138,134 @@ def test_expand_totals_bets_excludes_pushes_and_calculates_roi(tmp_path):
     assert summary["brier_score"] is not None
 
 
+def test_clv_is_computed_for_totals_and_moneyline_sides(tmp_path):
+    db_path = tmp_path / "quality.db"
+    _create_quality_db(db_path)
+    totals_bets = expand_totals_bets(load_totals_model_input(db_path=db_path, leagues=["NBA"]))
+
+    over = totals_bets[totals_bets["side"] == "over"].iloc[0]
+    under = totals_bets[totals_bets["side"] == "under"].iloc[0]
+    assert over["closing_line_value"] == 1.0
+    assert under["closing_line_value"] == -1.0
+
+    moneyline_input = pd.DataFrame(
+        {
+            "game_id": ["GAME1"],
+            "league": ["NBA"],
+            "model_type": ["ensemble"],
+            "start_time_utc": [pd.Timestamp("2026-01-01T20:00:00Z")],
+            "home_score": [120],
+            "away_score": [110],
+            "home_prob": [0.55],
+            "away_prob": [0.45],
+            "home_moneyline": [-110],
+            "away_moneyline": [120],
+            "home_moneyline_close": [-120],
+            "away_moneyline_close": [130],
+            "home_edge": [0.03],
+            "away_edge": [-0.03],
+            "home_implied_prob": [0.52],
+            "away_implied_prob": [0.48],
+            "home_no_vig_prob": [0.51],
+            "away_no_vig_prob": [0.49],
+        }
+    )
+    moneyline_bets = expand_moneyline_bets(moneyline_input)
+    home = moneyline_bets[moneyline_bets["side"] == "home"].iloc[0]
+    away = moneyline_bets[moneyline_bets["side"] == "away"].iloc[0]
+
+    assert round(home["closing_line_value"], 4) == 0.0758
+    assert round(away["closing_line_value"], 4) == -0.1
+
+
+def test_missing_close_lines_are_excluded_from_clv_summary():
+    bets = pd.DataFrame({"closing_line_value": [None, float("nan")]})
+
+    summary = closing_line_value_summary(bets)
+
+    assert summary["closing_line_value_count"] == 0
+    assert summary["avg_closing_line_value"] is None
+    assert summary["closing_line_value_win_rate"] is None
+
+
+def test_rule_filter_isolates_benchmark_variant_fields() -> None:
+    bets = pd.DataFrame(
+        [
+            {
+                "market": "totals",
+                "league": "NBA",
+                "model_type": "logistic",
+                "prediction_variant": "variant_a",
+                "price_mode": "selected_book",
+                "timing_bucket": "1-6h",
+                "feature_variant": "current_features",
+                "side": "over",
+                "edge": 0.06,
+            },
+            {
+                "market": "totals",
+                "league": "NBA",
+                "model_type": "logistic",
+                "prediction_variant": "variant_b",
+                "price_mode": "selected_book",
+                "timing_bucket": "1-6h",
+                "feature_variant": "current_features",
+                "side": "over",
+                "edge": 0.06,
+            },
+            {
+                "market": "totals",
+                "league": "NBA",
+                "model_type": "logistic",
+                "prediction_variant": "variant_a",
+                "price_mode": "best_book",
+                "timing_bucket": "1-6h",
+                "feature_variant": "current_features",
+                "side": "over",
+                "edge": 0.06,
+            },
+            {
+                "market": "totals",
+                "league": "NBA",
+                "model_type": "logistic",
+                "prediction_variant": "variant_a",
+                "price_mode": "selected_book",
+                "timing_bucket": "6-24h",
+                "feature_variant": "current_features",
+                "side": "over",
+                "edge": 0.06,
+            },
+            {
+                "market": "totals",
+                "league": "NBA",
+                "model_type": "logistic",
+                "prediction_variant": "variant_a",
+                "price_mode": "selected_book",
+                "timing_bucket": "1-6h",
+                "feature_variant": "no_availability_features",
+                "side": "over",
+                "edge": 0.06,
+            },
+        ]
+    )
+    rule = {
+        "market": "totals",
+        "league": "NBA",
+        "model_type": "logistic",
+        "prediction_variant": "variant_a",
+        "price_mode": "selected_book",
+        "timing_bucket": "1-6h",
+        "feature_variant": "current_features",
+        "side": "over",
+        "min_edge": 0.05,
+    }
+
+    filtered = filter_bets_for_rule(bets, rule)
+
+    assert len(filtered) == 1
+    assert filtered.iloc[0]["prediction_variant"] == "variant_a"
+
+
 def test_quality_report_evaluates_candidate_rule(tmp_path):
     db_path = tmp_path / "quality.db"
     _create_quality_db(db_path)
@@ -162,6 +295,9 @@ approved_rules: []
     assert report["dataset_counts"]["totals_prediction_rows"] == 1
     assert report["rule_results"][0]["rule_id"] == "nba_test_rule"
     assert report["rule_results"][0]["bets"] == 1
+    assert "clv_summary" in report
+    assert "feature_contract_coverage" in report
+    assert report["candidate_rule_rankings"][0]["rule_id"] == "nba_test_rule"
 
 
 def test_quality_report_evaluates_candidate_benchmark_output_with_same_gate(tmp_path):
@@ -175,6 +311,7 @@ def test_quality_report_evaluates_candidate_benchmark_output_with_same_gate(tmp_
             "start_time_utc": pd.date_range("2026-01-01", periods=4, tz="UTC"),
             "snapshot_time_utc": pd.date_range("2025-12-31", periods=4, tz="UTC"),
             "line": [200.5, 200.5, 200.5, 200.5],
+            "total_close": [201.5, 201.0, 202.0, 201.5],
             "actual_total": [221, 219, 230, 180],
             "predicted_prob": [0.80, 0.80, 0.80, 0.80],
             "over_no_vig_prob": [0.40, 0.40, 0.40, 0.40],

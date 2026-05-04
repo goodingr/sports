@@ -42,6 +42,8 @@ def _create_market_db(path):
                 game_id TEXT PRIMARY KEY,
                 home_score INTEGER,
                 away_score INTEGER,
+                home_moneyline_close REAL,
+                away_moneyline_close REAL,
                 total_close REAL
             );
             CREATE TABLE books (
@@ -90,6 +92,22 @@ def _create_market_db(path):
                 source_key TEXT NOT NULL,
                 created_at TEXT
             );
+            CREATE TABLE player_stats (
+                stat_id INTEGER PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                team_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                player_name TEXT,
+                min REAL,
+                pts INTEGER,
+                reb INTEGER,
+                ast INTEGER,
+                stl INTEGER,
+                blk INTEGER,
+                tov INTEGER,
+                pf INTEGER,
+                plus_minus INTEGER
+            );
             INSERT INTO sports VALUES (1, 'Basketball', 'NBA', 'totals');
             INSERT INTO teams VALUES (1, 1, 'LAL', 'Lakers');
             INSERT INTO teams VALUES (2, 1, 'BOS', 'Celtics');
@@ -99,10 +117,10 @@ def _create_market_db(path):
             INSERT INTO games VALUES ('PREV_AWAY', 1, '2025-12-29T20:00:00+00:00', 4, 2, 'final');
             INSERT INTO games VALUES ('GAME1', 1, '2026-01-01T20:00:00+00:00', 1, 2, 'final');
             INSERT INTO games VALUES ('FUTURE_HOME', 1, '2026-01-02T20:00:00+00:00', 1, 4, 'final');
-            INSERT INTO game_results VALUES ('PREV_HOME', 100, 90, 191.5);
-            INSERT INTO game_results VALUES ('PREV_AWAY', 80, 95, 177.5);
-            INSERT INTO game_results VALUES ('GAME1', 120, 110, 222.5);
-            INSERT INTO game_results VALUES ('FUTURE_HOME', 150, 70, 221.5);
+            INSERT INTO game_results VALUES ('PREV_HOME', 100, 90, -150, 130, 191.5);
+            INSERT INTO game_results VALUES ('PREV_AWAY', 80, 95, -120, 100, 177.5);
+            INSERT INTO game_results VALUES ('GAME1', 120, 110, -145, 130, 222.5);
+            INSERT INTO game_results VALUES ('FUTURE_HOME', 150, 70, -200, 170, 221.5);
             INSERT INTO books VALUES (1, 'DraftKings');
             INSERT INTO books VALUES (2, 'FanDuel');
             INSERT INTO odds_snapshots VALUES ('OPEN', '2026-01-01T12:00:00+00:00', 1);
@@ -246,6 +264,8 @@ def _create_soccer_market_db(path):
                 game_id TEXT PRIMARY KEY,
                 home_score INTEGER,
                 away_score INTEGER,
+                home_moneyline_close REAL,
+                away_moneyline_close REAL,
                 total_close REAL
             );
             CREATE TABLE books (
@@ -273,8 +293,8 @@ def _create_soccer_market_db(path):
             INSERT INTO teams VALUES (2, 1, 'CHE', 'Chelsea');
             INSERT INTO games VALUES ('EPL_PREV', 1, '2025-08-01T12:00:00+00:00', 1, 2, 'final');
             INSERT INTO games VALUES ('EPL_TARGET', 1, '2025-08-10T12:00:00+00:00', 1, 2, 'final');
-            INSERT INTO game_results VALUES ('EPL_PREV', 1, 0, 2.5);
-            INSERT INTO game_results VALUES ('EPL_TARGET', 9, 8, 3.0);
+            INSERT INTO game_results VALUES ('EPL_PREV', 1, 0, -120, 110, 2.5);
+            INSERT INTO game_results VALUES ('EPL_TARGET', 9, 8, -130, 120, 3.0);
             INSERT INTO books VALUES (1, 'DraftKings');
             INSERT INTO odds_snapshots VALUES ('EPL_LATEST', '2025-08-10T10:00:00+00:00', 1);
             """
@@ -305,12 +325,35 @@ def test_totals_model_input_uses_market_snapshots_without_leakage(tmp_path):
     assert row["book_line_count"] == 2
     assert row["best_over_moneyline"] == -105
     assert row["best_under_moneyline"] == -115
+    assert row["selected_book_total_close"] == 221.5
+    assert row["selected_book_close_snapshot_id"] == "LATEST"
+    assert row["best_over_book_total_close"] == 221.5
+    assert row["best_under_book_total_close"] == 221.5
     assert row["home_score_for_l5"] == 100
     assert row["away_score_for_l5"] == 95
     assert row["home_score_for_l5"] != 150
     assert row["home_score_for_l3"] == 100
     assert row["home_same_venue_score_for_l5"] == 100
     assert row["home_back_to_back"] == 0.0
+
+
+def test_totals_model_input_all_snapshots_uses_as_of_best_prices(tmp_path):
+    db_path = tmp_path / "market.db"
+    _create_market_db(db_path)
+
+    df = build_totals_model_input(db_path=db_path, leagues=["NBA"], latest_only=False)
+
+    assert set(df["snapshot_id"]) == {"OPEN", "LATEST"}
+    open_row = df[df["snapshot_id"] == "OPEN"].iloc[0]
+    assert open_row["book"] == "DraftKings"
+    assert open_row["line"] == 220.5
+    assert open_row["book_line_count"] == 1
+    assert open_row["best_over_moneyline"] == -110
+    assert open_row["best_under_moneyline"] == -110
+    assert open_row["best_over_book"] == "DraftKings"
+    assert open_row["best_under_book"] == "DraftKings"
+    assert open_row["selected_book_total_close"] == 221.5
+    assert open_row["selected_book_close_snapshot_id"] == "LATEST"
 
 
 def test_moneyline_model_input_uses_latest_pre_game_pair(tmp_path):
@@ -411,6 +454,14 @@ def test_nba_advanced_and_availability_features_are_pregame(tmp_path):
                 ),
             ],
         )
+        conn.execute(
+            """
+            INSERT INTO player_stats (
+                game_id, team_id, player_id, player_name, min, pts, reb, ast,
+                stl, blk, tov, pf, plus_minus
+            ) VALUES ('PREV_HOME', 1, 101, 'Pregame Out', 32, 18, 6, 5, 1, 1, 2, 3, 7)
+            """
+        )
 
     df = build_totals_model_input(db_path=db_path, leagues=["NBA"])
 
@@ -420,6 +471,8 @@ def test_nba_advanced_and_availability_features_are_pregame(tmp_path):
     assert row["nba_rolling_net_rating_5_diff"] == 9.5
     assert row["home_injuries_total"] == 1
     assert row["home_injuries_skill_out"] == 1
+    assert row["home_injuries_out_minutes_l10"] == 32
+    assert row["home_injuries_impact_points_l10"] == 18
 
 
 def test_feature_coverage_report_includes_density_and_drop_reasons(tmp_path):

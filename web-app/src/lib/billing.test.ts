@@ -3,7 +3,9 @@ import type Stripe from "stripe";
 import {
     PREMIUM_KEY,
     applySnapshot,
+    createBillingPortalSession,
     getOrCreateCustomer,
+    getStoredCustomerId,
     isPremiumStatus,
     revokedSnapshot,
     setClerkForTests,
@@ -200,5 +202,52 @@ describe("getOrCreateCustomer", () => {
         const id = await getOrCreateCustomer("user_clerk_1", "user@example.com");
         expect(id).toBe("cus_new");
         expect(users.user_clerk_1.publicMetadata.stripe_customer_id).toBe("cus_new");
+    });
+});
+
+describe("getStoredCustomerId", () => {
+    it("returns the stored stripe_customer_id when present", async () => {
+        const users: Record<string, StoredUser> = {
+            user_clerk_1: {
+                id: "user_clerk_1",
+                publicMetadata: { stripe_customer_id: "cus_existing" },
+                privateMetadata: {},
+            },
+        };
+        setClerkForTests(makeFakeClerk(users) as never);
+        const id = await getStoredCustomerId("user_clerk_1");
+        expect(id).toBe("cus_existing");
+    });
+
+    it("returns null when the user has no stored customer", async () => {
+        const users: Record<string, StoredUser> = {
+            user_clerk_1: { id: "user_clerk_1", publicMetadata: {}, privateMetadata: {} },
+        };
+        setClerkForTests(makeFakeClerk(users) as never);
+        const id = await getStoredCustomerId("user_clerk_1");
+        expect(id).toBeNull();
+    });
+});
+
+describe("createBillingPortalSession", () => {
+    it("forwards customer + return_url to Stripe and returns the redirect URL", async () => {
+        let received: { customer?: string; return_url?: string } = {};
+        setStripeForTests({
+            billingPortal: {
+                sessions: {
+                    create: async (params: { customer: string; return_url: string }) => {
+                        received = params;
+                        return { url: "https://billing.stripe.com/session/test" };
+                    },
+                },
+            },
+        } as unknown as Stripe);
+        const url = await createBillingPortalSession(
+            "cus_abc",
+            "https://example.test/account",
+        );
+        expect(url).toBe("https://billing.stripe.com/session/test");
+        expect(received.customer).toBe("cus_abc");
+        expect(received.return_url).toBe("https://example.test/account");
     });
 });

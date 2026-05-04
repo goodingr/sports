@@ -29,6 +29,14 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT = Path("reports/publishable_bets/latest_publishable_bets.json")
 DEFAULT_QUALITY_OUTPUT = Path("reports/publishable_bets/latest_quality_report.json")
+BENCHMARK_METADATA_FIELDS = (
+    "prediction_variant",
+    "feature_contract",
+    "feature_variant",
+    "price_mode",
+    "timing_bucket",
+)
+LIVE_RULE_ID_FIELDS = ("rule_id", "source_rule_id", "published_rule_id")
 
 QUALITY_SUMMARY_FIELDS = (
     "bets",
@@ -40,6 +48,9 @@ QUALITY_SUMMARY_FIELDS = (
     "bootstrap_roi_low",
     "bootstrap_roi_median",
     "bootstrap_roi_high",
+    "avg_closing_line_value",
+    "closing_line_value_win_rate",
+    "closing_line_value_count",
     "model_beats_market_brier",
     "brier_score",
     "market_brier_score",
@@ -52,6 +63,11 @@ QUALITY_SUMMARY_FIELDS = (
 def _read_sql(db_path: Path, query: str, params: Iterable[Any] = ()) -> pd.DataFrame:
     with sqlite3.connect(str(db_path)) as conn:
         return pd.read_sql_query(query, conn, params=list(params))
+
+
+def _table_columns(db_path: Path, table_name: str) -> set[str]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
 
 
 def _normalize_now(now: Optional[str | pd.Timestamp]) -> pd.Timestamp:
@@ -79,6 +95,20 @@ def load_current_prediction_output(
     now: Optional[str | pd.Timestamp] = None,
 ) -> pd.DataFrame:
     """Load current pre-game predictions that could become subscriber-facing bets."""
+    prediction_columns = _table_columns(db_path, "predictions")
+    optional_columns = [
+        column
+        for column in (
+            "prediction_variant",
+            "feature_variant",
+            "price_mode",
+            "timing_bucket",
+            "feature_contract",
+            *LIVE_RULE_ID_FIELDS,
+        )
+        if column in prediction_columns
+    ]
+    optional_select = "".join(f",\n            p.{column}" for column in optional_columns)
     query = """
         SELECT
             p.prediction_id,
@@ -102,7 +132,8 @@ def load_current_prediction_output(
             p.under_edge,
             p.over_implied_prob,
             p.under_implied_prob,
-            p.predicted_total_points,
+            p.predicted_total_points
+            {optional_select},
             g.start_time_utc,
             COALESCE(g.status, 'scheduled') AS game_status,
             s.league,
@@ -113,7 +144,9 @@ def load_current_prediction_output(
         JOIN sports s ON g.sport_id = s.sport_id
         LEFT JOIN teams ht ON g.home_team_id = ht.team_id
         LEFT JOIN teams at ON g.away_team_id = at.team_id
-    """
+    """.format(
+        optional_select=optional_select
+    )
     df = _read_sql(db_path, query)
     if df.empty:
         return df
@@ -247,11 +280,13 @@ def _safe_float(value: Any) -> Optional[float]:
     return float(value)
 
 
-def _serialize_bet(row: pd.Series, rule: dict[str, Any], quality_result: dict[str, Any]) -> dict[str, Any]:
+def _serialize_bet(
+    row: pd.Series, rule: dict[str, Any], quality_result: dict[str, Any]
+) -> dict[str, Any]:
     market_probability = row.get("no_vig_market_prob")
     if pd.isna(market_probability):
         market_probability = row.get("implied_prob")
-    return {
+    payload = {
         "rule_id": rule.get("id"),
         "market": row.get("market"),
         "league": row.get("league"),
@@ -261,11 +296,46 @@ def _serialize_bet(row: pd.Series, rule: dict[str, Any], quality_result: dict[st
         "away_team": row.get("away_team"),
         "side": row.get("side"),
         "odds": _safe_float(row.get("moneyline")),
+        "moneyline": _safe_float(row.get("moneyline")),
+        "total_line": _safe_float(row.get("total_line", row.get("line"))),
+        "predicted_total_points": _safe_float(row.get("predicted_total_points")),
+        "book": row.get("book"),
         "edge": _safe_float(row.get("edge")),
         "model_probability": _safe_float(row.get("predicted_prob")),
         "market_probability": _safe_float(market_probability),
         "quality_summary": _quality_summary(quality_result),
     }
+    for field in BENCHMARK_METADATA_FIELDS:
+        value = row.get(field, rule.get(field))
+        if value is not None and not pd.isna(value):
+            payload[field] = value
+    return payload
+
+
+def _required_live_metadata(rule: dict[str, Any]) -> list[str]:
+    return [field for field in BENCHMARK_METADATA_FIELDS if rule.get(field) is not None]
+
+
+def _live_metadata_mismatches(current_bets: pd.DataFrame, rule: dict[str, Any]) -> list[str]:
+    mismatches = [field for field in _required_live_metadata(rule) if field not in current_bets]
+    for field in _required_live_metadata(rule):
+        if field not in current_bets:
+            continue
+        values = {str(value) for value in current_bets[field].dropna().unique()}
+        if str(rule[field]) not in values:
+            mismatches.append(field)
+    return sorted(set(mismatches))
+
+
+def _rule_id_metadata_mismatch(current_bets: pd.DataFrame, rule: dict[str, Any]) -> bool:
+    present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in current_bets]
+    if not present_rule_fields:
+        return bool(_required_live_metadata(rule))
+    rule_id = str(rule.get("id"))
+    return not any(
+        rule_id in {str(value) for value in current_bets[field].dropna().unique()}
+        for field in present_rule_fields
+    )
 
 
 def _remove_paid_output(path: Path) -> None:
@@ -292,9 +362,7 @@ def publishable_bets(
     rules_config = load_rules(rules_path)
     rules = configured_rules(rules_config)
     approved_rules = [
-        rule
-        for rule in rules
-        if rule.get("status") == "approved" and not rule_is_disabled(rule)
+        rule for rule in rules if rule.get("status") == "approved" and not rule_is_disabled(rule)
     ]
 
     report = build_quality_report(
@@ -323,6 +391,8 @@ def publishable_bets(
         "output_path": str(output_path),
         "approved_rule_ids": [str(rule.get("id")) for rule in approved_rules],
         "passing_approved_rule_ids": [str(rule.get("id")) for rule in passing_rules],
+        "skipped_passing_rule_ids": [],
+        "live_metadata_mismatches": {},
         "publishable_profitable_list_exists": False,
         "bets": [],
     }
@@ -341,8 +411,22 @@ def publishable_bets(
 
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
+        metadata_mismatches = _live_metadata_mismatches(current_bets, rule)
+        if metadata_mismatches or _rule_id_metadata_mismatch(current_bets, rule):
+            rule_id = str(rule.get("id"))
+            status["skipped_passing_rule_ids"].append(rule_id)
+            status["live_metadata_mismatches"][rule_id] = {
+                "missing_or_mismatched_fields": metadata_mismatches,
+                "missing_matching_rule_id": _rule_id_metadata_mismatch(current_bets, rule),
+            }
+            continue
         quality_result = result_by_id[str(rule.get("id"))]
-        rule_bets = filter_bets_for_rule(current_bets, rule)
+        timing_filter = quality_result.get("odds_timing_filter") or {}
+        rule_bets = filter_bets_for_rule(
+            current_bets,
+            rule,
+            max_hours_before_start=timing_filter.get("max_hours_before_start"),
+        )
         if rule_bets.empty:
             continue
         for _, row in rule_bets.sort_values(["start_time_utc", "game_id", "side"]).iterrows():
@@ -350,7 +434,10 @@ def publishable_bets(
 
     if not publish_rows:
         _remove_paid_output(output_path)
-        status["reason"] = "no_current_bets_matching_passing_rules"
+        if status["skipped_passing_rule_ids"]:
+            status["reason"] = "passing_rules_require_benchmarked_live_metadata"
+        else:
+            status["reason"] = "no_current_bets_matching_passing_rules"
         return status
 
     status["publishable_profitable_list_exists"] = True
@@ -390,8 +477,16 @@ def promote_candidate_rule(
     """Promote a candidate rule into approved_rules only if it passes a strict source."""
     config = load_rules(rules_path)
     candidate_rules = config.get("candidate_rules", []) or []
+    locked_candidate_rules = config.get("locked_candidate_rules", []) or []
     approved_rules = config.get("approved_rules", []) or []
-    candidate = next((rule for rule in candidate_rules if str(rule.get("id")) == rule_id), None)
+    candidate = next(
+        (
+            rule
+            for rule in [*locked_candidate_rules, *candidate_rules]
+            if str(rule.get("id")) == rule_id
+        ),
+        None,
+    )
     if candidate is None:
         raise ValueError(f"Candidate rule not found: {rule_id}")
 
@@ -412,20 +507,102 @@ def promote_candidate_rule(
 
     promoted = {**candidate, "status": "approved"}
     promoted.pop("disabled", None)
-    approved_without_duplicate = [
-        rule for rule in approved_rules if str(rule.get("id")) != rule_id
-    ]
+    approved_without_duplicate = [rule for rule in approved_rules if str(rule.get("id")) != rule_id]
     candidate_without_promoted = [
         rule for rule in candidate_rules if str(rule.get("id")) != rule_id
     ]
+    locked_without_promoted = [
+        rule for rule in locked_candidate_rules if str(rule.get("id")) != rule_id
+    ]
     config["approved_rules"] = [*approved_without_duplicate, promoted]
     config["candidate_rules"] = candidate_without_promoted
+    config["locked_candidate_rules"] = locked_without_promoted
     rules_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return {
         "rule_id": rule_id,
         "promoted": True,
         "passing_sources": passing_sources,
         "rules_path": str(rules_path),
+    }
+
+
+def _candidate_from_lock_report(report: dict[str, Any], rule_id: str) -> Optional[dict[str, Any]]:
+    rows = report.get("locked_candidate_recommendations", []) or []
+    match = next((row for row in rows if str(row.get("rule_id")) == rule_id), None)
+    if match is None:
+        return None
+    required = ["market", "league", "model_type", "side", "min_edge"]
+    if any(match.get(field) is None for field in required):
+        return None
+    return {
+        "id": rule_id,
+        "status": "locked_candidate",
+        "market": match.get("market"),
+        "league": match.get("league"),
+        "model_type": match.get("model_type"),
+        "prediction_variant": match.get("prediction_variant"),
+        "side": match.get("side"),
+        "min_edge": match.get("min_edge"),
+        "feature_variant": match.get("feature_variant"),
+        "price_mode": match.get("price_mode"),
+        "timing_bucket": match.get("timing_bucket"),
+        "validation": "rolling_origin_decision_time",
+    }
+
+
+def lock_candidate_rule(
+    *,
+    rule_id: str,
+    rules_path: Path = Path("config/published_rules.yml"),
+    benchmark_report_path: Path,
+    locked_at: Optional[str | pd.Timestamp] = None,
+) -> dict[str, Any]:
+    """Move a benchmark-recommended candidate into locked paper tracking."""
+    config = load_rules(rules_path)
+    report = json.loads(benchmark_report_path.read_text(encoding="utf-8"))
+    candidate_rules = config.get("candidate_rules", []) or []
+    locked_candidate_rules = config.get("locked_candidate_rules", []) or []
+    existing_locked = next(
+        (rule for rule in locked_candidate_rules if str(rule.get("id")) == rule_id),
+        None,
+    )
+    if existing_locked is not None:
+        return {
+            "rule_id": rule_id,
+            "locked": True,
+            "already_locked": True,
+            "rules_path": str(rules_path),
+            "benchmark_report_path": str(benchmark_report_path),
+        }
+
+    candidate = next((rule for rule in candidate_rules if str(rule.get("id")) == rule_id), None)
+    report_candidate = _candidate_from_lock_report(report, rule_id)
+    if report_candidate is None:
+        raise RuntimeError(f"Rule {rule_id} was not recommended for locked paper tracking")
+    if candidate is None:
+        candidate = report_candidate
+
+    lock_time = _normalize_now(locked_at).isoformat()
+    locked = {
+        **candidate,
+        "status": "locked_candidate",
+        "locked_at": lock_time,
+        "lock_source": str(benchmark_report_path),
+        "approval_requires": "strict_locked_out_of_sample_results",
+    }
+    locked.pop("disabled", None)
+    config["candidate_rules"] = [rule for rule in candidate_rules if str(rule.get("id")) != rule_id]
+    config["locked_candidate_rules"] = [
+        rule for rule in locked_candidate_rules if str(rule.get("id")) != rule_id
+    ] + [locked]
+    rules_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return {
+        "rule_id": rule_id,
+        "locked": True,
+        "already_locked": False,
+        "locked_at": lock_time,
+        "rules_path": str(rules_path),
+        "benchmark_report_path": str(benchmark_report_path),
     }
 
 
@@ -446,6 +623,14 @@ def _build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--now", help="UTC timestamp override for reproducible tests.")
     publish.add_argument("--benchmark-predictions", type=Path, action="append", default=[])
     publish.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help=(
+            "Exit 0 when the quality gate produces no paid list. This is intended for "
+            "automation where fail-closed publishing is a normal, non-outage state."
+        ),
+    )
+    publish.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -463,18 +648,29 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+
+    lock = subparsers.add_parser("lock", help="Lock a benchmark-recommended candidate.")
+    lock.add_argument("--rule-id", required=True)
+    lock.add_argument("--rules", type=Path, default=Path("config/published_rules.yml"))
+    lock.add_argument("--benchmark-report", type=Path, required=True)
+    lock.add_argument("--locked-at", help="UTC timestamp override for reproducible tests.")
+    lock.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    )
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"publish", "promote"}:
+    if not raw_args or raw_args[0] not in {"publish", "promote", "lock"}:
         raw_args = ["publish", *raw_args]
 
     parser = _build_parser()
     args = parser.parse_args(raw_args)
     logging.basicConfig(level=getattr(logging, args.log_level))
-    leagues = _parse_leagues(args.leagues)
+    leagues = _parse_leagues(args.leagues) if hasattr(args, "leagues") else []
 
     if args.command == "promote":
         try:
@@ -485,6 +681,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                 db_path=args.db,
                 leagues=leagues,
                 benchmark_prediction_paths=args.benchmark_predictions,
+            )
+        except (RuntimeError, ValueError) as exc:
+            LOGGER.error("%s", exc)
+            return 1
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
+
+    if args.command == "lock":
+        try:
+            result = lock_candidate_rule(
+                rule_id=args.rule_id,
+                rules_path=args.rules,
+                benchmark_report_path=args.benchmark_report,
+                locked_at=args.locked_at,
             )
         except (RuntimeError, ValueError) as exc:
             LOGGER.error("%s", exc)
@@ -505,6 +715,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         LOGGER.info("Wrote %d publishable bets to %s", result.get("bet_count", 0), args.output)
         return 0
     LOGGER.warning("No publishable paid bet list: %s", result.get("reason"))
+    if getattr(args, "allow_empty", False):
+        return 0
     return 1
 
 

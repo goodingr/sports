@@ -9,7 +9,6 @@ from src.api.auth import get_current_user
 from src.api.main import app
 from src.api.routes import bets
 
-
 LOCKED_FIELD_NAMES = {
     "predicted_prob",
     "implied_prob",
@@ -104,6 +103,26 @@ def _sample_bets() -> pd.DataFrame:
     )
 
 
+def _publishable_future_bet() -> dict:
+    now = pd.Timestamp.now(tz="UTC")
+    return {
+        "rule_id": "nba_totals_rule",
+        "market": "totals",
+        "league": "NBA",
+        "game_id": "future-game",
+        "start_time_utc": (now + pd.Timedelta(hours=6)).isoformat(),
+        "home_team": "Home Future",
+        "away_team": "Away Future",
+        "side": "over",
+        "total_line": 222.5,
+        "odds": 105,
+        "moneyline": 105,
+        "edge": 0.21,
+        "predicted_total_points": 230.1,
+        "recommended_bet": "Over 222.5",
+    }
+
+
 def _all_keys(value):
     if isinstance(value, dict):
         keys = set(value)
@@ -177,15 +196,132 @@ def test_live_history_public_response_does_not_leak_locked_fields(api_client, mo
     _assert_no_locked_fields(live)
 
 
-def test_completed_history_public_response_does_not_leak_prediction_fields(
-    api_client, monkeypatch
-):
+def test_completed_history_public_response_does_not_leak_prediction_fields(api_client, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: None
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
 
     response = api_client.get("/api/bets/history")
 
     assert response.status_code == 200
-    completed = next(item for item in response.json()["data"] if item["game_id"] == "completed-game")
+    completed = next(
+        item for item in response.json()["data"] if item["game_id"] == "completed-game"
+    )
     assert completed["status"] == "Completed"
     _assert_no_locked_fields(completed)
+
+
+def test_premium_upcoming_returns_empty_when_no_approved_rule_passes(api_client, monkeypatch):
+    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
+
+    response = api_client.get("/api/bets/upcoming")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_premium"] is True
+    assert body["count"] == 0
+    assert body["data"] == []
+
+
+def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch):
+    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+    monkeypatch.setattr(bets, "_build_sportsbook_map", lambda recommended: {})
+
+    response = api_client.get("/api/bets/upcoming")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_premium"] is True
+    assert body["count"] == 1
+    assert len(body["data"]) == 1
+    bet = body["data"][0]
+    assert bet["game_id"] == "future-game"
+    assert bet["side"] == "over"
+    assert bet["edge"] == 0.21
+    assert bet["recommended_bet"] == "Over 222.5"
+
+
+def test_premium_upcoming_drops_rows_not_in_gated_set(api_client, monkeypatch):
+    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {
+            ("some-other-game", "totals", "over"): {
+                **_publishable_future_bet(),
+                "game_id": "some-other-game",
+            }
+        },
+    )
+
+    response = api_client.get("/api/bets/upcoming")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_premium"] is True
+    assert body["count"] == 1
+    assert body["data"][0]["game_id"] == "some-other-game"
+
+
+def test_premium_history_live_rows_filtered_by_gate(api_client, monkeypatch):
+    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+    monkeypatch.setattr(bets, "_build_sportsbook_map", lambda recommended: {})
+
+    response = api_client.get("/api/bets/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    game_ids = [item["game_id"] for item in body["data"]]
+    assert "live-game" not in game_ids
+    assert "completed-game" in game_ids
+
+
+def test_loader_returns_empty_when_publishable_file_absent(monkeypatch, tmp_path):
+    missing_path = tmp_path / "missing.json"
+    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", missing_path)
+
+    assert bets._load_gated_publishable_bets() == {}
+
+
+def test_loader_returns_empty_when_gate_did_not_pass(monkeypatch, tmp_path):
+    path = tmp_path / "latest_publishable_bets.json"
+    path.write_text(
+        json.dumps({"publishable_profitable_list_exists": False, "bets": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
+
+    assert bets._load_gated_publishable_bets() == {}
+
+
+def test_loader_keys_bets_by_game_market_side(monkeypatch, tmp_path):
+    path = tmp_path / "latest_publishable_bets.json"
+    path.write_text(
+        json.dumps(
+            {
+                "publishable_profitable_list_exists": True,
+                "bets": [
+                    {"game_id": "G1", "market": "totals", "side": "OVER"},
+                    {"game_id": "G2", "market": "moneyline", "side": "home"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
+
+    keyed = bets._load_gated_publishable_bets()
+    assert ("G1", "totals", "over") in keyed
+    assert ("G2", "moneyline", "home") in keyed

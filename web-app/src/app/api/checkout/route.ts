@@ -37,7 +37,7 @@ export async function POST() {
 
         const session = await stripe.checkout.sessions.create({
             customer: customerId,
-            success_url: `${appUrl}/dashboard?success=true`,
+            success_url: `${appUrl}/account?success=true`,
             cancel_url: `${appUrl}/pricing?canceled=true`,
             payment_method_types: ["card"],
             mode: "subscription",

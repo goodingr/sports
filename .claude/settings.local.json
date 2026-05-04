@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm install *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(poetry run *)",
+      "Bash(MYPYPATH= poetry run mypy --no-incremental src/data/ingest_sources.py src/db/loaders.py src/models/feature_loader.py src/data/sources/nba_injuries_espn.py src/data/sources/espn_odds.py)"
     ]
   }
 }

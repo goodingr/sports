@@ -48,7 +48,7 @@ The master pipeline handles everything: **Ingestion -> Training -> Prediction**.
 # Run full pipeline (Recommended)
 .\scripts\pipeline.ps1
 
-# Run without retraining models (Faster)
+# Run without the paid-picks benchmark (Faster/hourly)
 .\scripts\pipeline.ps1 -SkipTraining
 ```
 
@@ -74,14 +74,20 @@ For a detailed diagram and component overview, see [docs/ARCHITECTURE.md](docs/A
     -   **Smart History**: Checks DB history. If missing, runs full backfill. If present, runs fast update.
     -   **Live Odds**: Fetches latest odds from The Odds API.
     -   **Live Scores**: Fetches latest scores from The Odds API.
-2.  **Train Models** (`scripts/train.ps1`)
-    -   Computes advanced stats (rolling averages, EPA, etc.).
-    -   Rebuilds training datasets.
-    -   Retrains models (Ensemble, RF, GB) for Moneyline and Totals.
-3.  **Generate Predictions** (`scripts/predict.ps1`)
-    -   Loads latest odds.
-    -   Generates probabilities and edges.
-    -   Syncs results across all models.
+2.  **Resolve Data Hygiene**
+    -   Prunes release-league orphan results.
+    -   Backfills stale completed scores from ESPN.
+    -   Refreshes NBA injury availability data.
+3.  **Benchmark Paid Rules** (`src.models.train_betting --benchmark`)
+    -   Runs the predeclared rolling-origin grid in `config/betting_benchmark.yml`.
+    -   Ranks candidates by market Brier, ROI, bootstrap ROI, CLV, book slices, and timing slices.
+    -   Never auto-approves a paid rule.
+4.  **Generate Current Predictions** (`scripts/predict.ps1`)
+    -   Refreshes current prediction rows used as raw input.
+    -   These are not subscriber-facing unless the publish gate approves them.
+5.  **Publish Paid Picks** (`src.predict.publishable_bets`)
+    -   Writes a paid list only when an approved rule passes the strict gate.
+    -   Removes stale paid lists and exits fail-closed when no rule passes.
 
 ### Repository Structure
 
@@ -127,8 +133,10 @@ src/
 ### Manual Training
 
 ```powershell
-# Train specific league and model
-poetry run python -m src.models.train --league NBA --model-type ensemble
+# Run the paid-picks benchmark grid
+poetry run python -m src.models.train_betting --benchmark `
+  --benchmark-config config/betting_benchmark.yml `
+  --benchmark-output-dir reports/betting_benchmarks
 ```
 
 ### Manual Prediction
@@ -175,6 +183,67 @@ Dedicated analysis for Totals (O/U) betting.
     poetry run python -m src.features.moneyline_dataset --league NFL --seasons 2023
     ```
 4.  Submit a Pull Request.
+
+---
+
+## ✅ Release Gate
+
+Run these locally before opening a PR. CI mirrors them in
+`.github/workflows/ci.yml`. The lint/type scope is intentionally narrow —
+only files known to be clean. To expand, clean a file first, then add it to
+`RUFF_SCOPE` / `MYPY_SCOPE` in the workflow.
+
+### Python
+
+```bash
+# Lint (release-scoped)
+poetry run ruff check \
+  src/data/ingest_sources.py \
+  src/features/betting_model_input.py \
+  src/models/betting_benchmark.py \
+  src/models/prediction_quality.py \
+  src/models/train_betting.py \
+  src/predict/publishable_bets.py \
+  tests/test_betting_benchmark.py \
+  tests/test_betting_model_input.py \
+  tests/test_prediction_quality.py \
+  tests/test_publishable_bets.py \
+  tests/test_train_betting.py \
+  tests/api/test_readiness.py
+
+# Types (release-scoped)
+poetry run mypy \
+  src/data/ingest_sources.py \
+  src/data/sources/espn_odds.py \
+  src/data/sources/nba_injuries_espn.py \
+  src/features/betting_model_input.py \
+  src/models/feature_loader.py \
+  src/models/prediction_quality.py \
+  src/predict/publishable_bets.py
+
+# Full pytest (skip-reasons surfaced)
+poetry run pytest -q -rs
+
+# Release-gate slice (subset that CI gates as a separate job)
+poetry run pytest \
+  tests/test_prediction_quality.py \
+  tests/test_betting_benchmark.py \
+  tests/test_publishable_bets.py \
+  tests/api/test_readiness.py \
+  -q -rs
+```
+
+### Web
+
+```bash
+cd web-app
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e   # Playwright; not yet a hard gate -- see ci.yml
+```
 
 ---
 

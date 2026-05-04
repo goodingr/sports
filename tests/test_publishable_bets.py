@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 
+import pandas as pd
 import pytest
 import yaml
 
+import src.predict.publishable_bets as publisher
+from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_rule
 from src.predict.publishable_bets import main as publish_main
-from src.predict.publishable_bets import promote_candidate_rule
 
 
 def _create_publish_db(path, *, include_history: bool) -> None:
@@ -38,6 +40,8 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                 game_id TEXT PRIMARY KEY,
                 home_score INTEGER,
                 away_score INTEGER,
+                home_moneyline_close REAL,
+                away_moneyline_close REAL,
                 total_close REAL
             );
             CREATE TABLE predictions (
@@ -83,7 +87,7 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                     (game_id, start_time),
                 )
                 conn.execute(
-                    "INSERT INTO game_results VALUES (?, ?, ?, 200.5)",
+                    "INSERT INTO game_results VALUES (?, ?, ?, -120, 110, 201.5)",
                     (game_id, home_score, away_score),
                 )
                 conn.execute(
@@ -131,6 +135,7 @@ launch_gate:
   min_bets_multi_league: 4
   min_roi: 0.5
   min_bootstrap_roi_low: -0.5
+  max_hours_before_start: null
   bootstrap_samples: 300
   random_seed: 42
 approved_rules:
@@ -154,6 +159,7 @@ launch_gate:
   min_bets_multi_league: 4
   min_roi: 0.5
   min_bootstrap_roi_low: -0.5
+  max_hours_before_start: null
   bootstrap_samples: 300
   random_seed: 42
 approved_rules: []
@@ -164,6 +170,31 @@ candidate_rules:
     model_type: ensemble
     side: over
     min_edge: 0.05
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_metadata_approved_rules(path) -> None:
+    path.write_text(
+        """
+launch_gate:
+  min_bets_narrow: 1
+  min_roi: -1.0
+  min_bootstrap_roi_low: -1.0
+  max_hours_before_start: null
+approved_rules:
+  - id: nba_totals_metadata_rule
+    market: totals
+    league: NBA
+    model_type: logistic
+    prediction_variant: market_residual_shrink_050_sigmoid
+    feature_variant: current_features
+    price_mode: selected_book
+    timing_bucket: 1-6h
+    side: over
+    min_edge: 0.05
+candidate_rules: []
 """,
         encoding="utf-8",
     )
@@ -199,6 +230,27 @@ def test_publish_command_fails_closed_without_passing_approved_rule(tmp_path):
     assert not output_path.exists()
     quality = json.loads(quality_path.read_text(encoding="utf-8"))
     assert quality["publishable_profitable_list_exists"] is False
+
+    allow_empty_exit = publish_main(
+        [
+            "--db",
+            str(db_path),
+            "--rules",
+            str(rules_path),
+            "--output",
+            str(output_path),
+            "--quality-output",
+            str(quality_path),
+            "--leagues",
+            "NBA",
+            "--now",
+            "2026-02-01T12:00:00+00:00",
+            "--allow-empty",
+        ]
+    )
+
+    assert allow_empty_exit == 0
+    assert not output_path.exists()
 
 
 def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
@@ -244,6 +296,74 @@ def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
     assert bet["quality_summary"]["roi"] > 0.5
 
 
+def test_publish_guardrail_blocks_legacy_rows_for_benchmarked_rule(
+    tmp_path,
+    monkeypatch,
+):
+    rules_path = tmp_path / "rules.yml"
+    output_path = tmp_path / "latest_publishable_bets.json"
+    quality_path = tmp_path / "quality.json"
+    _write_metadata_approved_rules(rules_path)
+    output_path.write_text("stale paid list", encoding="utf-8")
+
+    monkeypatch.setattr(
+        publisher,
+        "build_quality_report",
+        lambda **kwargs: {
+            "rule_results": [
+                {
+                    "rule_id": "nba_totals_metadata_rule",
+                    "passes_launch_gate": True,
+                    "odds_timing_filter": {"max_hours_before_start": None},
+                }
+            ],
+            "evaluation_sources": [],
+        },
+    )
+    monkeypatch.setattr(
+        publisher,
+        "load_current_prediction_output",
+        lambda **kwargs: pd.DataFrame(
+            [
+                {
+                    "prediction_id": 1,
+                    "game_id": "CUR1",
+                    "model_type": "logistic",
+                    "predicted_at": "2026-02-01T10:00:00+00:00",
+                    "start_time_utc": "2026-02-02T20:00:00+00:00",
+                    "league": "NBA",
+                    "home_team": "Home",
+                    "away_team": "Away",
+                    "game_status": "scheduled",
+                    "total_line": 210.5,
+                    "over_prob": 0.72,
+                    "under_prob": 0.28,
+                    "over_moneyline": 100,
+                    "under_moneyline": 100,
+                    "over_edge": 0.22,
+                    "under_edge": -0.22,
+                    "over_implied_prob": 0.5,
+                    "under_implied_prob": 0.5,
+                }
+            ]
+        ),
+    )
+
+    result = publisher.publishable_bets(
+        db_path=tmp_path / "unused.db",
+        rules_path=rules_path,
+        output_path=output_path,
+        quality_output_path=quality_path,
+        leagues=["NBA"],
+        now="2026-02-01T12:00:00+00:00",
+    )
+
+    assert result["publishable_profitable_list_exists"] is False
+    assert result["reason"] == "passing_rules_require_benchmarked_live_metadata"
+    assert result["skipped_passing_rule_ids"] == ["nba_totals_metadata_rule"]
+    assert not output_path.exists()
+
+
 def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     failing_db = tmp_path / "failing.db"
     passing_db = tmp_path / "passing.db"
@@ -275,3 +395,48 @@ def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     assert promoted_config["approved_rules"][0]["id"] == "nba_totals_candidate"
     assert promoted_config["approved_rules"][0]["status"] == "approved"
     assert promoted_config["candidate_rules"] == []
+
+
+def test_lock_candidate_rule_uses_decision_time_recommendation_without_approval(tmp_path):
+    rules_path = tmp_path / "rules.yml"
+    report_path = tmp_path / "decision_time_benchmark.json"
+    _write_candidate_rules(rules_path)
+    report_path.write_text(
+        json.dumps(
+            {
+                "locked_candidate_recommendations": [
+                    {
+                        "rule_id": "nba_totals_candidate",
+                        "market": "totals",
+                        "league": "NBA",
+                        "model_type": "ensemble",
+                        "prediction_variant": "market_residual_shrink_050_sigmoid",
+                        "feature_variant": "current_features",
+                        "price_mode": "selected_book",
+                        "timing_bucket": "1-6h",
+                        "side": "over",
+                        "min_edge": 0.05,
+                        "lock_status": "lock_recommended",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = lock_candidate_rule(
+        rule_id="nba_totals_candidate",
+        rules_path=rules_path,
+        benchmark_report_path=report_path,
+        locked_at="2026-03-01T00:00:00+00:00",
+    )
+
+    locked_config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    assert result["locked"] is True
+    assert locked_config["approved_rules"] == []
+    assert locked_config["candidate_rules"] == []
+    assert locked_config["locked_candidate_rules"][0]["id"] == "nba_totals_candidate"
+    assert locked_config["locked_candidate_rules"][0]["status"] == "locked_candidate"
+    assert locked_config["locked_candidate_rules"][0]["approval_requires"] == (
+        "strict_locked_out_of_sample_results"
+    )

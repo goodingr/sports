@@ -57,6 +57,12 @@ export function Navbar() {
                         </Link>
                     </SignedOut>
                     <SignedIn>
+                        <Link
+                            href="/account"
+                            className="hidden sm:inline text-sm font-medium hover:text-primary transition-colors"
+                        >
+                            Account
+                        </Link>
                         <UserButton afterSignOutUrl="/" />
                     </SignedIn>
                     <button
@@ -101,6 +107,17 @@ export function Navbar() {
                                     </Link>
                                 </li>
                             </SignedOut>
+                            <SignedIn>
+                                <li>
+                                    <Link
+                                        href="/account"
+                                        onClick={closeMobile}
+                                        className="block py-3 text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                        Account
+                                    </Link>
+                                </li>
+                            </SignedIn>
                         </ul>
                     </Container>
                 </div>

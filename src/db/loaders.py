@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
+import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -18,14 +19,66 @@ from .core import connect
 
 LOGGER = logging.getLogger(__name__)
 
+BOOK_PRIORITY = (
+    "draftkings",
+    "fanduel",
+    "betmgm",
+    "caesars",
+    "betrivers",
+    "pointsbet",
+    "pinnacle",
+    "bovada",
+)
 
-import re
 
 def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _book_rank(book_name: Any) -> int:
+    normalized = str(book_name or "").strip().lower()
+    try:
+        return BOOK_PRIORITY.index(normalized)
+    except ValueError:
+        return len(BOOK_PRIORITY)
+
+
+def _sorted_bookmakers(bookmakers: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return sorted(
+        bookmakers,
+        key=lambda bookmaker: (
+            _book_rank(bookmaker.get("title") or bookmaker.get("key")),
+            str(bookmaker.get("title") or bookmaker.get("key") or ""),
+        ),
+    )
+
+
+def _parse_utc_datetime(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _should_replace_total_close(
+    *,
+    fetched_at: datetime,
+    start_time_utc: Optional[str],
+    existing_snapshot_time_utc: Any,
+) -> bool:
+    start_dt = _parse_utc_datetime(start_time_utc)
+    if start_dt is not None and fetched_at > start_dt:
+        return False
+    existing_dt = _parse_utc_datetime(existing_snapshot_time_utc)
+    return existing_dt is None or fetched_at > existing_dt
 
 def _generate_internal_id(league: str, date_str: str, home_name: str, away_name: str) -> str:
     """
@@ -56,6 +109,16 @@ def _ensure_odds_line_column(conn) -> None:
         raise
 
 
+def _ensure_injury_reports_player_id_column(conn) -> None:
+    try:
+        conn.execute("ALTER TABLE injury_reports ADD COLUMN player_id TEXT")
+    except sqlite3.OperationalError as exc:
+        message = str(exc).lower()
+        if "duplicate column name" in message:
+            return
+        raise
+
+
 _TEAMRANKINGS_COLUMNS = {
     "tr_pick": "TEXT",
     "tr_total_line": "REAL",
@@ -66,6 +129,14 @@ _TEAMRANKINGS_COLUMNS = {
     "tr_retrieved_at": "TEXT",
 }
 
+_TOTAL_CLOSE_LINEAGE_COLUMNS = {
+    "total_close_snapshot_id": "TEXT",
+    "total_close_snapshot_time_utc": "TEXT",
+    "total_close_book_id": "INTEGER",
+    "total_close_book": "TEXT",
+    "total_close_source": "TEXT",
+}
+
 
 def _ensure_game_results_tr_columns(conn) -> None:
     """Make sure game_results has the optional TeamRankings columns."""
@@ -73,6 +144,17 @@ def _ensure_game_results_tr_columns(conn) -> None:
         row[1] for row in conn.execute("PRAGMA table_info(game_results)").fetchall()
     }
     for column, ddl in _TEAMRANKINGS_COLUMNS.items():
+        if column in existing:
+            continue
+        conn.execute(f"ALTER TABLE game_results ADD COLUMN {column} {ddl}")
+
+
+def _ensure_game_results_total_close_lineage_columns(conn) -> None:
+    """Make sure game_results can trace totals close lines to a snapshot/book."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(game_results)").fetchall()
+    }
+    for column, ddl in _TOTAL_CLOSE_LINEAGE_COLUMNS.items():
         if column in existing:
             continue
         conn.execute(f"ALTER TABLE game_results ADD COLUMN {column} {ddl}")
@@ -811,6 +893,7 @@ def store_injury_reports(df: pd.DataFrame, *, league: str, source_key: str) -> i
 
     with connect() as conn:
         _ensure_odds_line_column(conn)
+        _ensure_injury_reports_player_id_column(conn)
         sport_id = _ensure_sport(
             conn,
             name=config["sport_name"],
@@ -849,14 +932,15 @@ def store_injury_reports(df: pd.DataFrame, *, league: str, source_key: str) -> i
                 """
                 INSERT INTO injury_reports (
                     league, sport_id, team_id, team_code, season, week,
-                    player_name, position, status,
+                    player_name, player_id, position, status,
                     practice_status, report_date, game_date, detail, source_key
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(league, player_name, report_date, source_key) DO UPDATE SET
                     team_id = COALESCE(excluded.team_id, injury_reports.team_id),
                     team_code = COALESCE(excluded.team_code, injury_reports.team_code),
                     season = COALESCE(excluded.season, injury_reports.season),
                     week = COALESCE(excluded.week, injury_reports.week),
+                    player_id = COALESCE(excluded.player_id, injury_reports.player_id),
                     position = COALESCE(excluded.position, injury_reports.position),
                     status = COALESCE(excluded.status, injury_reports.status),
                     practice_status = COALESCE(excluded.practice_status, injury_reports.practice_status),
@@ -872,6 +956,7 @@ def store_injury_reports(df: pd.DataFrame, *, league: str, source_key: str) -> i
                     season_value,
                     week_value,
                     player_name,
+                    (row.get("player_id") or None),
                     (row.get("position") or None),
                     (row.get("status") or None),
                     (row.get("practice_status") or None),
@@ -1010,6 +1095,7 @@ def load_odds_snapshot(
     config = SPORT_CONFIG.get((sport_key or "americanfootball_nfl").lower(), SPORT_CONFIG["americanfootball_nfl"])
 
     with connect() as conn:
+        _ensure_game_results_total_close_lineage_columns(conn)
         sport_id = _ensure_sport(
             conn,
             name=config["sport_name"],
@@ -1103,7 +1189,7 @@ def load_odds_snapshot(
             # We'll collect all outcomes first, then determine home/away based on the outcome_key logic
             home_ml_close = None
             away_ml_close = None
-            for bookmaker in event.get("bookmakers", []):
+            for bookmaker in _sorted_bookmakers(event.get("bookmakers", [])):
                 for market in bookmaker.get("markets", []):
                     if market.get("key") == "h2h":
                         for outcome in market.get("outcomes", []):
@@ -1125,8 +1211,15 @@ def load_odds_snapshot(
             # Track outcomes for later game_results update
             outcomes_by_key = {}
             total_close_value = None
+            total_close_lineage = {
+                "snapshot_id": None,
+                "snapshot_time_utc": None,
+                "book_id": None,
+                "book": None,
+                "source": None,
+            }
             
-            for bookmaker in event.get("bookmakers", []):
+            for bookmaker in _sorted_bookmakers(event.get("bookmakers", [])):
                 book_title = bookmaker.get("title") or bookmaker.get("key")
                 book_id = _get_or_create_book(conn, book_title, region)
                 for market in bookmaker.get("markets", []):
@@ -1151,6 +1244,13 @@ def load_odds_snapshot(
                         line_value = _safe_float(outcome.get("point"))
                         if market_key == "totals" and line_value is not None and total_close_value is None:
                             total_close_value = line_value
+                            total_close_lineage = {
+                                "snapshot_id": snapshot_id,
+                                "snapshot_time_utc": fetched_dt.isoformat(),
+                                "book_id": book_id,
+                                "book": book_title,
+                                "source": source,
+                            }
 
                         conn.execute(
                             """
@@ -1185,9 +1285,21 @@ def load_odds_snapshot(
                     LOGGER.debug("Game %s: no moneyline or totals data available to persist", game_id)
                 else:
                     existing = conn.execute(
-                        "SELECT game_id FROM game_results WHERE game_id = ?",
+                        """
+                        SELECT game_id, total_close_snapshot_time_utc
+                        FROM game_results
+                        WHERE game_id = ?
+                        """,
                         (game_id,),
                     ).fetchone()
+                    replace_total_close = total_close_norm is not None and _should_replace_total_close(
+                        fetched_at=fetched_dt,
+                        start_time_utc=commence_iso,
+                        existing_snapshot_time_utc=(
+                            existing["total_close_snapshot_time_utc"] if existing else None
+                        ),
+                    )
+                    total_close_update = total_close_norm if replace_total_close else None
 
                     if existing:
                         LOGGER.debug("Updating game_results for game_id %s with odds data", game_id)
@@ -1196,24 +1308,53 @@ def load_odds_snapshot(
                             UPDATE game_results
                             SET home_moneyline_close = COALESCE(?, home_moneyline_close),
                                 away_moneyline_close = COALESCE(?, away_moneyline_close),
-                        total_close = COALESCE(?, total_close)
+                                total_close = COALESCE(?, total_close),
+                                total_close_snapshot_id = COALESCE(?, total_close_snapshot_id),
+                                total_close_snapshot_time_utc = COALESCE(?, total_close_snapshot_time_utc),
+                                total_close_book_id = COALESCE(?, total_close_book_id),
+                                total_close_book = COALESCE(?, total_close_book),
+                                total_close_source = COALESCE(?, total_close_source)
                             WHERE game_id = ?
                             """,
-                            (_normalize_moneyline(home_ml), _normalize_moneyline(away_ml), total_close_norm, game_id),
+                            (
+                                _normalize_moneyline(home_ml),
+                                _normalize_moneyline(away_ml),
+                                total_close_update,
+                                total_close_lineage["snapshot_id"] if replace_total_close else None,
+                                total_close_lineage["snapshot_time_utc"] if replace_total_close else None,
+                                total_close_lineage["book_id"] if replace_total_close else None,
+                                total_close_lineage["book"] if replace_total_close else None,
+                                total_close_lineage["source"] if replace_total_close else None,
+                                game_id,
+                            ),
                         )
                     else:
                         LOGGER.debug("Inserting game_results for game_id %s with odds data", game_id)
                         conn.execute(
                             """
                             INSERT INTO game_results (
-                                game_id, home_moneyline_close, away_moneyline_close, total_close, source_version
-                            ) VALUES (?, ?, ?, ?, ?)
+                                game_id,
+                                home_moneyline_close,
+                                away_moneyline_close,
+                                total_close,
+                                total_close_snapshot_id,
+                                total_close_snapshot_time_utc,
+                                total_close_book_id,
+                                total_close_book,
+                                total_close_source,
+                                source_version
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 game_id,
                                 _normalize_moneyline(home_ml),
                                 _normalize_moneyline(away_ml),
-                                total_close_norm,
+                                total_close_update,
+                                total_close_lineage["snapshot_id"] if replace_total_close else None,
+                                total_close_lineage["snapshot_time_utc"] if replace_total_close else None,
+                                total_close_lineage["book_id"] if replace_total_close else None,
+                                total_close_lineage["book"] if replace_total_close else None,
+                                total_close_lineage["source"] if replace_total_close else None,
                                 source,
                             ),
                         )

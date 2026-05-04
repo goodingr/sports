@@ -34,10 +34,13 @@ export function BetFeed() {
     const [history, setHistory] = useState<Bet[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [partialError, setPartialError] = useState<string | null>(null);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
     const [page, setPage] = useState(1);
     const [totalHistory, setTotalHistory] = useState(0);
+    const [reloadKey, setReloadKey] = useState(0);
     const { user, isLoaded } = useUser();
     const { getToken } = useAuth();
 
@@ -46,24 +49,51 @@ export function BetFeed() {
     useEffect(() => {
         let cancelled = false;
         async function loadBets() {
+            setError(null);
+            setPartialError(null);
+            setLoading(true);
             try {
-                setError(null);
                 const token = await getToken();
                 const headers = buildAuthHeaders(token);
 
-                const [upcomingData, historyData] = await Promise.all([
+                const [upcomingResult, historyResult] = await Promise.allSettled([
                     fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', { headers }),
-                    fetchAPI<PaginatedBetsResponse>('/api/bets/history?limit=30&page=1', { headers }),
+                    fetchAPI<PaginatedBetsResponse>('/api/bets/history?limit=30&page=1', {
+                        headers,
+                    }),
                 ]);
 
                 if (cancelled) return;
-                setUpcoming((upcomingData.data ?? []).map(normalizeBet));
-                setHistory((historyData.data ?? []).map(normalizeBet));
-                setTotalHistory(historyData.total ?? 0);
-            } catch (err) {
-                if (!cancelled) {
-                    console.error('Failed to load bets:', err);
+
+                if (upcomingResult.status === 'fulfilled') {
+                    setUpcoming((upcomingResult.value.data ?? []).map(normalizeBet));
+                } else {
+                    setUpcoming([]);
+                }
+                if (historyResult.status === 'fulfilled') {
+                    setHistory((historyResult.value.data ?? []).map(normalizeBet));
+                    setTotalHistory(historyResult.value.total ?? 0);
+                } else {
+                    setHistory([]);
+                    setTotalHistory(0);
+                }
+
+                if (
+                    upcomingResult.status === 'rejected' &&
+                    historyResult.status === 'rejected'
+                ) {
+                    console.error('Failed to load bets:', upcomingResult.reason);
                     setError("We couldn't load picks right now. Please try again in a moment.");
+                } else if (upcomingResult.status === 'rejected') {
+                    console.error('Failed to load upcoming bets:', upcomingResult.reason);
+                    setPartialError(
+                        "Live picks are temporarily unavailable. Showing recent results below.",
+                    );
+                } else if (historyResult.status === 'rejected') {
+                    console.error('Failed to load history:', historyResult.reason);
+                    setPartialError(
+                        "Recent results are temporarily unavailable. Showing live picks below.",
+                    );
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -76,11 +106,12 @@ export function BetFeed() {
         return () => {
             cancelled = true;
         };
-    }, [isLoaded, getToken]);
+    }, [isLoaded, getToken, reloadKey]);
 
     const handleLoadMore = async () => {
         if (loadingMore) return;
         setLoadingMore(true);
+        setLoadMoreError(null);
         try {
             const token = await getToken();
             const headers = buildAuthHeaders(token);
@@ -96,6 +127,7 @@ export function BetFeed() {
             if (data.total) setTotalHistory(data.total);
         } catch (err) {
             console.error('Failed to load more history:', err);
+            setLoadMoreError("We couldn't load more results. Please try again.");
         } finally {
             setLoadingMore(false);
         }
@@ -119,11 +151,12 @@ export function BetFeed() {
                 role="alert"
                 className="text-center py-12 px-6 bg-danger/10 border border-danger/20 rounded-xl"
             >
-                <AlertCircle className="h-8 w-8 text-danger mx-auto mb-3" />
+                <AlertCircle className="h-8 w-8 text-danger mx-auto mb-3" aria-hidden="true" />
                 <p className="text-foreground font-medium mb-2">Unable to load picks</p>
                 <p className="text-sm text-muted-foreground mb-4">{error}</p>
                 <button
-                    onClick={() => window.location.reload()}
+                    type="button"
+                    onClick={() => setReloadKey((k) => k + 1)}
                     className="inline-flex items-center justify-center px-4 py-2 border border-white/10 rounded-full text-sm font-medium hover:bg-white/5 transition-colors"
                 >
                     Retry
@@ -137,6 +170,15 @@ export function BetFeed() {
 
     return (
         <div className="space-y-6">
+            {partialError && (
+                <div
+                    role="status"
+                    className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
+                >
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>{partialError}</span>
+                </div>
+            )}
             {/* Tabs */}
             <div className="flex border-b border-white/10" role="tablist">
                 <button
@@ -233,12 +275,23 @@ export function BetFeed() {
                             {history.length < totalHistory && (
                                 <div className="mt-8 text-center">
                                     <button
+                                        type="button"
                                         onClick={handleLoadMore}
                                         disabled={loadingMore}
+                                        aria-busy={loadingMore}
                                         className="inline-flex items-center justify-center px-6 py-3 border border-white/10 rounded-full text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {loadingMore ? 'Loading...' : 'View More'}
                                     </button>
+                                    {loadMoreError && (
+                                        <p
+                                            role="alert"
+                                            className="mt-3 text-sm text-danger flex items-center justify-center gap-2"
+                                        >
+                                            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                                            {loadMoreError}
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </>

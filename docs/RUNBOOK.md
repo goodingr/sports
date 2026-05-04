@@ -87,11 +87,14 @@ the stack back up at the previous tag (`git tag -l 'v*'`).
 The worker runs the pipeline on cron. To trigger off-schedule:
 
 ```bash
-# Hourly fast path: ingest + predict, no retraining.
+# Hourly fast path: ingest + data hygiene + predict + fail-closed paid publish.
 docker compose exec -u app worker /app/scripts/pipeline.sh --skip-training
 
-# Full daily path: ingest + train + predict.
+# Full daily path: ingest + data hygiene + benchmark + predict + paid publish.
 docker compose exec -u app worker /app/scripts/pipeline.sh
+
+# Benchmark-only paid-picks gate: data hygiene + benchmark + paid publish.
+docker compose exec -u app worker /app/scripts/run_job.sh benchmark
 
 # Single league only (debug a flaky source):
 docker compose exec -u app worker python -m src.data.ingest_manager --leagues NFL
@@ -102,8 +105,9 @@ docker compose exec worker bash -lc 'ls -t /app/logs/pipeline_*.log | head -1 | 
 ```
 
 A clean run finishes with `pipeline complete` in `/app/logs/pipeline_<ts>.log`.
-Any `WARN:` lines indicate non-fatal step failures — investigate but the
-pipeline keeps going.
+Any `WARN:` lines must be triaged before relying on paid-picks output. The
+pipeline may keep going, but benchmark, quality, or publish warnings mean the
+subscriber feed should remain empty until the underlying gate is green.
 
 To see what cron has scheduled:
 ```bash

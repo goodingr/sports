@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.api import readiness
 from src.api.settings import APISettings
@@ -95,3 +96,43 @@ def test_ready_endpoint_reports_ready_when_backend_dependencies_are_present(
     assert body["checks"]["db"]["ok"] is True
     assert body["checks"]["schema"]["ok"] is True
     assert body["checks"]["models"]["leagues"]["NBA"]["ok"] is True
+
+
+def test_health_endpoint_is_dependency_free(api_client, monkeypatch):
+    """`/health` is the liveness probe — it must not depend on the DB.
+
+    docker-compose's deploy gate runs `/ready` (which exercises the DB and
+    schema), but external orchestrators may want a cheap probe that stays
+    green during transient DB unavailability so the container is not
+    restart-flapped while the worker is mid-vacuum. This test guards that
+    contract by pointing the readiness settings at a missing DB and proving
+    `/health` still returns 200 even though `/ready` would not.
+    """
+    settings = APISettings(
+        db_path=Path("/tmp/this/path/should/never/exist/betting.db"),
+        models_dir=Path("/tmp/no-models"),
+        release_leagues=("NBA",),
+        cors_origins=(),
+    )
+    monkeypatch.setattr(readiness, "get_settings", lambda: settings)
+
+    response = api_client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
+def test_ready_returns_503_when_database_unreachable(api_client, monkeypatch, tmp_path):
+    """`/ready` is the staging gate — it must reject when the DB is gone."""
+    settings = APISettings(
+        db_path=tmp_path / "missing.db",
+        models_dir=tmp_path / "models",
+        release_leagues=("NBA",),
+        cors_origins=(),
+    )
+    monkeypatch.setattr(readiness, "get_settings", lambda: settings)
+
+    response = api_client.get("/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    assert body["checks"]["db"]["ok"] is False

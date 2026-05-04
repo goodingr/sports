@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -20,8 +22,76 @@ from src.dashboard.data import (
 )
 from src.data.sportsbook_urls import get_sportsbook_url
 from src.data.team_mappings import get_full_team_name
+from src.predict.publishable_bets import DEFAULT_OUTPUT as PUBLISHABLE_BETS_PATH
 
 router = APIRouter(prefix="/api/bets", tags=["bets"])
+
+
+def _load_gated_publishable_bets() -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Read the gated paid-pick output if a passing approved rule produced it.
+
+    Returns an empty mapping when the file is missing, malformed, or the gate
+    has not been satisfied. Keys are (game_id, market, side) tuples; the value
+    is the serialized bet record from src.predict.publishable_bets.
+    """
+    path: Path = PUBLISHABLE_BETS_PATH
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if not payload.get("publishable_profitable_list_exists"):
+        return {}
+    bets_list = payload.get("bets") or []
+    keyed: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for bet in bets_list:
+        if not isinstance(bet, dict):
+            continue
+        game_id = bet.get("game_id")
+        market = bet.get("market")
+        side = bet.get("side")
+        if game_id is None or market is None or side is None:
+            continue
+        keyed[(str(game_id), str(market).lower(), str(side).lower())] = bet
+    return keyed
+
+
+def _gated_keys_for_market(
+    gated: dict[tuple[str, str, str], dict[str, Any]], market: str
+) -> set[tuple[str, str]]:
+    market = market.lower()
+    return {(game_id, side) for (game_id, m, side) in gated if m == market}
+
+
+def _publishable_bets_frame(
+    gated: dict[tuple[str, str, str], dict[str, Any]],
+    *,
+    market: str | None = None,
+) -> pd.DataFrame:
+    records: list[dict[str, Any]] = []
+    market_filter = market.lower() if market else None
+    for (game_id, bet_market, side), bet in gated.items():
+        if market_filter and bet_market != market_filter:
+            continue
+        record = dict(bet)
+        record.setdefault("game_id", game_id)
+        record.setdefault("market", bet_market)
+        record.setdefault("side", side)
+        if "commence_time" not in record and record.get("start_time_utc") is not None:
+            record["commence_time"] = record.get("start_time_utc")
+        if "moneyline" not in record and record.get("odds") is not None:
+            record["moneyline"] = record.get("odds")
+        record.setdefault("status", "Pending")
+        records.append(record)
+    if not records:
+        return pd.DataFrame()
+    frame = pd.DataFrame(records)
+    if "commence_time" in frame.columns:
+        frame["commence_time"] = pd.to_datetime(frame["commence_time"], utc=True, errors="coerce")
+    return frame
 
 
 class OddsRecord(BaseModel):
@@ -229,7 +299,9 @@ def _build_sportsbook_map(recommended: pd.DataFrame) -> dict[str, dict[str, Any]
         outcome = str(_clean_value(odds_row.get("outcome")) or "").lower()
         preferred = outcome == side_by_game.get(key)
         if key not in sportsbook_map or preferred:
-            sportsbook_map[key] = {column: _clean_value(odds_row.get(column)) for column in odds_df.columns}
+            sportsbook_map[key] = {
+                column: _clean_value(odds_row.get(column)) for column in odds_df.columns
+            }
     return sportsbook_map
 
 
@@ -268,7 +340,11 @@ def _premium_bet(
     game_id = base.game_id
     sportsbook = sportsbook_map.get(game_id, {})
     side = _string_value(row, "side")
-    line = sportsbook.get("line") if sportsbook.get("line") is not None else _row_value(row, "total_line")
+    line = (
+        sportsbook.get("line")
+        if sportsbook.get("line") is not None
+        else _row_value(row, "total_line")
+    )
     book = sportsbook.get("book") or _row_value(row, "book")
     book_url = _row_value(row, "book_url")
     if book and not book_url:
@@ -284,7 +360,7 @@ def _premium_bet(
         total_line=_clean_value(line),
         book=_clean_value(book),
         book_url=_clean_value(book_url),
-        recommended_bet=_recommended_bet(side, line),
+        recommended_bet=_string_value(row, "recommended_bet") or _recommended_bet(side, line),
         odds_data=odds_map.get(game_id, []),
     )
 
@@ -302,11 +378,30 @@ def _serialize_bets(
     records: list[dict[str, Any]] = []
     for _, row in rows.iterrows():
         if premium:
-            records.append(_model_dump(_premium_bet(row, odds_map=odds_map, sportsbook_map=sportsbook_map)))
+            records.append(
+                _model_dump(_premium_bet(row, odds_map=odds_map, sportsbook_map=sportsbook_map))
+            )
         else:
             is_locked = lock_unstarted or bool(_row_value(row, "is_live"))
             records.append(_model_dump(_public_bet(row, is_locked=is_locked)))
     return records
+
+
+def _filter_rows_to_gated(rows: pd.DataFrame, gated_keys: set[tuple[str, str]]) -> pd.DataFrame:
+    """Keep only rows whose (game_id, side) is in the gated key set."""
+    if rows.empty:
+        return rows
+    if not gated_keys:
+        return rows.iloc[0:0].copy()
+    mask = rows.apply(
+        lambda row: (
+            str(_clean_value(row.get("game_id")) or ""),
+            str(_clean_value(row.get("side")) or "").lower(),
+        )
+        in gated_keys,
+        axis=1,
+    )
+    return rows[mask].copy()
 
 
 def get_totals_data(model_type: str = "ensemble", version: Optional[str] = "all") -> pd.DataFrame:
@@ -365,7 +460,7 @@ async def get_stats(model_type: str = "ensemble") -> dict[str, Any]:
         return _model_dump(empty_response)
 
     total_bets = len(completed)
-    wins = len(completed[completed["won"] == True])
+    wins = int(completed["won"].eq(True).sum())
     win_rate = (wins / total_bets) * 100 if total_bets > 0 else 0.0
     total_profit = completed["profit"].sum() if "profit" in completed.columns else 0.0
     total_staked = completed["stake"].sum() if "stake" in completed.columns else (total_bets * 100)
@@ -412,6 +507,15 @@ async def get_history(
     else:
         history = df[df["status"] == "Completed"].copy()
 
+    if premium and not history.empty:
+        gated_keys = _gated_keys_for_market(_load_gated_publishable_bets(), "totals")
+        completed_mask = history["status"] == "Completed"
+        live_rows = _filter_rows_to_gated(history[~completed_mask], gated_keys)
+        completed_rows = history[completed_mask]
+        history = pd.concat([live_rows, completed_rows])
+        if "is_live" in history.columns and "commence_time" in history.columns:
+            history = history.sort_values(["is_live", "commence_time"], ascending=[False, False])
+
     start = (page - 1) * limit
     paginated = history.iloc[start : start + limit]
 
@@ -447,8 +551,44 @@ async def get_upcoming(
     model_type: str = "ensemble",
     user: Optional[dict[str, Any]] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get upcoming active bets. Premium users see odds and recommendations."""
+    """Get upcoming active bets.
+
+    Premium users only receive paid recommendations sourced from the gated
+    publishable-picks output. If no approved rule passes the launch gate, the
+    response contains an empty data array. Free users see locked-card metadata
+    for upcoming games (no edge/side/odds/recommendation fields).
+    """
     premium = is_user_premium(user)
+    if premium:
+        gated = _load_gated_publishable_bets()
+        upcoming = _publishable_bets_frame(gated)
+        if upcoming.empty:
+            return _model_dump(UpcomingResponse(data=[], count=0, is_premium=True))
+        now = pd.Timestamp.now(tz="UTC")
+        if "commence_time" in upcoming.columns:
+            upcoming = upcoming[upcoming["commence_time"] > now]
+            upcoming = upcoming.sort_values("commence_time", ascending=True)
+        odds_map: dict[str, list[OddsRecord]] = {}
+        sportsbook_map: dict[str, dict[str, Any]] = {}
+        if not upcoming.empty:
+            game_ids = [
+                str(row["game_id"])
+                for _, row in upcoming.iterrows()
+                if _clean_value(row.get("game_id")) is not None
+            ]
+            odds_map = _build_batch_odds_map(game_ids)
+        response = UpcomingResponse(
+            data=_serialize_bets(
+                upcoming,
+                premium=True,
+                odds_map=odds_map,
+                sportsbook_map=sportsbook_map,
+            ),
+            count=len(upcoming),
+            is_premium=True,
+        )
+        return _model_dump(response)
+
     df = get_totals_data(model_type)
 
     if df.empty:
@@ -506,26 +646,28 @@ async def get_odds_for_game(
         )
 
     odds_data = _odds_records_from_df(get_game_odds(game_id))
-    df_preds = get_totals_data(model_type)
+    gated = _load_gated_publishable_bets()
+    gated_rows = _publishable_bets_frame(gated)
+    if not gated_rows.empty and "game_id" in gated_rows.columns:
+        gated_rows = gated_rows[gated_rows["game_id"].astype(str) == str(game_id)].copy()
 
     prediction_info = PredictionInfo()
-    if not df_preds.empty and "game_id" in df_preds.columns:
-        game_pred = df_preds[df_preds["game_id"] == game_id]
-        if not game_pred.empty:
-            if "edge" in game_pred.columns:
-                game_pred = game_pred.sort_values("edge", ascending=False)
-            best_bet = game_pred.iloc[0]
-            side = _string_value(best_bet, "side")
-            prediction_info = PredictionInfo(
-                predicted_total_points=_float_value(best_bet, "predicted_total_points"),
-                recommended_bet=_recommended_bet(side, _row_value(best_bet, "total_line")),
-                edge=_float_value(best_bet, "edge"),
-                home_score=_float_value(best_bet, "home_score"),
-                away_score=_float_value(best_bet, "away_score"),
-                profit=_float_value(best_bet, "profit"),
-                won=_bool_value(best_bet.get("won")),
-                status=_string_value(best_bet, "status") or "Pending",
-            )
+    if not gated_rows.empty:
+        if "edge" in gated_rows.columns:
+            gated_rows = gated_rows.sort_values("edge", ascending=False)
+        best_bet = gated_rows.iloc[0]
+        side = _string_value(best_bet, "side")
+        prediction_info = PredictionInfo(
+            predicted_total_points=_float_value(best_bet, "predicted_total_points"),
+            recommended_bet=_string_value(best_bet, "recommended_bet")
+            or _recommended_bet(side, _row_value(best_bet, "total_line")),
+            edge=_float_value(best_bet, "edge"),
+            home_score=_float_value(best_bet, "home_score"),
+            away_score=_float_value(best_bet, "away_score"),
+            profit=_float_value(best_bet, "profit"),
+            won=_bool_value(best_bet.get("won")),
+            status=_string_value(best_bet, "status") or "Pending",
+        )
 
     response = GameOddsResponse(data=odds_data, count=len(odds_data), prediction=prediction_info)
     return _model_dump(response)

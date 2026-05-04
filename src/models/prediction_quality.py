@@ -35,6 +35,10 @@ class QualityGate:
     min_bets_multi_league: int = 300
     min_roi: float = 0.05
     min_bootstrap_roi_low: float = 0.0
+    min_avg_clv: float = 0.0
+    min_clv_win_rate: float = 0.5
+    max_hours_before_start: Optional[float] = 72.0
+    require_positive_clv: bool = True
     bootstrap_samples: int = 3000
     random_seed: int = 42
 
@@ -51,7 +55,9 @@ def american_to_decimal(moneyline: float | int | None) -> Optional[float]:
     return 1.0 + 100.0 / abs(ml)
 
 
-def american_profit(moneyline: float | int | None, won: bool, stake: float = DEFAULT_STAKE) -> float:
+def american_profit(
+    moneyline: float | int | None, won: bool, stake: float = DEFAULT_STAKE
+) -> float:
     """Return profit for a settled American-odds bet."""
     decimal = american_to_decimal(moneyline)
     if decimal is None:
@@ -211,7 +217,11 @@ def load_totals_model_input(
     for column in numeric_cols:
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
-    df = _latest_pre_game(df, ["game_id", "model_type"]) if latest_only else _coerce_prediction_times(df)
+    df = (
+        _latest_pre_game(df, ["game_id", "model_type"])
+        if latest_only
+        else _coerce_prediction_times(df)
+    )
     df["actual_total"] = df["home_score"] + df["away_score"]
     df["model_total_error"] = df["predicted_total_points"] - df["actual_total"]
     df["market_line_error"] = df["total_line"] - df["actual_total"]
@@ -246,6 +256,8 @@ def load_moneyline_model_input(
             p.away_edge,
             p.home_implied_prob,
             p.away_implied_prob,
+            gr.home_moneyline_close,
+            gr.away_moneyline_close,
             g.start_time_utc,
             s.league,
             gr.home_score,
@@ -274,11 +286,17 @@ def load_moneyline_model_input(
         "away_edge",
         "home_implied_prob",
         "away_implied_prob",
+        "home_moneyline_close",
+        "away_moneyline_close",
         "home_score",
         "away_score",
     ]:
         df[column] = pd.to_numeric(df[column], errors="coerce")
-    df = _latest_pre_game(df, ["game_id", "model_type"]) if latest_only else _coerce_prediction_times(df)
+    df = (
+        _latest_pre_game(df, ["game_id", "model_type"])
+        if latest_only
+        else _coerce_prediction_times(df)
+    )
     no_vig = df.apply(
         lambda row: no_vig_pair(row["home_moneyline"], row["away_moneyline"]),
         axis=1,
@@ -287,6 +305,14 @@ def load_moneyline_model_input(
     df["home_no_vig_prob"] = no_vig[0]
     df["away_no_vig_prob"] = no_vig[1]
     return df
+
+
+def _moneyline_clv(bet_moneyline: float | int | None, close_moneyline: float | int | None) -> float:
+    bet_decimal = american_to_decimal(bet_moneyline)
+    close_decimal = american_to_decimal(close_moneyline)
+    if bet_decimal is None or close_decimal is None:
+        return np.nan
+    return float(bet_decimal - close_decimal)
 
 
 def expand_totals_bets(model_input: pd.DataFrame) -> pd.DataFrame:
@@ -336,6 +362,7 @@ def expand_moneyline_bets(model_input: pd.DataFrame) -> pd.DataFrame:
         side_df["side"] = side
         side_df["predicted_prob"] = side_df[f"{side}_prob"]
         side_df["moneyline"] = side_df[f"{side}_moneyline"]
+        side_df["close_moneyline"] = side_df[f"{side}_moneyline_close"]
         side_df["edge"] = side_df[f"{side}_edge"]
         side_df["implied_prob"] = side_df[f"{side}_implied_prob"]
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_prob"]
@@ -353,6 +380,10 @@ def expand_moneyline_bets(model_input: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
     bets["actual_value"] = bets["profit"]
+    bets["closing_line_value"] = bets.apply(
+        lambda row: _moneyline_clv(row["moneyline"], row["close_moneyline"]),
+        axis=1,
+    )
     return bets
 
 
@@ -416,6 +447,27 @@ def calibration_bins(
     return rows
 
 
+def closing_line_value_summary(bets: pd.DataFrame) -> dict[str, Any]:
+    if bets.empty or "closing_line_value" not in bets.columns:
+        return {
+            "closing_line_value_count": 0,
+            "avg_closing_line_value": None,
+            "closing_line_value_win_rate": None,
+        }
+    values = pd.to_numeric(bets["closing_line_value"], errors="coerce").dropna()
+    if values.empty:
+        return {
+            "closing_line_value_count": 0,
+            "avg_closing_line_value": None,
+            "closing_line_value_win_rate": None,
+        }
+    return {
+        "closing_line_value_count": int(len(values)),
+        "avg_closing_line_value": float(values.mean()),
+        "closing_line_value_win_rate": float((values > 0).mean()),
+    }
+
+
 def summarize_bets(
     bets: pd.DataFrame,
     gate: QualityGate = QualityGate(),
@@ -427,6 +479,7 @@ def summarize_bets(
             "roi": None,
             "win_rate": None,
             "profit": 0.0,
+            **closing_line_value_summary(bets),
             "passes_launch_gate": False,
         }
     frame = bets.dropna(subset=["profit", "predicted_prob", "won"]).copy()
@@ -444,6 +497,7 @@ def summarize_bets(
     if frame["won"].nunique() > 1 and "no_vig_market_prob" in frame.columns:
         market_probs = frame["no_vig_market_prob"].fillna(frame["implied_prob"])
         market_brier = float(brier_score_loss(frame["won"].astype(int), market_probs))
+    clv = closing_line_value_summary(frame)
 
     ordered_won = (
         frame.sort_values("start_time_utc")["won"]
@@ -467,6 +521,7 @@ def summarize_bets(
         "bootstrap_roi_low": ci_low,
         "bootstrap_roi_median": ci_median,
         "bootstrap_roi_high": ci_high,
+        **clv,
         "max_drawdown": max_drawdown(frame["profit"]),
         "max_losing_streak": max_losing_streak(ordered_won),
         "calibration_bins": calibration_bins(frame),
@@ -474,6 +529,16 @@ def summarize_bets(
             len(frame) >= gate.min_bets_narrow
             and roi >= gate.min_roi
             and ci_low > gate.min_bootstrap_roi_low
+            and (
+                not gate.require_positive_clv
+                or (
+                    clv["closing_line_value_count"] > 0
+                    and clv["avg_closing_line_value"] is not None
+                    and clv["avg_closing_line_value"] > gate.min_avg_clv
+                    and clv["closing_line_value_win_rate"] is not None
+                    and clv["closing_line_value_win_rate"] > gate.min_clv_win_rate
+                )
+            )
         ),
     }
 
@@ -487,7 +552,40 @@ def _empty_like(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.iloc[0:0].copy()
 
 
-def filter_bets_for_rule(bets: pd.DataFrame, rule: dict[str, Any]) -> pd.DataFrame:
+RULE_EXACT_MATCH_FIELDS = (
+    "prediction_variant",
+    "price_mode",
+    "timing_bucket",
+    "feature_variant",
+)
+
+
+def _filter_exact_rule_field(frame: pd.DataFrame, rule: dict[str, Any], field: str) -> pd.DataFrame:
+    """Apply an optional exact-match rule field without silently aggregating variants."""
+    value = rule.get(field)
+    if value is None:
+        return frame
+    if field not in frame.columns:
+        return _empty_like(frame)
+    return frame[frame[field].astype(str) == str(value)].copy()
+
+
+def _hours_before_start(frame: pd.DataFrame) -> pd.Series:
+    if "hours_before_start" in frame.columns:
+        return pd.to_numeric(frame["hours_before_start"], errors="coerce")
+    if {"start_time_utc", "predicted_at"} <= set(frame.columns):
+        starts = pd.to_datetime(frame["start_time_utc"], utc=True, errors="coerce")
+        predicted = pd.to_datetime(frame["predicted_at"], utc=True, errors="coerce")
+        return (starts - predicted).dt.total_seconds() / 3600.0
+    return pd.Series(np.nan, index=frame.index, dtype="float64")
+
+
+def filter_bets_for_rule(
+    bets: pd.DataFrame,
+    rule: dict[str, Any],
+    *,
+    max_hours_before_start: Optional[float] = None,
+) -> pd.DataFrame:
     """Apply a rule's market/league/model/side/price filters to a bet table."""
     frame = bets.copy()
     if frame.empty or rule_is_disabled(rule):
@@ -505,6 +603,8 @@ def filter_bets_for_rule(bets: pd.DataFrame, rule: dict[str, Any]) -> pd.DataFra
         if "model_type" not in frame.columns:
             return _empty_like(frame)
         frame = frame[frame["model_type"] == rule["model_type"]]
+    for field in RULE_EXACT_MATCH_FIELDS:
+        frame = _filter_exact_rule_field(frame, rule, field)
     if rule.get("side") and str(rule["side"]).lower() != "both":
         if "side" not in frame.columns:
             return _empty_like(frame)
@@ -521,25 +621,57 @@ def filter_bets_for_rule(bets: pd.DataFrame, rule: dict[str, Any]) -> pd.DataFra
         if "moneyline" not in frame.columns:
             return _empty_like(frame)
         frame = frame[frame["moneyline"] <= float(rule["max_moneyline"])]
+    if max_hours_before_start is not None:
+        hours = _hours_before_start(frame)
+        if hours.notna().any():
+            frame = frame[hours.notna() & (hours <= max_hours_before_start)].copy()
     return frame.copy()
 
 
 def evaluate_rule(bets: pd.DataFrame, rule: dict[str, Any], gate: QualityGate) -> dict[str, Any]:
     """Apply a predeclared rule and return quality metrics."""
-    frame = filter_bets_for_rule(bets, rule)
+    raw_frame = filter_bets_for_rule(bets, rule)
+    frame = filter_bets_for_rule(
+        bets,
+        rule,
+        max_hours_before_start=gate.max_hours_before_start,
+    )
 
     summary = summarize_bets(frame, gate=gate)
     league = str(rule.get("league") or "ALL").upper()
     required_min_bets = gate.min_bets_multi_league if league == "ALL" else gate.min_bets_narrow
     summary["required_min_bets"] = required_min_bets
-    summary["passes_launch_gate"] = bool(
-        summary.get("bets", 0) >= required_min_bets
-        and summary.get("roi") is not None
-        and summary["roi"] >= gate.min_roi
-        and summary.get("bootstrap_roi_low") is not None
-        and summary["bootstrap_roi_low"] > gate.min_bootstrap_roi_low
-        and summary.get("model_beats_market_brier") is True
-    )
+    failures: list[str] = []
+    if summary.get("bets", 0) < required_min_bets:
+        failures.append(f"sample_size_below_{required_min_bets}")
+    if summary.get("roi") is None or summary["roi"] < gate.min_roi:
+        failures.append(f"roi_below_{gate.min_roi}")
+    if (
+        summary.get("bootstrap_roi_low") is None
+        or summary["bootstrap_roi_low"] <= gate.min_bootstrap_roi_low
+    ):
+        failures.append(f"bootstrap_roi_low_not_above_{gate.min_bootstrap_roi_low}")
+    if summary.get("model_beats_market_brier") is not True:
+        failures.append("brier_does_not_beat_market")
+    if gate.require_positive_clv:
+        if summary.get("closing_line_value_count", 0) <= 0:
+            failures.append("missing_clv")
+        if (
+            summary.get("avg_closing_line_value") is None
+            or summary["avg_closing_line_value"] <= gate.min_avg_clv
+        ):
+            failures.append(f"avg_clv_not_above_{gate.min_avg_clv}")
+        if (
+            summary.get("closing_line_value_win_rate") is None
+            or summary["closing_line_value_win_rate"] <= gate.min_clv_win_rate
+        ):
+            failures.append(f"clv_win_rate_not_above_{gate.min_clv_win_rate}")
+    summary["launch_gate_failures"] = failures
+    summary["passes_launch_gate"] = not failures
+    summary["odds_timing_filter"] = {
+        "max_hours_before_start": gate.max_hours_before_start,
+        "stale_odds_excluded": int(len(raw_frame) - len(frame)),
+    }
     summary["rule_id"] = rule.get("id")
     summary["status"] = rule.get("status", "candidate")
     summary["disabled"] = rule_is_disabled(rule)
@@ -564,7 +696,9 @@ def _best_or_selected(row: pd.Series, best_column: str, selected_column: str) ->
     return np.nan
 
 
-def _coalesce_probability(frame: pd.DataFrame, columns: Iterable[str], fallback: float = np.nan) -> pd.Series:
+def _coalesce_probability(
+    frame: pd.DataFrame, columns: Iterable[str], fallback: float = np.nan
+) -> pd.Series:
     result = pd.Series(fallback, index=frame.index, dtype="float64")
     for column in columns:
         if column in frame.columns:
@@ -582,10 +716,9 @@ def _expand_totals_benchmark_predictions(predictions: pd.DataFrame) -> pd.DataFr
     frame["line"] = pd.to_numeric(frame[line_column], errors="coerce")
     if "actual_total" not in frame.columns:
         if {"home_score", "away_score"} <= set(frame.columns):
-            frame["actual_total"] = (
-                pd.to_numeric(frame["home_score"], errors="coerce")
-                + pd.to_numeric(frame["away_score"], errors="coerce")
-            )
+            frame["actual_total"] = pd.to_numeric(
+                frame["home_score"], errors="coerce"
+            ) + pd.to_numeric(frame["away_score"], errors="coerce")
         else:
             return pd.DataFrame()
     else:
@@ -641,6 +774,13 @@ def _expand_totals_benchmark_predictions(predictions: pd.DataFrame) -> pd.DataFr
         axis=1,
     )
     bets["actual_value"] = bets["profit"]
+    if "total_close" in bets.columns:
+        bets["total_close"] = pd.to_numeric(bets["total_close"], errors="coerce")
+        bets["closing_line_value"] = np.where(
+            bets["side"] == "over",
+            bets["total_close"] - bets["line"],
+            bets["line"] - bets["total_close"],
+        )
     if "snapshot_time_utc" in bets.columns and "predicted_at" not in bets.columns:
         bets["predicted_at"] = bets["snapshot_time_utc"]
     return bets
@@ -686,6 +826,11 @@ def _expand_moneyline_benchmark_predictions(predictions: pd.DataFrame) -> pd.Dat
         axis=1,
     )
     frame["actual_value"] = frame["profit"]
+    if "close_moneyline" in frame.columns:
+        frame["closing_line_value"] = frame.apply(
+            lambda row: _moneyline_clv(row["moneyline"], row["close_moneyline"]),
+            axis=1,
+        )
     return frame
 
 
@@ -717,7 +862,9 @@ def expand_benchmark_predictions(
             return pd.concat(non_empty, ignore_index=True) if non_empty else pd.DataFrame()
 
     if market_key is None:
-        if "target_over" in predictions.columns or {"actual_total", "line"} <= set(predictions.columns):
+        if "target_over" in predictions.columns or {"actual_total", "line"} <= set(
+            predictions.columns
+        ):
             market_key = "totals"
         elif "target_win" in predictions.columns:
             market_key = "moneyline"
@@ -756,31 +903,248 @@ def _quality_gate_from_config(config: dict[str, Any]) -> QualityGate:
         min_bootstrap_roi_low=float(
             raw.get("min_bootstrap_roi_low", QualityGate.min_bootstrap_roi_low)
         ),
+        min_avg_clv=float(raw.get("min_avg_clv", QualityGate.min_avg_clv)),
+        min_clv_win_rate=float(raw.get("min_clv_win_rate", QualityGate.min_clv_win_rate)),
+        max_hours_before_start=(
+            None
+            if raw.get("max_hours_before_start") is None
+            else float(raw.get("max_hours_before_start", QualityGate.max_hours_before_start))
+        ),
+        require_positive_clv=bool(
+            raw.get("require_positive_clv", QualityGate.require_positive_clv)
+        ),
         bootstrap_samples=int(raw.get("bootstrap_samples", QualityGate.bootstrap_samples)),
         random_seed=int(raw.get("random_seed", QualityGate.random_seed)),
     )
 
 
+def _edge_bucket(edge: Any) -> str:
+    if pd.isna(edge):
+        return "missing"
+    value = float(edge)
+    if value < 0.02:
+        return "<0.02"
+    if value < 0.04:
+        return "0.02-0.04"
+    if value < 0.06:
+        return "0.04-0.06"
+    if value < 0.08:
+        return "0.06-0.08"
+    if value < 0.10:
+        return "0.08-0.10"
+    return ">=0.10"
+
+
+def _hours_bucket(hours: Any) -> str:
+    if pd.isna(hours):
+        return "missing"
+    value = float(hours)
+    if value < 1:
+        return "<1h"
+    if value < 6:
+        return "1-6h"
+    if value < 24:
+        return "6-24h"
+    if value < 72:
+        return "24-72h"
+    return ">=72h"
+
+
+def build_clv_summary(bets: pd.DataFrame) -> list[dict[str, Any]]:
+    if bets.empty or "closing_line_value" not in bets.columns:
+        return []
+    frame = bets.copy()
+    frame["closing_line_value"] = pd.to_numeric(
+        frame["closing_line_value"],
+        errors="coerce",
+    )
+    frame = frame[frame["closing_line_value"].notna()].copy()
+    if frame.empty:
+        return []
+    if "edge" in frame.columns:
+        frame["edge_bucket"] = frame["edge"].apply(_edge_bucket)
+    else:
+        frame["edge_bucket"] = "missing"
+    if {"start_time_utc", "predicted_at"} <= set(frame.columns):
+        frame["start_time_utc"] = pd.to_datetime(frame["start_time_utc"], utc=True, errors="coerce")
+        frame["predicted_at"] = pd.to_datetime(frame["predicted_at"], utc=True, errors="coerce")
+        frame["hours_before_start"] = (
+            frame["start_time_utc"] - frame["predicted_at"]
+        ).dt.total_seconds() / 3600.0
+    frame["hours_bucket"] = frame.get(
+        "hours_before_start",
+        pd.Series(np.nan, index=frame.index),
+    ).apply(_hours_bucket)
+    if "book" not in frame.columns:
+        frame["book"] = "unknown"
+
+    rows: list[dict[str, Any]] = []
+    group_columns = [
+        "market",
+        "league",
+        "model_type",
+        "side",
+        "edge_bucket",
+        "book",
+        "hours_bucket",
+    ]
+    for keys, group in frame.groupby(group_columns, dropna=False):
+        record = dict(zip(group_columns, keys))
+        clv = closing_line_value_summary(group)
+        record.update(clv)
+        record["bets"] = int(len(group))
+        rows.append(record)
+    return rows
+
+
+def build_candidate_rule_rankings(rule_results: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates = [
+        row for row in rule_results if row.get("status") in {"candidate", "locked_candidate"}
+    ]
+
+    def _brier_delta(row: dict[str, Any]) -> float:
+        brier = row.get("brier_score")
+        market_brier = row.get("market_brier_score")
+        if brier is None or market_brier is None:
+            return -999.0
+        return float(market_brier) - float(brier)
+
+    candidates.sort(
+        key=lambda row: (
+            bool(row.get("passes_launch_gate")),
+            bool(row.get("model_beats_market_brier")),
+            _brier_delta(row),
+            row.get("bootstrap_roi_low") if row.get("bootstrap_roi_low") is not None else -999.0,
+            (
+                row.get("avg_closing_line_value")
+                if row.get("avg_closing_line_value") is not None
+                else -999.0
+            ),
+            (
+                row.get("closing_line_value_win_rate")
+                if row.get("closing_line_value_win_rate") is not None
+                else -999.0
+            ),
+            row.get("roi") if row.get("roi") is not None else -999.0,
+            -(row.get("max_drawdown") or 999999.0),
+            row.get("bets") or 0,
+        ),
+        reverse=True,
+    )
+    rankings: list[dict[str, Any]] = []
+    for rank, row in enumerate(candidates, start=1):
+        rankings.append(
+            {
+                "rank": rank,
+                "rule_id": row.get("rule_id"),
+                "market": row.get("rule", {}).get("market"),
+                "league": row.get("rule", {}).get("league"),
+                "model_type": row.get("rule", {}).get("model_type"),
+                "prediction_variant": row.get("rule", {}).get("prediction_variant"),
+                "price_mode": row.get("rule", {}).get("price_mode"),
+                "timing_bucket": row.get("rule", {}).get("timing_bucket"),
+                "feature_variant": row.get("rule", {}).get("feature_variant"),
+                "side": row.get("rule", {}).get("side"),
+                "min_edge": row.get("rule", {}).get("min_edge"),
+                "status": row.get("status"),
+                "bets": row.get("bets"),
+                "roi": row.get("roi"),
+                "bootstrap_roi_low": row.get("bootstrap_roi_low"),
+                "brier_score": row.get("brier_score"),
+                "market_brier_score": row.get("market_brier_score"),
+                "brier_delta_vs_market": _brier_delta(row),
+                "model_beats_market_brier": row.get("model_beats_market_brier"),
+                "avg_closing_line_value": row.get("avg_closing_line_value"),
+                "closing_line_value_win_rate": row.get("closing_line_value_win_rate"),
+                "passes_launch_gate": row.get("passes_launch_gate"),
+                "launch_gate_failures": row.get("launch_gate_failures", []),
+            }
+        )
+    return rankings
+
+
+def build_feature_contract_coverage(
+    db_path: Path = DB_PATH,
+    leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
+) -> list[dict[str, Any]]:
+    from src.models.train_betting import load_training_frame
+
+    rows: list[dict[str, Any]] = []
+    for market in ("totals", "moneyline"):
+        try:
+            frame, contract = load_training_frame(market, db_path=db_path, leagues=leagues)
+        except Exception as exc:  # noqa: BLE001
+            rows.append(
+                {
+                    "market": market,
+                    "rows": 0,
+                    "feature_count": 0,
+                    "error": str(exc),
+                }
+            )
+            continue
+        record: dict[str, Any] = {
+            "market": market,
+            "rows": int(len(frame)),
+            "feature_count": int(len(contract.feature_columns)),
+            "target_column": contract.target_column,
+            "market_probability_column": contract.market_probability_column,
+        }
+        for label, markers in {
+            "soccer": ("soccer_",),
+            "nba_advanced": ("nba_", "rolling_off_rating", "rolling_def_rating", "rolling_pace"),
+            "availability": ("injuries_",),
+            "rest": ("rest_days", "back_to_back", "rest_diff"),
+            "market": ("no_vig_prob", "market_hold", "moneyline", "line_movement"),
+        }.items():
+            feature_columns = [
+                column
+                for column in contract.feature_columns
+                if any(marker in column for marker in markers)
+            ]
+            present = [column for column in feature_columns if column in frame.columns]
+            record[f"{label}_feature_count"] = int(len(feature_columns))
+            if frame.empty or not present:
+                record[f"{label}_non_null_pct"] = 0.0
+            else:
+                record[f"{label}_non_null_pct"] = round(
+                    float(frame[present].notna().to_numpy().mean() * 100.0),
+                    2,
+                )
+        rows.append(record)
+    return rows
+
+
 def load_rules(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"launch_gate": {}, "approved_rules": [], "candidate_rules": []}
+        return {
+            "launch_gate": {},
+            "approved_rules": [],
+            "candidate_rules": [],
+            "locked_candidate_rules": [],
+        }
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     data.setdefault("approved_rules", [])
     data.setdefault("candidate_rules", [])
+    data.setdefault("locked_candidate_rules", [])
     return data
 
 
 def configured_rules(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return approved and candidate rules with section-derived default statuses."""
+    """Return approved, locked, and candidate rules with section-derived default statuses."""
     approved = [
         {**rule, "status": rule.get("status", "approved")}
         for rule in config.get("approved_rules", []) or []
+    ]
+    locked = [
+        {**rule, "status": rule.get("status", "locked_candidate")}
+        for rule in config.get("locked_candidate_rules", []) or []
     ]
     candidates = [
         {**rule, "status": rule.get("status", "candidate")}
         for rule in config.get("candidate_rules", []) or []
     ]
-    return [*approved, *candidates]
+    return [*approved, *locked, *candidates]
 
 
 def build_quality_report(
@@ -798,9 +1162,11 @@ def build_quality_report(
     totals_bets = expand_totals_bets(totals_input)
     moneyline_bets = expand_moneyline_bets(moneyline_input)
     all_bets = pd.concat([totals_bets, moneyline_bets], ignore_index=True)
+    feature_contract_coverage = build_feature_contract_coverage(db_path=db_path, leagues=leagues)
 
     rules = configured_rules(rules_config)
     rule_results = [evaluate_rule(all_bets, rule, gate) for rule in rules]
+    candidate_rule_rankings = build_candidate_rule_rankings(rule_results)
     approved_rule_results = [
         result
         for result in rule_results
@@ -839,6 +1205,7 @@ def build_quality_report(
             source_id=artifact_path.stem,
         )
         source_rule_results = [evaluate_rule(benchmark_bets, rule, gate) for rule in rules]
+        source_candidate_rankings = build_candidate_rule_rankings(source_rule_results)
         source_passing_approved = [
             str(result["rule_id"])
             for result in source_rule_results
@@ -855,6 +1222,8 @@ def build_quality_report(
                 "expanded_bets": int(len(benchmark_bets)),
             },
             "rule_results": source_rule_results,
+            "candidate_rule_rankings": source_candidate_rankings,
+            "clv_summary": build_clv_summary(benchmark_bets),
             "passing_approved_rule_ids": source_passing_approved,
             "publishable_profitable_list_exists": bool(source_passing_approved),
         }
@@ -906,6 +1275,9 @@ def build_quality_report(
         "passing_approved_rule_ids": passing_approved_rule_ids,
         "publishable_profitable_list_exists": bool(passing_approved_rule_ids),
         "grouped_quality": grouped_rows,
+        "clv_summary": build_clv_summary(all_bets),
+        "feature_contract_coverage": feature_contract_coverage,
+        "candidate_rule_rankings": candidate_rule_rankings,
         "totals_error_summary": totals_error_summary,
     }
 

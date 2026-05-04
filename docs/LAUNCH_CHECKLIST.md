@@ -80,8 +80,15 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       ```
       docker compose exec worker crontab -l -u app
       ```
-      shows four lines (predict, train, backup_local, backup_remote).
+      shows five lines (predict, train, benchmark, backup_local, backup_remote).
 - [ ] `docker compose logs --since=15m worker` contains no `ERROR` lines.
+- [ ] Paid-picks publish gate is fail-closed:
+      ```
+      docker compose exec -u app worker python -m src.predict.publishable_bets \
+        --allow-empty
+      ```
+      exits `0` when no approved rule passes and does not leave a stale paid
+      list behind.
 
 ## 7. End-to-end validation
 
@@ -93,6 +100,12 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       docker compose exec -u app worker /app/scripts/pipeline.sh --skip-training
       ```
       and confirm the dashboard shows the new timestamp.
+- [ ] Force the daily benchmark gate:
+      ```
+      docker compose exec -u app worker /app/scripts/run_job.sh benchmark
+      ```
+      and confirm `reports/betting_benchmarks/` receives a ranked report or the
+      job fails because data quality is still blocking benchmark promotion.
 
 ## 8. Observability & on-call
 

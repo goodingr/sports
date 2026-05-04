@@ -44,13 +44,26 @@ NBA_ROLLING_SOURCE_COLUMNS = tuple(
     for metric in ("win_pct", "point_diff", "off_rating", "def_rating", "net_rating", "pace")
 )
 
-INJURY_SOURCE_COLUMNS = (
+RAW_INJURY_SOURCE_COLUMNS = (
     "injuries_out",
     "injuries_doubtful",
     "injuries_questionable",
     "injuries_total",
     "injuries_skill_out",
 )
+PLAYER_IMPACT_METRICS = (
+    "minutes",
+    "points",
+    "rebounds",
+    "assists",
+    "plus_minus",
+)
+INJURY_IMPACT_SOURCE_COLUMNS = tuple(
+    f"injuries_{status}_{metric}_l10"
+    for status in ("out", "doubtful", "questionable", "impact")
+    for metric in PLAYER_IMPACT_METRICS
+)
+INJURY_SOURCE_COLUMNS = (*RAW_INJURY_SOURCE_COLUMNS, *INJURY_IMPACT_SOURCE_COLUMNS)
 
 SOCCER_WAREHOUSE_ALIAS_COLUMNS = {
     "warehouse_goals_for_l5": "score_for_l5",
@@ -260,6 +273,14 @@ MODEL_FEATURE_CONTRACTS = {
     "moneyline": MONEYLINE_SIDE_FEATURE_CONTRACT_COLUMNS,
 }
 
+TOTAL_CLOSE_LINEAGE_COLUMNS = {
+    "total_close_snapshot_id": "TEXT",
+    "total_close_snapshot_time_utc": "TEXT",
+    "total_close_book_id": "INTEGER",
+    "total_close_book": "TEXT",
+    "total_close_source": "TEXT",
+}
+
 
 def get_model_feature_contract(market: str) -> tuple[str, ...]:
     """Return the stable feature columns expected for a canonical model input."""
@@ -326,6 +347,13 @@ def _table_exists(db_path: Path, table_name: str) -> bool:
     return row is not None
 
 
+def _table_column_names(db_path: Path, table_name: str) -> set[str]:
+    if not _table_exists(db_path, table_name):
+        return set()
+    with sqlite3.connect(str(db_path)) as conn:
+        return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+
+
 def _ensure_columns(
     df: pd.DataFrame, columns: Iterable[str], default: Any = np.nan
 ) -> pd.DataFrame:
@@ -337,6 +365,18 @@ def _ensure_columns(
             axis=1,
         )
     return updated
+
+
+def _ensure_total_close_lineage_columns(db_path: Path) -> None:
+    """Apply the lightweight close-line provenance migration for read paths."""
+    if not _table_exists(db_path, "game_results"):
+        return
+    with sqlite3.connect(str(db_path)) as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(game_results)").fetchall()}
+        for column, ddl in TOTAL_CLOSE_LINEAGE_COLUMNS.items():
+            if column in existing:
+                continue
+            conn.execute(f"ALTER TABLE game_results ADD COLUMN {column} {ddl}")
 
 
 def _latest_source_parquet(league: str, source_subdir: str, filename: str) -> pd.DataFrame:
@@ -394,17 +434,57 @@ def _latest_per_game(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _attach_line_dispersion(latest_by_book: pd.DataFrame, selected: pd.DataFrame) -> pd.DataFrame:
-    if latest_by_book.empty or selected.empty:
+def _latest_books_as_of(
+    pregame_pairs: pd.DataFrame,
+    *,
+    game_id: Any,
+    as_of: Any,
+) -> pd.DataFrame:
+    if pregame_pairs.empty or pd.isna(as_of):
+        return pregame_pairs.iloc[0:0].copy()
+    group = pregame_pairs[
+        (pregame_pairs["game_id"] == game_id) & (pregame_pairs["snapshot_time_utc"] <= as_of)
+    ].copy()
+    if group.empty:
+        return group
+    return (
+        group.sort_values(
+            ["snapshot_time_utc", "book_rank", "book"],
+            ascending=[True, True, True],
+        )
+        .drop_duplicates(["game_id", "book"], keep="last")
+        .copy()
+    )
+
+
+def _attach_line_dispersion(pregame_pairs: pd.DataFrame, selected: pd.DataFrame) -> pd.DataFrame:
+    if pregame_pairs.empty or selected.empty:
         selected["book_line_count"] = 0
         selected["line_std"] = np.nan
         return selected
-    dispersion = (
-        latest_by_book.groupby("game_id")
-        .agg(book_line_count=("line", "count"), line_std=("line", "std"))
-        .reset_index()
-    )
-    return selected.merge(dispersion, on="game_id", how="left")
+    rows = []
+    for _, row in selected.iterrows():
+        latest_as_of = _latest_books_as_of(
+            pregame_pairs,
+            game_id=row["game_id"],
+            as_of=row["snapshot_time_utc"],
+        )
+        rows.append(
+            {
+                "_selected_index": row.name,
+                "book_line_count": int(latest_as_of["line"].notna().sum()),
+                "line_std": (
+                    float(latest_as_of["line"].std())
+                    if latest_as_of["line"].notna().sum() > 1
+                    else np.nan
+                ),
+            }
+        )
+    dispersion = pd.DataFrame(rows).set_index("_selected_index")
+    updated = selected.copy()
+    updated["book_line_count"] = dispersion["book_line_count"]
+    updated["line_std"] = dispersion["line_std"]
+    return updated
 
 
 def _load_team_result_history(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.DataFrame:
@@ -580,27 +660,23 @@ def _attach_team_history_features(
     return selected.merge(pd.DataFrame(feature_rows), on="game_id", how="left")
 
 
-def _attach_best_totals_prices(
-    latest_by_book: pd.DataFrame, selected: pd.DataFrame
-) -> pd.DataFrame:
-    if latest_by_book.empty or selected.empty:
+def _attach_best_totals_prices(pregame_pairs: pd.DataFrame, selected: pd.DataFrame) -> pd.DataFrame:
+    if pregame_pairs.empty or selected.empty:
         return selected
-    selected_lines = (
-        selected[["game_id", "line"]]
-        .drop_duplicates("game_id")
-        .rename(columns={"line": "selected_line"})
-    )
-    scoped = latest_by_book.merge(selected_lines, on="game_id", how="inner")
-    scoped = scoped[np.isclose(scoped["line"], scoped["selected_line"], equal_nan=False)].copy()
-    if scoped.empty:
-        scoped = latest_by_book.copy()
-
     rows = []
-    for game_id, group in scoped.groupby("game_id"):
-        row: dict[str, Any] = {"game_id": game_id}
+    for _, selected_row in selected.iterrows():
+        group = _latest_books_as_of(
+            pregame_pairs,
+            game_id=selected_row["game_id"],
+            as_of=selected_row["snapshot_time_utc"],
+        )
+        scoped = group[np.isclose(group["line"], selected_row["line"], equal_nan=False)].copy()
+        if scoped.empty:
+            scoped = group
+        row: dict[str, Any] = {"_selected_index": selected_row.name}
         for side in ("over", "under"):
             price_col = f"{side}_moneyline"
-            priced = group.dropna(subset=[price_col])
+            priced = scoped.dropna(subset=[price_col])
             if priced.empty:
                 row[f"best_{side}_moneyline"] = np.nan
                 row[f"best_{side}_book"] = None
@@ -611,17 +687,78 @@ def _attach_best_totals_prices(
             row[f"best_{side}_moneyline"] = best[price_col]
             row[f"best_{side}_book"] = best["book"]
         rows.append(row)
-    return selected.merge(pd.DataFrame(rows), on="game_id", how="left")
+    best_prices = pd.DataFrame(rows).set_index("_selected_index")
+    updated = selected.copy()
+    for column in [
+        "best_over_moneyline",
+        "best_over_book",
+        "best_under_moneyline",
+        "best_under_book",
+    ]:
+        updated[column] = best_prices[column]
+    return updated
+
+
+def _attach_totals_close_lines_by_book(
+    latest_by_book: pd.DataFrame,
+    selected: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach latest pregame close lines for selected and best-price books."""
+    if latest_by_book.empty or selected.empty:
+        return selected
+    close_columns = [
+        "game_id",
+        "book",
+        "book_id",
+        "line",
+        "snapshot_id",
+        "snapshot_time_utc",
+    ]
+    close_by_book = latest_by_book[close_columns].drop_duplicates(["game_id", "book"]).copy()
+
+    selected_close = close_by_book.rename(
+        columns={
+            "book": "selected_book_close_book",
+            "book_id": "selected_book_close_book_id",
+            "line": "selected_book_total_close",
+            "snapshot_id": "selected_book_close_snapshot_id",
+            "snapshot_time_utc": "selected_book_close_snapshot_time_utc",
+        }
+    )
+    updated = selected.merge(
+        selected_close,
+        left_on=["game_id", "book"],
+        right_on=["game_id", "selected_book_close_book"],
+        how="left",
+    )
+
+    for side in ("over", "under"):
+        best_close = close_by_book.rename(
+            columns={
+                "book": f"best_{side}_book",
+                "book_id": f"best_{side}_book_close_book_id",
+                "line": f"best_{side}_book_total_close",
+                "snapshot_id": f"best_{side}_book_close_snapshot_id",
+                "snapshot_time_utc": f"best_{side}_book_close_snapshot_time_utc",
+            }
+        )
+        updated = updated.merge(best_close, on=["game_id", f"best_{side}_book"], how="left")
+    return updated
 
 
 def _attach_best_moneyline_prices(
-    latest_by_book: pd.DataFrame, selected: pd.DataFrame
+    pregame_pairs: pd.DataFrame, selected: pd.DataFrame
 ) -> pd.DataFrame:
-    if latest_by_book.empty or selected.empty:
+    if pregame_pairs.empty or selected.empty:
         return selected
     rows = []
-    for game_id, group in latest_by_book.groupby("game_id"):
-        row: dict[str, Any] = {"game_id": game_id}
+    for _, selected_row in selected.iterrows():
+        group = _latest_books_as_of(
+            pregame_pairs,
+            game_id=selected_row["game_id"],
+            as_of=selected_row["snapshot_time_utc"],
+        )
+        row: dict[str, Any] = {"_selected_index": selected_row.name}
         for side in ("home", "away"):
             price_col = f"{side}_moneyline"
             priced = group.dropna(subset=[price_col])
@@ -635,7 +772,16 @@ def _attach_best_moneyline_prices(
             row[f"best_{side}_moneyline"] = best[price_col]
             row[f"best_{side}_book"] = best["book"]
         rows.append(row)
-    return selected.merge(pd.DataFrame(rows), on="game_id", how="left")
+    best_prices = pd.DataFrame(rows).set_index("_selected_index")
+    updated = selected.copy()
+    for column in [
+        "best_home_moneyline",
+        "best_home_book",
+        "best_away_moneyline",
+        "best_away_book",
+    ]:
+        updated[column] = best_prices[column]
+    return updated
 
 
 def _attach_prefixed_team_features(
@@ -864,6 +1010,8 @@ def _status_category(status: Any, practice_status: Any = None) -> str:
 def _load_injury_reports(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.DataFrame:
     if not _table_exists(db_path, "injury_reports"):
         return pd.DataFrame()
+    columns = _table_column_names(db_path, "injury_reports")
+    player_id_expr = "player_id" if "player_id" in columns else "NULL AS player_id"
     league_sql, params = _league_filter(leagues)
     league_sql = league_sql.replace("s.league", "league")
     query = f"""
@@ -872,6 +1020,7 @@ def _load_injury_reports(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.
             team_id,
             UPPER(team_code) AS team_code,
             player_name,
+            {player_id_expr},
             position,
             status,
             practice_status,
@@ -887,12 +1036,91 @@ def _load_injury_reports(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.
     reports["report_date"] = pd.to_datetime(reports["report_date"], utc=True, errors="coerce")
     reports["game_date"] = pd.to_datetime(reports["game_date"], utc=True, errors="coerce")
     reports["team_id"] = pd.to_numeric(reports["team_id"], errors="coerce")
+    reports["player_id"] = reports["player_id"].fillna("").astype(str).str.strip()
     reports["status_category"] = reports.apply(
         lambda row: _status_category(row.get("status"), row.get("practice_status")),
         axis=1,
     )
     reports["position"] = reports["position"].fillna("").astype(str).str.upper()
     return reports.dropna(subset=["report_date"])
+
+
+def _load_player_stat_history(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.DataFrame:
+    if not (
+        _table_exists(db_path, "player_stats")
+        and _table_exists(db_path, "games")
+        and _table_exists(db_path, "sports")
+    ):
+        return pd.DataFrame()
+    league_sql, params = _league_filter(leagues)
+    query = f"""
+        SELECT
+            UPPER(s.league) AS league,
+            g.start_time_utc,
+            ps.team_id,
+            CAST(ps.player_id AS TEXT) AS player_id,
+            ps.player_name,
+            ps.min AS minutes,
+            ps.pts AS points,
+            ps.reb AS rebounds,
+            ps.ast AS assists,
+            ps.plus_minus
+        FROM player_stats ps
+        JOIN games g ON ps.game_id = g.game_id
+        JOIN sports s ON g.sport_id = s.sport_id
+        WHERE g.start_time_utc IS NOT NULL
+          {league_sql}
+    """
+    stats = _read_sql(db_path, query, params)
+    if stats.empty:
+        return stats
+    stats["start_time_utc"] = pd.to_datetime(
+        stats["start_time_utc"],
+        utc=True,
+        errors="coerce",
+        format="mixed",
+    )
+    stats["team_id"] = pd.to_numeric(stats["team_id"], errors="coerce")
+    stats["player_id"] = stats["player_id"].fillna("").astype(str).str.strip()
+    stats["player_name"] = stats["player_name"].fillna("").astype(str).str.lower().str.strip()
+    for column in PLAYER_IMPACT_METRICS:
+        stats[column] = pd.to_numeric(stats[column], errors="coerce")
+    return stats.dropna(subset=["start_time_utc"])
+
+
+def _recent_player_stat_averages(
+    player_stats: pd.DataFrame,
+    *,
+    league: str,
+    team_id: Any,
+    player_id: Any,
+    player_name: Any,
+    start_time: pd.Timestamp,
+) -> dict[str, float]:
+    if player_stats.empty or pd.isna(start_time):
+        return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
+    scoped = player_stats[player_stats["league"] == str(league).upper()].copy()
+    if pd.notna(team_id):
+        scoped = scoped[scoped["team_id"] == float(team_id)]
+    clean_player_id = str(player_id or "").strip()
+    clean_player_name = str(player_name or "").lower().strip()
+    if clean_player_id:
+        scoped = scoped[scoped["player_id"] == clean_player_id]
+    elif clean_player_name:
+        scoped = scoped[scoped["player_name"] == clean_player_name]
+    else:
+        return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
+    scoped = scoped[scoped["start_time_utc"] < start_time].sort_values("start_time_utc").tail(10)
+    if scoped.empty:
+        return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
+    return {
+        metric: (
+            float(scoped[metric].mean())
+            if metric in scoped.columns and scoped[metric].notna().any()
+            else np.nan
+        )
+        for metric in PLAYER_IMPACT_METRICS
+    }
 
 
 def _summarize_team_injuries(
@@ -902,6 +1130,7 @@ def _summarize_team_injuries(
     team_id: Any,
     team_code: Any,
     start_time: pd.Timestamp,
+    player_stats: pd.DataFrame,
 ) -> dict[str, float]:
     empty = {column: np.nan for column in INJURY_SOURCE_COLUMNS}
     if reports.empty or pd.isna(start_time):
@@ -934,13 +1163,38 @@ def _summarize_team_injuries(
     )
     severe = latest["status_category"].isin(["out", "doubtful"])
     skill_positions = {"G", "F", "C", "G-F", "F-G", "F-C", "C-F", "G-C"}
-    return {
+    summary = {
         "injuries_out": float((latest["status_category"] == "out").sum()),
         "injuries_doubtful": float((latest["status_category"] == "doubtful").sum()),
         "injuries_questionable": float((latest["status_category"] == "questionable").sum()),
         "injuries_total": float((latest["status_category"] != "other").sum()),
         "injuries_skill_out": float((severe & latest["position"].isin(skill_positions)).sum()),
     }
+    if player_stats.empty:
+        summary.update({column: np.nan for column in INJURY_IMPACT_SOURCE_COLUMNS})
+        return summary
+
+    impact_totals = {column: 0.0 for column in INJURY_IMPACT_SOURCE_COLUMNS}
+    weights = {"out": 1.0, "doubtful": 0.75, "questionable": 0.35}
+    for injury in latest.itertuples(index=False):
+        status = getattr(injury, "status_category", "other")
+        if status not in weights:
+            continue
+        averages = _recent_player_stat_averages(
+            player_stats,
+            league=league,
+            team_id=team_id,
+            player_id=getattr(injury, "player_id", None),
+            player_name=getattr(injury, "player_name", None),
+            start_time=start_time,
+        )
+        for metric, value in averages.items():
+            if pd.isna(value):
+                continue
+            impact_totals[f"injuries_{status}_{metric}_l10"] += float(value)
+            impact_totals[f"injuries_impact_{metric}_l10"] += float(value) * weights[status]
+    summary.update(impact_totals)
+    return summary
 
 
 def _attach_injury_features(
@@ -956,6 +1210,7 @@ def _attach_injury_features(
     reports = _load_injury_reports(db_path, leagues)
     if reports.empty:
         return _ensure_columns(selected, output_columns)
+    player_stats = _load_player_stat_history(db_path, leagues)
 
     rows: list[dict[str, Any]] = []
     game_rows = selected[
@@ -978,6 +1233,7 @@ def _attach_injury_features(
                 team_id=getattr(row, f"{side}_team_id"),
                 team_code=getattr(row, f"{side}_team_code"),
                 start_time=row.start_time_utc,
+                player_stats=player_stats,
             )
             record.update({f"{side}_{key}": value for key, value in summary.items()})
         rows.append(record)
@@ -1120,6 +1376,7 @@ def build_totals_model_input(
     latest_only: bool = True,
 ) -> pd.DataFrame:
     """Build leakage-safe over/under model input from odds snapshots and results."""
+    _ensure_total_close_lineage_columns(db_path)
     league_sql, params = _league_filter(leagues)
     query = f"""
         SELECT
@@ -1141,7 +1398,12 @@ def build_totals_model_input(
             MAX(CASE WHEN LOWER(o.outcome) = 'under' THEN o.price_american END) AS under_moneyline,
             gr.home_score,
             gr.away_score,
-            gr.total_close
+            gr.total_close,
+            gr.total_close_snapshot_id,
+            gr.total_close_snapshot_time_utc,
+            gr.total_close_book_id,
+            gr.total_close_book,
+            gr.total_close_source
         FROM odds o
         JOIN odds_snapshots os ON o.snapshot_id = os.snapshot_id
         JOIN games g ON o.game_id = g.game_id
@@ -1160,7 +1422,9 @@ def build_totals_model_input(
             g.game_id, s.league, g.start_time_utc, os.snapshot_id,
             g.home_team_id, g.away_team_id, ht.code, at.code, ht.name, at.name,
             os.fetched_at_utc, b.name, o.book_id, o.line,
-            gr.home_score, gr.away_score, gr.total_close
+            gr.home_score, gr.away_score, gr.total_close,
+            gr.total_close_snapshot_id, gr.total_close_snapshot_time_utc,
+            gr.total_close_book_id, gr.total_close_book, gr.total_close_source
         HAVING over_moneyline IS NOT NULL AND under_moneyline IS NOT NULL
     """
     df = _read_sql(db_path, query, params)
@@ -1216,8 +1480,9 @@ def build_totals_model_input(
         df.sort_values("snapshot_time_utc").drop_duplicates(["game_id", "book"], keep="last").copy()
     )
     selected = _latest_per_game(df) if latest_only else df.copy()
-    selected = _attach_line_dispersion(latest_by_book, selected)
-    selected = _attach_best_totals_prices(latest_by_book, selected)
+    selected = _attach_line_dispersion(df, selected)
+    selected = _attach_best_totals_prices(df, selected)
+    selected = _attach_totals_close_lines_by_book(latest_by_book, selected)
     selected = _attach_team_history_features(selected, db_path, leagues)
     selected = _attach_nba_advanced_features(selected, db_path)
     selected = _attach_injury_features(selected, db_path, leagues)
@@ -1264,7 +1529,9 @@ def build_moneyline_model_input(
             ht.name AS home_team,
             at.name AS away_team,
             gr.home_score,
-            gr.away_score
+            gr.away_score,
+            gr.home_moneyline_close,
+            gr.away_moneyline_close
         FROM odds o
         JOIN odds_snapshots os ON o.snapshot_id = os.snapshot_id
         JOIN games g ON o.game_id = g.game_id
@@ -1323,6 +1590,10 @@ def build_moneyline_model_input(
         .reset_index()
         .rename(columns={"home": "home_moneyline", "away": "away_moneyline"})
     )
+    closes = raw[["game_id", "home_moneyline_close", "away_moneyline_close"]].drop_duplicates(
+        "game_id"
+    )
+    paired = paired.merge(closes, on="game_id", how="left")
     paired = paired.dropna(subset=["home_moneyline", "away_moneyline"])
     paired = _add_market_common_features(paired)
     no_vig = paired.apply(
@@ -1360,13 +1631,8 @@ def build_moneyline_model_input(
     paired["home_moneyline_movement"] = paired["home_moneyline"] - paired["opening_home_moneyline"]
     paired["away_moneyline_movement"] = paired["away_moneyline"] - paired["opening_away_moneyline"]
 
-    latest_by_book = (
-        paired.sort_values("snapshot_time_utc")
-        .drop_duplicates(["game_id", "book"], keep="last")
-        .copy()
-    )
     selected = _latest_per_game(paired) if latest_only else paired.copy()
-    selected = _attach_best_moneyline_prices(latest_by_book, selected)
+    selected = _attach_best_moneyline_prices(paired, selected)
     selected = _attach_team_history_features(selected, db_path, leagues)
     selected = _attach_nba_advanced_features(selected, db_path)
     selected = _attach_injury_features(selected, db_path, leagues)
@@ -1419,6 +1685,7 @@ def build_moneyline_side_model_input(
                 "opponent_moneyline": row[f"{opponent_prefix}_moneyline"],
                 "best_moneyline": row.get(f"best_{team_prefix}_moneyline"),
                 "best_book": row.get(f"best_{team_prefix}_book"),
+                "close_moneyline": row.get(f"{team_prefix}_moneyline_close"),
                 "no_vig_prob": row[f"{team_prefix}_no_vig_prob"],
                 "opponent_no_vig_prob": row[f"{opponent_prefix}_no_vig_prob"],
                 "market_hold": row["market_hold"],

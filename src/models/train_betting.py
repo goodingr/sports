@@ -18,6 +18,7 @@ from typing import Any, Iterable, Optional
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -30,14 +31,17 @@ try:  # pragma: no cover - optional runtime dependency
 except ImportError:  # pragma: no cover
     XGBClassifier = None  # type: ignore[assignment]
 
+from src.data.availability_quality import warn_if_low_availability_coverage
 from src.db.core import DB_PATH
 from src.features.betting_model_input import (
     DEFAULT_RELEASE_LEAGUES,
     build_moneyline_side_model_input,
     build_totals_model_input,
+    get_model_feature_contract,
 )
 from src.models.prediction_quality import (
     american_profit,
+    american_to_decimal,
     expected_value,
     settle_total_side,
     summarize_bets,
@@ -55,6 +59,12 @@ FORBIDDEN_FEATURE_COLUMNS = {
     "target_home_win",
     "is_push",
     "total_close",
+    "home_moneyline_close",
+    "away_moneyline_close",
+    "close_moneyline",
+    "selected_book_total_close",
+    "best_over_book_total_close",
+    "best_under_book_total_close",
 }
 
 TOTALS_FEATURE_COLUMNS = [
@@ -137,6 +147,21 @@ NON_FEATURE_COLUMNS = {
     "best_over_book",
     "best_under_book",
     "opening_snapshot_time_utc",
+    "total_close_snapshot_id",
+    "total_close_snapshot_time_utc",
+    "total_close_book_id",
+    "total_close_book",
+    "total_close_source",
+    "selected_book_close_book",
+    "selected_book_close_book_id",
+    "selected_book_close_snapshot_id",
+    "selected_book_close_snapshot_time_utc",
+    "best_over_book_close_book_id",
+    "best_over_book_close_snapshot_id",
+    "best_over_book_close_snapshot_time_utc",
+    "best_under_book_close_book_id",
+    "best_under_book_close_snapshot_id",
+    "best_under_book_close_snapshot_time_utc",
 }
 
 OPTIONAL_AGENT_FEATURE_PREFIXES = {
@@ -205,13 +230,43 @@ class BettingTrainingArtifacts:
     predictions_path: Path
 
 
+class FoldSafeFeaturePruner(BaseEstimator, TransformerMixin):
+    """Drop features that are entirely missing within the current training fold."""
+
+    def fit(self, X: Any, y: Any = None) -> "FoldSafeFeaturePruner":
+        frame = self._frame(X)
+        self.input_columns_ = list(frame.columns)
+        self.keep_columns_ = [
+            column for column in self.input_columns_ if not frame[column].isna().all()
+        ]
+        self.use_fallback_ = not self.keep_columns_
+        return self
+
+    def transform(self, X: Any) -> pd.DataFrame:
+        frame = self._frame(X)
+        if self.use_fallback_:
+            return pd.DataFrame(
+                {"__fold_safe_feature_pruner_fallback": np.zeros(len(frame), dtype=float)},
+                index=frame.index,
+            )
+        return frame.loc[:, self.keep_columns_]
+
+    @staticmethod
+    def _frame(X: Any) -> pd.DataFrame:
+        if isinstance(X, pd.DataFrame):
+            return X.apply(pd.to_numeric, errors="coerce")
+        return pd.DataFrame(X).apply(pd.to_numeric, errors="coerce")
+
+
 def _contract_for_market(market: str, df: pd.DataFrame) -> FeatureContract:
     market_key = market.lower()
     if market_key == "totals":
-        columns = _available_feature_columns(df, TOTALS_FEATURE_COLUMNS, market_key)
+        declared = [*TOTALS_FEATURE_COLUMNS, *get_model_feature_contract("totals")]
+        columns = _available_feature_columns(df, declared, market_key)
         return FeatureContract("totals", "target_over", columns, "over_no_vig_prob")
     if market_key == "moneyline":
-        columns = _available_feature_columns(df, MONEYLINE_FEATURE_COLUMNS, market_key)
+        declared = [*MONEYLINE_FEATURE_COLUMNS, *get_model_feature_contract("moneyline")]
+        columns = _available_feature_columns(df, declared, market_key)
         return FeatureContract("moneyline", "target_win", columns, "no_vig_prob")
     raise ValueError("market must be one of: totals, moneyline")
 
@@ -221,7 +276,16 @@ def _available_feature_columns(
     declared_columns: Iterable[str],
     market: str,
 ) -> list[str]:
-    columns = [column for column in declared_columns if column in df.columns]
+    columns = []
+    for column in dict.fromkeys(declared_columns):
+        if (
+            column in df.columns
+            and column not in NON_FEATURE_COLUMNS
+            and column not in FORBIDDEN_FEATURE_COLUMNS
+        ):
+            numeric = pd.to_numeric(df[column], errors="coerce")
+            if numeric.notna().any():
+                columns.append(column)
     optional_prefixes = OPTIONAL_AGENT_FEATURE_PREFIXES.get(market, ())
     for column in df.columns:
         if (
@@ -242,15 +306,20 @@ def load_training_frame(
     market: str,
     db_path: Path = DB_PATH,
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
+    latest_only: bool = True,
 ) -> tuple[pd.DataFrame, FeatureContract]:
     """Load a leakage-safe training frame and matching feature contract."""
     if market == "totals":
-        df = build_totals_model_input(db_path=db_path, leagues=leagues, latest_only=True)
+        df = build_totals_model_input(db_path=db_path, leagues=leagues, latest_only=latest_only)
         if df.empty:
             return df, _contract_for_market(market, df)
         df = df[df["target_over"].notna()].copy()
     elif market == "moneyline":
-        df = build_moneyline_side_model_input(db_path=db_path, leagues=leagues, latest_only=True)
+        df = build_moneyline_side_model_input(
+            db_path=db_path,
+            leagues=leagues,
+            latest_only=latest_only,
+        )
         if df.empty:
             return df, _contract_for_market(market, df)
         df = df[df["target_win"].notna()].copy()
@@ -268,6 +337,7 @@ def _build_estimator(model_type: str) -> Pipeline:
     if model_type == "logistic":
         return Pipeline(
             [
+                ("feature_pruner", FoldSafeFeaturePruner()),
                 ("imputer", SimpleImputer(strategy="median")),
                 ("scaler", StandardScaler()),
                 ("clf", LogisticRegression(max_iter=1000)),
@@ -276,6 +346,7 @@ def _build_estimator(model_type: str) -> Pipeline:
     if model_type == "gradient_boosting":
         return Pipeline(
             [
+                ("feature_pruner", FoldSafeFeaturePruner()),
                 ("imputer", SimpleImputer(strategy="median")),
                 (
                     "clf",
@@ -293,6 +364,7 @@ def _build_estimator(model_type: str) -> Pipeline:
     if model_type == "random_forest":
         return Pipeline(
             [
+                ("feature_pruner", FoldSafeFeaturePruner()),
                 ("imputer", SimpleImputer(strategy="median")),
                 (
                     "clf",
@@ -311,6 +383,7 @@ def _build_estimator(model_type: str) -> Pipeline:
             raise ImportError("xgboost is required for model_type='xgboost'")
         return Pipeline(
             [
+                ("feature_pruner", FoldSafeFeaturePruner()),
                 ("imputer", SimpleImputer(strategy="median")),
                 (
                     "clf",
@@ -367,8 +440,7 @@ def _line_movement_probability(
     base = pd.to_numeric(df[market_probability_column], errors="coerce").fillna(0.5).to_numpy()
     if market == "totals" and "line_movement" in df.columns:
         adjustment = (
-            pd.to_numeric(df["line_movement"], errors="coerce").fillna(0.0).to_numpy()
-            * 0.015
+            pd.to_numeric(df["line_movement"], errors="coerce").fillna(0.0).to_numpy() * 0.015
         )
     elif market == "moneyline" and "moneyline_movement" in df.columns:
         adjustment = (
@@ -442,6 +514,14 @@ def _best_or_selected(row: pd.Series, best_column: str, selected_column: str) ->
     return float(row[selected_column])
 
 
+def _moneyline_clv(bet_moneyline: float | int | None, close_moneyline: float | int | None) -> float:
+    bet_decimal = american_to_decimal(bet_moneyline)
+    close_decimal = american_to_decimal(close_moneyline)
+    if bet_decimal is None or close_decimal is None:
+        return np.nan
+    return float(bet_decimal - close_decimal)
+
+
 def _totals_validation_bets(df: pd.DataFrame, edge_threshold: float) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for _, row in df.iterrows():
@@ -461,6 +541,13 @@ def _totals_validation_bets(df: pd.DataFrame, edge_threshold: float) -> pd.DataF
             won = settle_total_side(total, line, side)
             if won is None:
                 continue
+            total_close = row.get("total_close")
+            if pd.notna(total_close):
+                closing_line_value = (
+                    float(total_close) - line if side == "over" else line - float(total_close)
+                )
+            else:
+                closing_line_value = np.nan
             rows.append(
                 {
                     "league": row["league"],
@@ -475,6 +562,7 @@ def _totals_validation_bets(df: pd.DataFrame, edge_threshold: float) -> pd.DataF
                     "profit": american_profit(moneyline, won),
                     "expected_value": expected_value(prob, moneyline),
                     "actual_value": american_profit(moneyline, won),
+                    "closing_line_value": closing_line_value,
                     "predicted_at": row["snapshot_time_utc"],
                     "start_time_utc": row["start_time_utc"],
                 }
@@ -491,6 +579,7 @@ def _moneyline_validation_bets(df: pd.DataFrame, edge_threshold: float) -> pd.Da
         if edge < edge_threshold:
             continue
         moneyline = _best_or_selected(row, "best_moneyline", "moneyline")
+        close_moneyline = row.get("close_moneyline")
         won = bool(row["target_win"])
         rows.append(
             {
@@ -506,6 +595,7 @@ def _moneyline_validation_bets(df: pd.DataFrame, edge_threshold: float) -> pd.Da
                 "profit": american_profit(moneyline, won),
                 "expected_value": expected_value(prob, moneyline),
                 "actual_value": american_profit(moneyline, won),
+                "closing_line_value": _moneyline_clv(moneyline, close_moneyline),
                 "predicted_at": row["snapshot_time_utc"],
                 "start_time_utc": row["start_time_utc"],
             }
@@ -595,6 +685,7 @@ def train_betting_model(
     output_dir: Path = Path("reports/backtests"),
     models_dir: Path = Path("models"),
 ) -> BettingTrainingArtifacts:
+    warn_if_low_availability_coverage(db_path=db_path, leagues=leagues)
     df, contract = load_training_frame(market, db_path=db_path, leagues=leagues)
     if df.empty:
         raise RuntimeError(f"No settled {market} training rows were found")
@@ -700,6 +791,7 @@ def main() -> None:
             output_dir=args.benchmark_output_dir,
         )
         print(f"Ranked benchmark written to {artifacts.report_path}")
+        print(f"Triage report written to {artifacts.triage_report_path}")
         print(f"Best candidate JSON written to {artifacts.best_rule_json_path}")
         print(f"Best candidate YAML written to {artifacts.best_rule_yaml_path}")
         return

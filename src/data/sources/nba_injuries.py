@@ -14,7 +14,6 @@ from src.db.loaders import store_injury_reports
 
 from .utils import DEFAULT_HEADERS, SourceDefinition, source_run, write_json
 
-
 LOGGER = logging.getLogger(__name__)
 
 INJURY_URL = "https://cdn.nba.com/static/json/liveData/injuries/injuries_00.json"
@@ -54,6 +53,7 @@ def _parse_payload(payload: Dict[str, Any]) -> pd.DataFrame:
         "TEAM_ABBREVIATION": "team_code",
         "TEAM_CITY": "team_name",
         "TEAM_NAME": "team_full_name",
+        "PLAYER_ID": "player_id",
         "PLAYER_NAME": "player_name",
         "PLAYER_POSITION": "position",
         "INJURY": "status",
@@ -137,6 +137,7 @@ def ingest(*, timeout: int = 30) -> str:
                     "team_code",
                     "team_name",
                     "player_name",
+                    "player_id",
                     "position",
                     "status",
                     "practice_status",

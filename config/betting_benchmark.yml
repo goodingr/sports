@@ -77,6 +77,12 @@ strict_gate:
   min_bets_multi_league: 300
   min_roi: 0.05
   min_bootstrap_roi_low: 0.0
+  min_avg_clv: 0.0
+  min_clv_win_rate: 0.5
+  # Exclude candidate bets when the latest available odds snapshot is older
+  # than this many hours before game start. Set to null only for diagnostics.
+  max_hours_before_start: 72
+  require_positive_clv: true
   bootstrap_samples: 3000
   random_seed: 42
   require_brier_beats_market: true

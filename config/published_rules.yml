@@ -12,6 +12,10 @@ launch_gate:
   min_bets_multi_league: 300
   min_roi: 0.05
   min_bootstrap_roi_low: 0.0
+  min_avg_clv: 0.0
+  min_clv_win_rate: 0.5
+  max_hours_before_start: 72
+  require_positive_clv: true
   bootstrap_samples: 3000
   random_seed: 42
 

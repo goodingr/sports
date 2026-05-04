@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ExternalLink, Lock } from 'lucide-react';
 import type { OddsRecord } from '@/lib/api';
 
@@ -36,6 +37,9 @@ interface MatchDetailsModalProps {
     oddsData?: OddsRecord[];
 }
 
+const FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input:not([disabled])';
+
 function groupOddsByBook(odds: OddsRecord[]): BookOdds[] {
     const acc: BookOdds[] = [];
     for (const curr of odds) {
@@ -65,11 +69,42 @@ export function MatchDetailsModal({
     predictionInfo,
     oddsData,
 }: MatchDetailsModalProps) {
-    // Close on Escape key
+    const dialogRef = useRef<HTMLDivElement>(null);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+    // Close on Escape; trap Tab focus inside dialog.
     useEffect(() => {
         if (!isOpen) return;
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                onClose();
+                return;
+            }
+            if (e.key !== 'Tab') return;
+            const dialog = dialogRef.current;
+            if (!dialog) return;
+            const focusables = Array.from(
+                dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+            ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+            if (focusables.length === 0) {
+                e.preventDefault();
+                return;
+            }
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey) {
+                if (active === first || !dialog.contains(active)) {
+                    e.preventDefault();
+                    last.focus();
+                }
+            } else {
+                if (active === last || !dialog.contains(active)) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => {
@@ -77,17 +112,53 @@ export function MatchDetailsModal({
         };
     }, [isOpen, onClose]);
 
-    // Lock body scroll while modal is open
+    // Move focus into the dialog on open; restore on close.
+    useEffect(() => {
+        if (!isOpen) return;
+        const previouslyFocused = document.activeElement as HTMLElement | null;
+        // Defer to next tick so the dialog has been laid out before we focus.
+        const id = window.setTimeout(() => {
+            closeButtonRef.current?.focus();
+        }, 0);
+        return () => {
+            window.clearTimeout(id);
+            previouslyFocused?.focus?.();
+        };
+    }, [isOpen]);
+
+    // Lock body scroll while modal is open and mark siblings inert so background
+    // controls cannot be tabbed to or clicked.
     useEffect(() => {
         if (!isOpen) return;
         const original = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
+        const dialog = dialogRef.current;
+        const siblings: Element[] = dialog?.parentElement
+            ? Array.from(dialog.parentElement.children).filter((el) => el !== dialog)
+            : Array.from(document.body.children).filter(
+                  (el) => el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE',
+              );
+        const restore: Array<() => void> = [];
+        for (const el of siblings) {
+            const html = el as HTMLElement;
+            const hadInert = html.hasAttribute('inert');
+            const hadAriaHidden = html.getAttribute('aria-hidden');
+            html.setAttribute('inert', '');
+            html.setAttribute('aria-hidden', 'true');
+            restore.push(() => {
+                if (!hadInert) html.removeAttribute('inert');
+                if (hadAriaHidden === null) html.removeAttribute('aria-hidden');
+                else html.setAttribute('aria-hidden', hadAriaHidden);
+            });
+        }
         return () => {
             document.body.style.overflow = original;
+            for (const fn of restore) fn();
         };
     }, [isOpen]);
 
     if (!isOpen) return null;
+    if (typeof document === 'undefined') return null;
 
     const formattedDate = commenceTime
         ? new Date(commenceTime).toLocaleDateString('en-US', {
@@ -105,8 +176,9 @@ export function MatchDetailsModal({
     const lockedFromServer = predictionInfo?.recommended_bet === 'Premium Only';
     const showLock = isLocked || lockedFromServer;
 
-    return (
+    const dialogNode = (
         <div
+            ref={dialogRef}
             className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
             onClick={onClose}
             role="dialog"
@@ -132,9 +204,11 @@ export function MatchDetailsModal({
                         </h2>
                     </div>
                     <button
+                        ref={closeButtonRef}
+                        type="button"
                         onClick={onClose}
-                        aria-label="Close"
-                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-muted-foreground hover:text-foreground shrink-0"
+                        aria-label="Close match details"
+                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-muted-foreground hover:text-foreground shrink-0 focus:outline-none focus:ring-2 focus:ring-primary/50"
                     >
                         <X className="h-5 w-5" />
                     </button>
@@ -154,7 +228,8 @@ export function MatchDetailsModal({
                             </p>
                             <a
                                 href="/pricing"
-                                className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-8 py-3 rounded-lg transition-all transform hover:scale-105 shadow-lg shadow-primary/25"
+                                data-testid="modal-paywall-cta"
+                                className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-8 py-3 rounded-lg transition-all transform hover:scale-105 shadow-lg shadow-primary/25 focus:outline-none focus:ring-2 focus:ring-primary/50"
                             >
                                 Subscribe to Unlock
                             </a>
@@ -167,6 +242,7 @@ export function MatchDetailsModal({
                             className={`grid grid-cols-2 gap-3 sm:gap-4 mb-6 ${
                                 showLock ? 'opacity-20 pointer-events-none filter blur-sm' : ''
                             }`}
+                            aria-hidden={showLock || undefined}
                         >
                             {/* Result Section (if completed) */}
                             {predictionInfo.status === 'Completed' && (
@@ -284,7 +360,10 @@ export function MatchDetailsModal({
 
                     {/* Odds Section */}
                     {showLock ? (
-                        <div className="grid gap-2 opacity-20 pointer-events-none filter blur-sm select-none">
+                        <div
+                            className="grid gap-2 opacity-20 pointer-events-none filter blur-sm select-none"
+                            aria-hidden="true"
+                        >
                             <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
                                 <div>Sportsbook</div>
                                 <div className="text-center">Line</div>
@@ -371,4 +450,6 @@ export function MatchDetailsModal({
             </div>
         </div>
     );
+
+    return createPortal(dialogNode, document.body);
 }

@@ -61,8 +61,8 @@ python_files = ["test_*.py"]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-mypy_path = "src"
 explicit_package_bases = true
+namespace_packages = true
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

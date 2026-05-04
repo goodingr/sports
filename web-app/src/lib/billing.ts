@@ -185,6 +185,35 @@ export async function applySnapshot(
 }
 
 /**
+ * Look up the Stripe customer id stored on a Clerk user. Returns null when
+ * the user has never run checkout (no customer record exists yet).
+ */
+export async function getStoredCustomerId(userId: string): Promise<string | null> {
+    const clerk = await getClerk();
+    const user = await clerk.users.getUser(userId);
+    const id = (user.publicMetadata as Record<string, unknown> | undefined)?.[
+        "stripe_customer_id"
+    ];
+    return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
+ * Open a Stripe Billing Portal session for a customer so they can manage or
+ * cancel their subscription. Returns the redirect URL.
+ */
+export async function createBillingPortalSession(
+    customerId: string,
+    returnUrl: string,
+): Promise<string> {
+    const stripe = getStripe();
+    const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: returnUrl,
+    });
+    return session.url;
+}
+
+/**
  * Get or create a Stripe customer for a Clerk user. Persists the resulting
  * customer id on Clerk so we always reuse it on subsequent checkouts.
  */

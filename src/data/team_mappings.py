@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import unicodedata
 from pathlib import Path
 from typing import Dict
 
@@ -25,7 +26,12 @@ _ALIAS_TRANSLATION_TABLE = str.maketrans(
 
 
 def _canonicalize_alias(value: str) -> str:
-    cleaned = value.lower().translate(_ALIAS_TRANSLATION_TABLE)
+    ascii_value = (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    cleaned = ascii_value.lower().translate(_ALIAS_TRANSLATION_TABLE)
     return " ".join(cleaned.split())
 
 

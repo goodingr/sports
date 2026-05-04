@@ -30,4 +30,14 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """Liveness probe.
+
+    Intentionally cheap and dependency-free: returns 200 as long as the
+    process is up and serving HTTP. Kubernetes/k8s-style orchestrators use
+    this to decide whether to restart the container.
+
+    For a deploy / staging gate that should wait until the API can serve
+    real traffic, hit `/ready` instead — that endpoint validates the DB,
+    schema, freshness, and model artefacts.
+    """
     return {"status": "healthy"}

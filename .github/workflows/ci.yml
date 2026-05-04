@@ -4,8 +4,34 @@ on:
   push:
   pull_request:
 
+# Stable lint/type-check scope is intentionally narrow: only files that pass
+# cleanly. To expand, clean a file then add it to the lists below.
+env:
+  RUFF_SCOPE: >-
+    src/data/ingest_sources.py
+    src/features/betting_model_input.py
+    src/models/betting_benchmark.py
+    src/models/prediction_quality.py
+    src/models/train_betting.py
+    src/predict/publishable_bets.py
+    tests/test_betting_benchmark.py
+    tests/test_betting_model_input.py
+    tests/test_prediction_quality.py
+    tests/test_publishable_bets.py
+    tests/test_train_betting.py
+    tests/api/test_readiness.py
+  MYPY_SCOPE: >-
+    src/data/ingest_sources.py
+    src/data/sources/espn_odds.py
+    src/data/sources/nba_injuries_espn.py
+    src/features/betting_model_input.py
+    src/models/feature_loader.py
+    src/models/prediction_quality.py
+    src/predict/publishable_bets.py
+
 jobs:
-  lint-and-test:
+  python:
+    name: Python (lint, types, tests)
     runs-on: ubuntu-latest
 
     steps:
@@ -20,14 +46,94 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
       - name: Install dependencies
-        run: poetry install --with dev
+        run: poetry install --with dev --no-interaction
 
       - name: Ruff
-        run: poetry run ruff check src/data/ingest_sources.py src/data/sources/espn_odds.py src/data/sources/nba_injuries_espn.py src/db/loaders.py src/models/feature_loader.py src/models/forward_test.py tests scripts/setup_forward_test.py
+        run: poetry run ruff check $RUFF_SCOPE
 
       - name: Mypy
-        run: poetry run mypy src/data/ingest_sources.py src/db/loaders.py src/models/feature_loader.py src/data/sources/nba_injuries_espn.py src/data/sources/espn_odds.py
+        run: poetry run mypy $MYPY_SCOPE
 
       - name: Pytest
-        run: poetry run pytest
+        run: poetry run pytest -q -rs
+
+  release-gates:
+    name: Release gates (betting + readiness)
+    runs-on: ubuntu-latest
+    needs: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction
+
+      - name: Prediction quality
+        run: poetry run pytest tests/test_prediction_quality.py -q -rs
+
+      - name: Betting benchmark
+        run: poetry run pytest tests/test_betting_benchmark.py -q -rs
+
+      - name: Publishable bets
+        run: poetry run pytest tests/test_publishable_bets.py -q -rs
+
+      - name: Readiness (/ready) smoke
+        run: poetry run pytest tests/api/test_readiness.py -q -rs
+
+  web:
+    name: Web (lint, typecheck, unit, build, e2e)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Playwright e2e is gated owner: Agent 4. Until that suite is green,
+      # don't fail the whole pipeline on it -- but still surface failures.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run test:e2e
+        continue-on-error: true

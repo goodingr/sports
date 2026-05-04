@@ -49,12 +49,19 @@ services:
       - sports_logs:/app/logs
     expose:
       - "8000"
+    # Compose only supports a single healthcheck and that healthcheck is what
+    # gates dependent services via `depends_on: condition: service_healthy`.
+    # We use /ready (not /health) here so the proxy and web only start
+    # forwarding once the DB is reachable, the schema matches, and there are
+    # at least *some* model artefacts present. /health is still served for
+    # external orchestrators that want a cheap liveness probe — see
+    # src/api/main.py.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/ready"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 20s
+      start_period: 60s
     networks:
       - sports
 
@@ -80,12 +87,19 @@ services:
     user: "0:0"
     entrypoint: ["/usr/bin/tini", "--"]
     command: ["/app/scripts/worker_entrypoint.sh"]
+    # Worker health asks two questions:
+    #   1. Is cron itself alive? (pid 1)
+    #   2. Has any tracked job logged a failure heartbeat that's newer than
+    #      its success heartbeat? Cron-being-up alone is not enough — a
+    #      silently-failing pipeline still keeps cron running.
+    # See scripts/worker_health.sh for the full checks.
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "cron"]
-      interval: 30s
-      timeout: 5s
+      test: ["CMD", "/app/scripts/worker_health.sh"]
+      interval: 60s
+      timeout: 10s
       retries: 3
-      start_period: 10s
+      # Allow a generous grace period for the first cron tick on cold start.
+      start_period: 120s
     networks:
       - sports
 
