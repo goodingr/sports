@@ -196,6 +196,24 @@ docker compose exec -u app worker python -m src.models.train \
   --league NFL --model-type ensemble
 ```
 
+### NBA paper capture on Windows
+
+After the normal 6:04 p.m. Eastern pipeline and its 30-minute grace period,
+check the trial's odds receipt and capture record from the repository root.
+
+```powershell
+poetry run python -m scripts.paper_capture_health
+```
+
+The check reads the local archive and ledger. It treats a completed evaluation
+with all quotes below the threshold as healthy. An empty or unverified slate,
+a missing odds receipt, and a missing or failed capture need separate triage.
+Exit `2` indicates an empty slate that the archive cannot verify independently.
+Exit `1` indicates missing, invalid, or incomplete evidence.
+The supplemental Task Scheduler jobs can both succeed on the same day without
+collecting anything, so their exit codes cannot confirm the daily capture.
+Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
+
 ### Stale games / scores
 ```bash
 # List games that should have a final score but don't.

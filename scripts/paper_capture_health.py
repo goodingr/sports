@@ -1,0 +1,245 @@
+"""Check the daily NBA paper capture using the local warehouse and raw receipts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+from contextlib import closing
+from dataclasses import dataclass
+from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
+
+from src.data.config import RAW_DATA_DIR
+from src.db.core import resolve_db_path
+from src.predict.paper_coverage import _FULLY_EVALUATED
+from src.predict.paper_ledger import DEFAULT_RULES, PaperTrial, load_trial
+from src.predict.paper_settlement import _utc_timestamp
+
+_EASTERN = ZoneInfo("America/New_York")
+_EXPECTED_TIME = time(18, 4)
+_GRACE_MINUTES = 30
+_NBA_RAW_DIR = RAW_DATA_DIR / "odds" / "basketball_nba"
+
+
+@dataclass(frozen=True)
+class _Receipt:
+    path: Path
+    fetched_at: datetime
+    status: str
+    eligible_events: frozenset[str] = frozenset()
+
+
+def _latest_elapsed_tick(
+    now: datetime, registered: datetime, review: datetime, clock: time, grace: timedelta
+) -> datetime | None:
+    elapsed = min(now.astimezone(timezone.utc) - grace, review - timedelta(microseconds=1))
+    day = elapsed.astimezone(_EASTERN).date()
+    tick = datetime.combine(day, clock, _EASTERN).astimezone(timezone.utc)
+    if tick > elapsed:
+        tick = datetime.combine(day - timedelta(days=1), clock, _EASTERN).astimezone(timezone.utc)
+    return tick if tick >= registered else None
+
+
+def _is_daily_nba_request(payload: dict, trial: PaperTrial) -> bool:
+    request = payload.get("request")
+    if not isinstance(request, dict) or not isinstance(request.get("url"), str):
+        return False
+    try:
+        url = urlparse(request["url"])
+        host = url.hostname
+    except ValueError:
+        return False
+    params = request.get("params")
+    return (
+        isinstance(params, dict)
+        and url.scheme == "https"
+        and host == "api.the-odds-api.com"
+        and url.path.rstrip("/") == "/v4/sports/basketball_nba/odds"
+        and payload.get("source", trial.odds_source) == trial.odds_source
+        and set(str(params.get("markets", "")).split(",")) == {"h2h", "totals"}
+        and "us" in str(params.get("regions", "")).split(",")
+        and params.get("oddsFormat") == "american"
+        and not params.get("eventIds")
+        and not params.get("bookmakers")
+    )
+
+
+def _read_receipt(
+    raw_dir: Path, trial: PaperTrial, start: datetime, end: datetime
+) -> _Receipt | None:
+    daily = []
+    invalid = []
+    minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
+    maximum_lead = timedelta(hours=trial.max_hours_before_start)
+    # Daily receipts live at this level. Supplemental archives are in subdirectories.
+    for path in raw_dir.glob("odds_*.json"):
+        try:
+            named_at = datetime.strptime(path.name[5:25], "%Y-%m-%dT%H-%M-%SZ").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            continue
+        if not start.date() <= named_at.date() <= end.date():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            payload = None
+        fetched = _utc_timestamp(payload.get("fetched_at")) if isinstance(payload, dict) else None
+        if fetched is None:
+            if start <= named_at <= end:
+                invalid.append(_Receipt(path, named_at, "receipt_invalid"))
+            continue
+        if not start <= fetched <= end:
+            continue
+        if not _is_daily_nba_request(payload, trial):
+            invalid.append(_Receipt(path, fetched, "receipt_invalid"))
+            continue
+        if payload.get("error"):
+            daily.append(_Receipt(path, fetched, "receipt_error"))
+            continue
+        events = payload.get("results")
+        if not isinstance(events, list):
+            daily.append(_Receipt(path, fetched, "receipt_invalid"))
+            continue
+        all_events = set()
+        eligible = set()
+        for event in events:
+            if not isinstance(event, dict):
+                break
+            event_id = event.get("id")
+            tip = _utc_timestamp(event.get("commence_time"))
+            if (
+                not isinstance(event_id, str) or not event_id or event_id in all_events
+                or event.get("sport_key") != "basketball_nba" or tip is None
+            ):
+                break
+            all_events.add(event_id)
+            if minimum_lead <= tip - fetched <= maximum_lead:
+                eligible.add(event_id)
+        else:
+            daily.append(_Receipt(path, fetched, "valid", frozenset(eligible)))
+            continue
+        daily.append(_Receipt(path, fetched, "receipt_invalid"))
+    return max(daily or invalid, key=lambda item: (item.fetched_at, item.path.name), default=None)
+
+
+def assess_capture_health(
+    conn: sqlite3.Connection,
+    trial: PaperTrial,
+    raw_dir: Path,
+    now: datetime,
+    *,
+    expected_time: time = _EXPECTED_TIME,
+    grace_minutes: int = _GRACE_MINUTES,
+) -> dict[str, Any]:
+    """Return the status of the latest daily tick whose grace period elapsed."""
+    if now.utcoffset() is None or grace_minutes <= 0 or expected_time.tzinfo is not None:
+        raise ValueError("Use an aware observation time, a local daily clock, and positive grace")
+    base: dict[str, Any] = {"trial_id": trial.trial_id}
+    registered_row = conn.execute(
+        "SELECT registered_at, specification FROM paper_trials WHERE trial_id = ?", (trial.trial_id,)
+    ).fetchone()
+    if registered_row is None:
+        return {**base, "status": "trial_unregistered"}
+    registered = _utc_timestamp(registered_row["registered_at"])
+    review = _utc_timestamp(trial.review_at)
+    if registered is None or review is None or registered_row["specification"] != trial.specification:
+        return {**base, "status": "trial_mismatch"}
+    grace = timedelta(minutes=grace_minutes)
+    tick = _latest_elapsed_tick(now, registered, review, expected_time, grace)
+    if tick is None:
+        return {**base, "status": "waiting"}
+    end = min(tick + grace, review - timedelta(microseconds=1))
+    base.update(expected_at=tick.isoformat(), window_ends_at=end.isoformat())
+    receipt = _read_receipt(raw_dir, trial, tick, end)
+    if receipt is None:
+        return {**base, "status": "receipt_missing"}
+    base.update(receipt_at=receipt.fetched_at.isoformat(), receipt_file=receipt.path.name)
+    if receipt.status != "valid":
+        return {**base, "status": receipt.status}
+
+    runs = []
+    for row in conn.execute(
+        "SELECT run_id, observed_at, status FROM paper_capture_runs WHERE trial_id = ?",
+        (trial.trial_id,),
+    ):
+        observed = _utc_timestamp(row["observed_at"])
+        if observed is not None and receipt.fetched_at <= observed <= end:
+            runs.append((observed, row["run_id"], row["status"]))
+    if not runs:
+        return {**base, "status": "capture_missing"}
+    captured, run_id, status = max(runs)
+    base.update(capture_at=captured.isoformat(), eligible_fixtures=len(receipt.eligible_events))
+    if status == "failed":
+        return {**base, "status": "capture_failed"}
+    if not receipt.eligible_events:
+        return {**base, "status": "empty_slate_unverified"}
+
+    evaluated = {}
+    for row in conn.execute(
+        """
+        SELECT g.odds_api_id, o.outcome, s.source, s.fetched_at_utc, s.raw_path
+        FROM paper_fixture_observations o
+        JOIN games g ON g.game_id = o.game_id
+        JOIN sports sport ON sport.sport_id = g.sport_id AND sport.league = ?
+        LEFT JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id AND s.sport_id = g.sport_id
+        WHERE o.run_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM games other
+              WHERE other.sport_id = g.sport_id AND other.odds_api_id = g.odds_api_id
+                AND other.game_id <> g.game_id
+          )
+        """,
+        (trial.league, run_id),
+    ):
+        if (
+            row["odds_api_id"] in receipt.eligible_events
+            and row["outcome"] in _FULLY_EVALUATED
+            and row["source"] == trial.odds_source
+            and _utc_timestamp(row["fetched_at_utc"]) == receipt.fetched_at
+            and isinstance(row["raw_path"], str)
+            and row["raw_path"].replace("\\", "/").rsplit("/", 1)[-1] == receipt.path.name
+        ):
+            evaluated[row["odds_api_id"]] = row["outcome"]
+    base.update(
+        evaluated_fixtures=len(evaluated),
+        below_edge_fixtures=sum(outcome == "below_edge_threshold" for outcome in evaluated.values()),
+    )
+    healthy = status == "evaluated" and evaluated.keys() == receipt.eligible_events
+    return {**base, "status": "healthy" if healthy else "capture_incomplete"}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path)
+    parser.add_argument("--raw-dir", type=Path, default=_NBA_RAW_DIR)
+    parser.add_argument("--rules", type=Path, default=DEFAULT_RULES)
+    parser.add_argument("--expected-time", type=time.fromisoformat, default=_EXPECTED_TIME)
+    parser.add_argument("--grace-minutes", type=int, default=_GRACE_MINUTES)
+    parser.add_argument("--as-of", type=_utc_timestamp, default=datetime.now(timezone.utc))
+    args = parser.parse_args()
+    if args.as_of is None or args.grace_minutes <= 0 or args.expected_time.tzinfo is not None:
+        parser.error("Use an aware --as-of, a local --expected-time and positive --grace-minutes")
+    db_path = resolve_db_path(args.db).resolve()
+    try:
+        with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            result = assess_capture_health(
+                conn, load_trial(args.rules), args.raw_dir, args.as_of,
+                expected_time=args.expected_time, grace_minutes=args.grace_minutes,
+            )
+    except sqlite3.Error:
+        result = {"status": "warehouse_unavailable"}
+    print(json.dumps(result))
+    exit_code = {"healthy": 0, "waiting": 0, "empty_slate_unverified": 2}.get(result["status"], 1)
+    raise SystemExit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
