@@ -240,6 +240,7 @@ def _close_for_decision(
         ),
     )
     latest = None
+    ambiguous = False
     for row in candidates:
         fetched = _utc_timestamp(row["fetched_at_utc"])
         if fetched is None or not (captured_at < fetched < start and fetched >= window_start):
@@ -260,9 +261,12 @@ def _close_for_decision(
         ):
             continue
         candidate = (fetched, row["snapshot_id"], row["line"], row[f"{decision['side']}_price"])
-        if latest is None or candidate[:2] > latest[:2]:
+        if latest is None or fetched > latest[0]:
             latest = candidate
-    if latest is None:
+            ambiguous = False
+        elif fetched == latest[0]:
+            ambiguous = True
+    if latest is None or ambiguous:
         return None
     fetched, snapshot_id, close_line, close_price = latest
     clv = (

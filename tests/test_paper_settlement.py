@@ -142,6 +142,34 @@ def test_grades_original_price_and_keeps_latest_verified_close(ledger):
     assert unreconciled_grades(ledger, "pilot", START + timedelta(days=2)) == 0
 
 
+def test_exact_latest_close_conflict_has_no_clv_until_unambiguous_quote(ledger):
+    _decision(ledger, "game")
+    _quote(ledger, "game", "older", timedelta(minutes=-20))
+    tied_offset = timedelta(minutes=-10)
+    _quote(ledger, "game", "a-conflict", tied_offset, lines=(218.5, 218.5))
+    _quote(ledger, "game", "z-conflict", tied_offset, lines=(222.5, 222.5))
+    tied_clock = (START + tied_offset).astimezone(timezone(timedelta(hours=-5)))
+    ledger.execute(
+        "UPDATE odds_snapshots SET fetched_at_utc = ? WHERE snapshot_id = 'z-conflict'",
+        (tied_clock.isoformat(),),
+    )
+
+    observed = START + timedelta(hours=3)
+    assert settle_open_trials(ledger, observed) == 1
+    grade = ledger.execute("SELECT * FROM paper_settlements").fetchone()
+    assert grade["outcome"] == "win"
+    assert grade["close_snapshot_id"] is None
+    assert grade["clv_points"] is None
+
+    _quote(
+        ledger, "game", "0-later", tied_offset + timedelta(microseconds=1), lines=(223.5, 223.5)
+    )
+    assert settle_open_trials(ledger, observed + timedelta(hours=1)) == 1
+    grade = ledger.execute("SELECT * FROM paper_settlements").fetchone()
+    assert grade["close_snapshot_id"] == "0-later"
+    assert grade["clv_points"] == 3.0
+
+
 def test_never_uses_a_close_after_its_own_provider_tipoff(ledger):
     _decision(ledger, "game")
     provider_start = START - timedelta(minutes=1)

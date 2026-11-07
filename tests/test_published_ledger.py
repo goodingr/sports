@@ -114,6 +114,53 @@ def test_publication_rejects_older_quote_even_when_sqlite_clocks_tie(
         assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == int(issue_latest)
 
 
+@pytest.mark.parametrize("issue_before_conflict", [False, True])
+def test_exact_latest_clock_conflict_blocks_issuance_and_live_visibility(
+    warehouse, issue_before_conflict
+):
+    path, start = warehouse
+    payload = release(start)
+    fetched = start - timedelta(hours=2, minutes=1)
+    if issue_before_conflict:
+        assert publish_at_evaluation(payload, path)["bet_count"] == 1
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('a-conflict', ?, 1, 'the-odds-api', NULL)",
+            (fetched.astimezone(timezone(timedelta(hours=-5))).isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            SELECT 'a-conflict', game_id, book_id, market, outcome, -115, 225.5
+            FROM odds WHERE snapshot_id = 'quote'
+            """
+        )
+
+    if issue_before_conflict:
+        assert load_active_release(path)["bet_count"] == 0
+    assert publish_at_evaluation(payload, path)["bet_count"] == 0
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == int(
+            issue_before_conflict
+        )
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('0-later', ?, 1, 'the-odds-api', NULL)",
+            ((fetched + timedelta(microseconds=1)).isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            SELECT '0-later', game_id, book_id, market, outcome, price_american, line
+            FROM odds WHERE snapshot_id = 'quote'
+            """
+        )
+
+    payload["bets"][0]["quote_snapshot_id"] = "0-later"
+    assert publish_at_evaluation(payload, path)["bet_count"] == 1
+    assert load_active_release(path)["bets"][0]["quote_snapshot_id"] == "0-later"
+
+
 @pytest.mark.parametrize(("provider_lead", "issued"), [(12, False), (15, True), (31, False), (None, False)])
 def test_paper_approved_pick_uses_provider_tipoff_at_publication_and_live_read(
     warehouse, monkeypatch, provider_lead, issued

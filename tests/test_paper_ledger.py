@@ -443,6 +443,7 @@ def test_capture_rejects_stale_superseded_and_future_predictions(warehouse):
     [
         ("utc", True, "recorded"),
         ("offset", True, "recorded"),
+        ("exact_tie", True, "quote_not_current_at_trial_book"),
         ("utc", False, "quote_not_current_at_trial_book"),
         ("naive", False, "quote_not_current_at_trial_book"),
         ("naive", True, "invalid_time"),
@@ -457,6 +458,8 @@ def test_paper_quote_order_preserves_submillisecond_and_legacy_clocks(
     newer = base + timedelta(microseconds=200)
     if clock == "offset":
         newer = newer.astimezone(timezone(timedelta(hours=-5)))
+    elif clock == "exact_tie":
+        newer = older.astimezone(timezone(timedelta(hours=-5)))
     elif clock == "naive":
         newer = newer.replace(tzinfo=None)
     with connect(db) as conn:

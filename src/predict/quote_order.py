@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 def latest_market_snapshot_id(
     conn: sqlite3.Connection, *, game_id: str, sport_id: int, source: str, market: str
 ) -> str | None:
-    """Find the newest market observation, including incomplete quote pairs."""
+    """Find a unique newest market observation, including incomplete quote pairs."""
     snapshots = conn.execute(
         """
         SELECT DISTINCT s.snapshot_id, s.fetched_at_utc
@@ -16,7 +16,8 @@ def latest_market_snapshot_id(
         """,
         (game_id, sport_id, source, market),
     )
-    latest = None
+    latest_stamp = None
+    latest_snapshot_id = None
     for snapshot_id, fetched_at in snapshots:
         if not isinstance(fetched_at, str):
             continue
@@ -31,7 +32,8 @@ def latest_market_snapshot_id(
             )
         except (OverflowError, ValueError):
             continue
-        candidate = stamp, snapshot_id
-        if latest is None or candidate > latest:
-            latest = candidate
-    return latest[1] if latest is not None else None
+        if latest_stamp is None or stamp > latest_stamp:
+            latest_stamp, latest_snapshot_id = stamp, snapshot_id
+        elif stamp == latest_stamp:
+            latest_snapshot_id = None
+    return latest_snapshot_id
