@@ -41,8 +41,12 @@ Evidence:
 Subsequent frozen NHL moneyline and soccer totals market-offset experiments also
 failed to establish a profitable edge; their evidence is in
 `reports/research/nhl_market_offset/result.json` and
-`reports/research/soccer_poisson_offset/result.json`. These findings do not support
-a profitability claim. The NBA prospective trial is collecting evidence and its
+`reports/research/soccer_poisson_offset/result.json`. The college basketball
+moneyline consensus holdout produced one win across 32 decisions. That +5000
+payout accounted for its entire gain. Its date-clustered ROI interval included
+losses, its Brier score was worse than DraftKings, and it had zero qualifying
+closing quotes. See `reports/research/ncaab_moneyline_consensus/result.json`.
+The NBA prospective trial is collecting evidence and its
 scheduled final review is April 19, 2027 at midnight Eastern time.
 
 ## Blocked Claims
