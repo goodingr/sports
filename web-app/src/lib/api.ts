@@ -61,6 +61,7 @@ export interface PublishedPick {
     away_team: string;
     start_time_utc: string;
     published_at: string;
+    settled_at?: string;
     market: string;
     side: string;
     moneyline: number;
@@ -115,6 +116,7 @@ export interface RawBet {
     home_team: string;
     away_team: string;
     market?: string;
+    quote_expires_at?: string;
     bet_type?: string;
     side?: string;
     prediction?: string;
@@ -143,6 +145,7 @@ export interface Bet {
     home_team: string;
     away_team: string;
     market?: string;
+    quote_expires_at?: string;
     bet_type: string;
     prediction: string;
     odds: number;
@@ -182,6 +185,7 @@ export function normalizeBet(bet: RawBet): Bet {
         home_team: bet.home_team,
         away_team: bet.away_team,
         market: bet.market ?? (moneylineTeam ? 'moneyline' : undefined),
+        quote_expires_at: bet.quote_expires_at,
         bet_type: side,
         prediction: bet.description || bet.prediction || recommendation || '',
         odds: Number(bet.moneyline ?? bet.odds ?? 0),
@@ -200,4 +204,20 @@ export function normalizeBet(bet: RawBet): Bet {
         recommended_bet: recommendation,
         odds_data: bet.odds_data,
     };
+}
+
+export function normalizeUpcomingBets(bets: RawBet[], receivedAt = Date.now()): Bet[] {
+    const upcoming: Bet[] = [];
+    for (const raw of bets) {
+        const bet = normalizeBet(raw);
+        const start = Date.parse(bet.commence_time);
+        const quoteExpiry = bet.quote_expires_at === undefined
+            ? receivedAt + 60_000
+            : Date.parse(bet.quote_expires_at);
+        const expiresAt = Math.min(start, quoteExpiry);
+        if (Number.isFinite(expiresAt) && expiresAt > receivedAt) {
+            upcoming.push({ ...bet, quote_expires_at: new Date(expiresAt).toISOString() });
+        }
+    }
+    return upcoming;
 }

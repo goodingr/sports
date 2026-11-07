@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { fetchAPI, normalizeBet, type Bet, type PaginatedBetsResponse, type UpcomingBetsResponse } from '@/lib/api';
+import { useState, useEffect, useRef } from 'react';
+import { fetchAPI, normalizeBet, normalizeUpcomingBets, type Bet, type PaginatedBetsResponse, type UpcomingBetsResponse } from '@/lib/api';
 import { BetCard } from './BetCard';
 import { Lock, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
@@ -44,35 +44,81 @@ export function BetFeed() {
     const { user, isLoaded } = useUser();
     const { getToken } = useAuth();
     const [apiPremium, setApiPremium] = useState<boolean | null>(null);
+    const loadMoreController = useRef<AbortController | null>(null);
 
     const hasPremium = hasPremiumAccess(user?.publicMetadata);
     const isPremium = apiPremium ?? hasPremium;
 
     useEffect(() => {
         let cancelled = false;
+        let upcomingInFlight = false;
+        const lifecycle = new AbortController();
+
+        function acceptUpcoming(data: UpcomingBetsResponse) {
+            setUpcoming(normalizeUpcomingBets(data.data ?? []));
+            setApiPremium(data.is_premium ?? null);
+        }
+
+        async function refreshUpcoming() {
+            if (cancelled || upcomingInFlight || document.visibilityState !== 'visible') return;
+            upcomingInFlight = true;
+            try {
+                const token = await getToken();
+                if (cancelled) return;
+                const data = await fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', {
+                    headers: buildAuthHeaders(token),
+                    cache: 'no-store',
+                    signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(10_000)]),
+                });
+                if (!cancelled) {
+                    acceptUpcoming(data);
+                    setError(null);
+                    setPartialError((previous) => previous?.startsWith('Upcoming picks') ? null : previous);
+                }
+            } catch {
+                if (!cancelled) {
+                    setUpcoming([]);
+                    setApiPremium(null);
+                    setPartialError('Upcoming picks are temporarily unavailable. Model results are available under Past.');
+                }
+            } finally {
+                upcomingInFlight = false;
+            }
+        }
+
+        function refreshVisible() {
+            if (document.visibilityState !== 'visible') return;
+            setUpcoming((current) => current.filter((bet) => Date.parse(bet.quote_expires_at ?? '') > Date.now()));
+            void refreshUpcoming();
+        }
+
         async function loadBets() {
+            upcomingInFlight = true;
             setError(null);
             setPartialError(null);
             setPage(1);
             setLoadMoreError(null);
+            setLoadingMore(false);
             setLoading(true);
             try {
                 const token = await getToken();
+                if (cancelled) return;
                 const headers = buildAuthHeaders(token);
+                const signal = AbortSignal.any([lifecycle.signal, AbortSignal.timeout(10_000)]);
 
                 const [upcomingResult, historyResult] = await Promise.allSettled([
-                    fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', { headers, cache: 'no-store' }),
+                    fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', { headers, cache: 'no-store', signal }),
                     fetchAPI<PaginatedBetsResponse>('/api/bets/history?limit=30&page=1', {
                         headers,
                         cache: 'no-store',
+                        signal,
                     }),
                 ]);
 
                 if (cancelled) return;
 
                 if (upcomingResult.status === 'fulfilled') {
-                    setUpcoming((upcomingResult.value.data ?? []).map(normalizeBet));
-                    setApiPremium(upcomingResult.value.is_premium ?? null);
+                    acceptUpcoming(upcomingResult.value);
                 } else {
                     setUpcoming([]);
                     setApiPremium(null);
@@ -108,40 +154,62 @@ export function BetFeed() {
                     setError("We couldn't load picks right now. Please try again in a moment.");
                 }
             } finally {
+                upcomingInFlight = false;
                 if (!cancelled) setLoading(false);
             }
         }
 
-        if (isLoaded) {
-            loadBets();
-        }
+        if (!isLoaded) return;
+        void loadBets();
+        const refreshInterval = window.setInterval(refreshUpcoming, 60_000);
+        window.addEventListener('focus', refreshVisible);
+        document.addEventListener('visibilitychange', refreshVisible);
         return () => {
             cancelled = true;
+            lifecycle.abort();
+            loadMoreController.current?.abort();
+            window.clearInterval(refreshInterval);
+            window.removeEventListener('focus', refreshVisible);
+            document.removeEventListener('visibilitychange', refreshVisible);
         };
     }, [isLoaded, getToken, reloadKey, user?.id, hasPremium]);
+
+    useEffect(() => {
+        if (upcoming.length === 0) return;
+        const nextExpiry = Math.min(...upcoming.map((bet) => Date.parse(bet.quote_expires_at ?? '')));
+        const expiryTimer = window.setTimeout(() => {
+            setUpcoming((current) => current.filter((bet) => Date.parse(bet.quote_expires_at ?? '') > Date.now()));
+        }, Math.max(0, nextExpiry - Date.now()));
+        return () => window.clearTimeout(expiryTimer);
+    }, [upcoming]);
 
     const handleLoadMore = async () => {
         if (loadingMore) return;
         setLoadingMore(true);
         setLoadMoreError(null);
+        const controller = new AbortController();
+        loadMoreController.current = controller;
         try {
             const token = await getToken();
+            if (controller.signal.aborted) return;
             const headers = buildAuthHeaders(token);
 
             const nextPage = page + 1;
             const data = await fetchAPI<PaginatedBetsResponse>(
                 `/api/bets/history?limit=30&page=${nextPage}`,
-                { headers, cache: 'no-store' }
+                { headers, cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) }
             );
 
+            if (controller.signal.aborted) return;
             setHistory((prev) => [...prev, ...(data.data ?? []).map(normalizeBet)]);
             setPage(nextPage);
             if (data.total) setTotalHistory(data.total);
         } catch (err) {
+            if (controller.signal.aborted) return;
             console.error('Failed to load more history:', err);
             setLoadMoreError("We couldn't load more results. Please try again.");
         } finally {
-            setLoadingMore(false);
+            if (!controller.signal.aborted) setLoadingMore(false);
         }
     };
 

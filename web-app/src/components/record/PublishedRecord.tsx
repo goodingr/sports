@@ -118,11 +118,17 @@ export function PublishedRecord() {
                                             <dt className="inline font-medium">Started </dt>
                                             <dd className="inline"><time dateTime={pick.start_time_utc}>{formatTimestamp(pick.start_time_utc)}</time></dd>
                                         </div>
+                                        {pick.settled_at && (
+                                            <div>
+                                                <dt className="inline font-medium">Graded </dt>
+                                                <dd className="inline"><time dateTime={pick.settled_at}>{formatTimestamp(pick.settled_at)}</time></dd>
+                                            </div>
+                                        )}
                                         <div>
                                             <dt className="inline font-medium">Book </dt>
                                             <dd className="inline">{pick.book}</dd>
                                         </div>
-                                        {pick.away_score != null && pick.home_score != null && (
+                                        {pick.outcome !== 'void' && pick.away_score != null && pick.home_score != null && (
                                             <div>
                                                 <dt className="inline font-medium">Final score </dt>
                                                 <dd className="inline">{pick.away_score} – {pick.home_score} (away – home)</dd>
