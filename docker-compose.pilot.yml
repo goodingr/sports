@@ -9,7 +9,7 @@ services:
         NEXT_PUBLIC_APP_URL: "https://${PILOT_DOMAIN:?Set PILOT_DOMAIN}"
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?Set a Clerk publishable key}
         COMMERCIAL_PILOT_ONLY: "true"
-        COMMERCIAL_PILOT_CONTACT_EMAIL: ${PILOT_CONTACT_EMAIL:?Set a working pilot contact email}
+        COMMERCIAL_PILOT_CONTACT_EMAIL: "${PILOT_CONTACT_EMAIL:-}"
     image: sports-betting/interest-pilot:local
     restart: unless-stopped
     environment:
@@ -17,7 +17,7 @@ services:
       COMMERCIAL_PILOT_MODE: "${COMMERCIAL_PILOT_MODE:-live}"
       COMMERCIAL_INTEREST_ENABLED: "true"
       COMMERCIAL_INTEREST_ENROLLMENT_CLOSED: "${COMMERCIAL_INTEREST_ENROLLMENT_CLOSED:-false}"
-      COMMERCIAL_PILOT_CONTACT_EMAIL: ${PILOT_CONTACT_EMAIL:?Set a working pilot contact email}
+      COMMERCIAL_PILOT_CONTACT_EMAIL: "${PILOT_CONTACT_EMAIL:-}"
       NEXT_PUBLIC_APP_URL: "https://${PILOT_DOMAIN:?Set PILOT_DOMAIN}"
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?Set a Clerk publishable key}
       NEXT_PUBLIC_CLERK_SIGN_IN_URL: /login
@@ -25,6 +25,7 @@ services:
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?Set the matching Clerk secret key}
     expose:
       - "3000"
+    # Keep serving withdrawals when launch readiness fails for a missing contact.
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/interest', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s

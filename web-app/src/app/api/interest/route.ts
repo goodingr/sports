@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { isInterestEnrollmentClosed } from "@/lib/interest-enrollment";
 import { interestConfigurationUnavailable, isInterestConfigurationReady } from "@/lib/pilot";
 
 const OFFER_VERSION = "premium-29-usd-monthly-v1";
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
     if ((action === "contact" || (action === "join" && consent !== undefined)) && typeof consent !== "boolean") {
         return new NextResponse("Invalid email consent", { status: 400 });
     }
-    const enrollmentClosed = process.env.COMMERCIAL_INTEREST_ENROLLMENT_CLOSED === "true";
+    const enrollmentClosed = isInterestEnrollmentClosed();
     if (enrollmentClosed && (action === "join" || (action === "contact" && consent === true))) {
         return NextResponse.json({ code: "enrollment_closed" }, {
             status: 409,

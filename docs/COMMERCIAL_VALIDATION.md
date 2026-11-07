@@ -90,7 +90,16 @@ If the hosted process binds to loopback behind a TLS proxy, use
 Next.js to send an internal Clerk rewrite over TLS to its own HTTP port.
 [Next.js loopback rewrite issue](https://github.com/vercel/next.js/issues/94745)
 
-Production interest requests default to `COMMERCIAL_PILOT_MODE=live`. They require an explicit non-loopback HTTPS origin such as `https://pilot.example.com`, a `pk_live_` publishable key with a valid Clerk hostname encoding, and an `sk_live_` secret key. The pilot returns 503 when these checks fail. Compose requires an exact HTTP 200 from the signed-out `/interest` page to check that the web app is up. A passing check leaves the credential pairing and authenticated writes unverified.
+Production interest requests default to `COMMERCIAL_PILOT_MODE=live`. They require an explicit non-loopback HTTPS origin such as `https://pilot.example.com`, a `pk_live_` publishable key with a valid Clerk hostname encoding, and an `sk_live_` secret key. The pilot returns 503 when these checks fail.
+
+Before recruiting, require HTTP 200 from `GET /api/pilot/ready` on the final
+domain. It checks the pilot configuration and that the contact address can
+appear on the privacy and terms pages. Verify that the inbox receives mail
+and complete the signed-in checks below. If the contact setting is missing
+or malformed, readiness returns 503 and enrollment closes. Existing
+participants can still sign in and withdraw price interest or email consent.
+Compose uses the signed-out `/interest` page as its liveness check so those
+withdrawals remain available after a restart.
 
 Before recruiting, use a dedicated operator-controlled account in the production Clerk instance intended for the paid app. Keep this account out of the screened roster and exclude it from reports.
 
@@ -117,9 +126,9 @@ the offline production smoke. It builds the app for a reserved HTTPS origin
 and sends loopback requests with the proxy headers. The app verifies a signed
 synthetic session and reads and writes a local Clerk fixture. The smoke checks
 referral attribution, the no-charge offer, separate price and email consent,
-withdrawal after enrollment closes, and closed billing routes. Complete the
-production Clerk account and public TLS checks on the final domain before
-recruiting.
+readiness, withdrawal with a missing contact, and closed billing routes.
+Complete the production Clerk account and public TLS checks on the final
+domain before recruiting.
 
 After the release gates clear, export live Stripe Billing cohorts and the itemized Balance report for the same time zone and dates. Use the subscription price ID to isolate this product, reconcile charges, fees, refunds, and disputes by transaction, and calculate monthly contribution and operating result. Reconcile paid invoices to actual funds collected. Review two completed renewal cohorts before increasing acquisition spend. Keep customer-level exports out of the repository. [Stripe Billing analytics](https://docs.stripe.com/billing/subscriptions/analytics) · [Stripe Balance report](https://docs.stripe.com/reports/balance) · [Stripe event types](https://docs.stripe.com/api/events/types)
 

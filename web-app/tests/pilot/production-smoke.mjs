@@ -202,9 +202,26 @@ async function main() {
             assert.equal(response.headers["cache-control"], "no-store");
             assert.deepEqual(JSON.parse(response.text), { joined, contactAllowed });
         };
+        const expectReadiness = async (status) => {
+            const response = await getResponse(port, "/api/pilot/ready");
+            assert.equal(response.status, status);
+            assert.equal(response.headers["cache-control"], "no-store");
+            if (status === 503) assert.equal(response.text, "Interest is currently unavailable.");
+        };
         let joinedRecord;
 
+        await withPilot({ ...env, COMMERCIAL_PILOT_CONTACT_EMAIL: "operator@" }, port, false, async (page) => {
+            await expectReadiness(503);
+            assert.match(page.text, /Sign in to manage interest/);
+            assert.doesNotMatch(page.text, /Create an account/);
+            await expectState(post("view"), false, false);
+            assert.equal((await post("join", { consent: false })).status, 409);
+            assert.equal((await post("contact", { consent: true })).status, 409);
+            assert.equal(user.private_metadata.commercialPriceInterest, undefined);
+        });
+
         await withPilot(env, port, false, async (page) => {
+            await expectReadiness(200);
             assert.match(page.text, /\$29\/month/);
             assert.match(page.text, /no subscription\s+or payment obligation/);
             const referral = await getResponse(port, "/?source=referral");
@@ -237,9 +254,23 @@ async function main() {
         });
 
         await withPilot(env, port, true, async (page) => {
+            await expectReadiness(200);
             assert.match(page.text, /Interest enrollment is closed/);
             await expectState(post("view"), true, true);
             assert.equal((await post("join", { consent: false })).status, 409);
+        });
+
+        await withPilot({ ...env, COMMERCIAL_PILOT_CONTACT_EMAIL: undefined }, port, false, async (page) => {
+            await expectReadiness(503);
+            assert.match(page.text, /Sign in to manage interest/);
+            const signedIn = await getResponse(port, "/interest", { cookie: cookie() });
+            assert.equal(signedIn.status, 200);
+            assert.match(signedIn.text, /Manage your Pro Access interest/);
+            assert.doesNotMatch(signedIn.text, /Sign in to manage interest/);
+            assert.equal((await post("leave", { cookie: "" })).status, 401);
+            assert.equal((await post("leave", { origin: "https://other.example.invalid" })).status, 403);
+            await expectState(post("view"), true, true);
+            await expectState(post("contact", { consent: false }), true, false);
             await expectState(post("leave"), false, false);
             await expectState(post("view"), false, false);
             const withdrawn = user.private_metadata.commercialPriceInterest;
@@ -250,7 +281,7 @@ async function main() {
             assert.equal(withdrawn.contactConsent.active, false);
         });
 
-        console.log("Offline production pilot passed: referral, signed-in consent, withdrawal and billing closure.");
+        console.log("Offline production pilot passed: readiness, referral, consent, withdrawal and billing closure.");
     } finally {
         if (server.listening) await new Promise((resolve) => server.close(resolve));
         if (existsSync(fonts)) await unlink(fonts);

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Container } from "@/components/ui/Container";
+import { isInterestEnrollmentClosed } from "@/lib/interest-enrollment";
 import { isInterestConfigurationReady, isPilotOnly } from "@/lib/pilot";
 import { InterestControls } from "./InterestControls";
 
@@ -28,7 +29,7 @@ function normalizeSource(value: string | string[] | undefined): string {
 export default async function InterestPage({ searchParams }: InterestPageProps) {
     if (process.env.COMMERCIAL_INTEREST_ENABLED !== "true" || !isInterestConfigurationReady()) notFound();
 
-    const enrollmentClosed = process.env.COMMERCIAL_INTEREST_ENROLLMENT_CLOSED === "true";
+    const enrollmentClosed = isInterestEnrollmentClosed();
     const [{ userId }, params] = await Promise.all([auth(), searchParams]);
     const source = normalizeSource(params.source);
     const returnUrl = encodeURIComponent("/interest?source=" + source);

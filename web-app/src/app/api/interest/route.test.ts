@@ -133,6 +133,8 @@ describe("price-interest API", () => {
         ["loopback HTTP preview", "preview", "http://127.0.0.1:3100", "test"],
     ])("records interest in a configured %s environment", async (_, mode, appUrl, keyMode) => {
         vi.stubEnv("NODE_ENV", "production");
+        vi.stubEnv("COMMERCIAL_PILOT_ONLY", "true");
+        vi.stubEnv("COMMERCIAL_PILOT_CONTACT_EMAIL", "pilot@example.invalid");
         vi.stubEnv("COMMERCIAL_PILOT_MODE", mode);
         vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
         vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", keyMode === "live" ? livePublishableKey : testPublishableKey);

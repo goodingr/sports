@@ -14,12 +14,14 @@ const isBillingRoute = createRouteMatcher([
     '/api/checkout', '/api/billing/portal', '/api/webhooks/stripe',
 ]);
 const isInterestRoute = createRouteMatcher(['/interest', '/api/interest']);
+const isPilotReadinessRoute = createRouteMatcher(['/api/pilot/ready']);
 
 const authenticate = clerkMiddleware(async (auth, req) => {
     if (isProtectedRoute(req)) await auth.protect();
 });
 
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
+    if (isPilotReadinessRoute(request)) return NextResponse.next();
     const pilotOnly = isPilotOnly();
     if (pilotOnly && isBillingRoute(request)) return pilotBillingUnavailable();
     if (
