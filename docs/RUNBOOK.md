@@ -244,6 +244,11 @@ It preserves the immediate NBA capture, ordinary history and predictions,
 and paid-release quality checks. Leagues without a fresh quote can still
 fail those checks and trigger revocation.
 
+For a scheduled host that already runs these scripts, create the local file
+`config/research_provider_leagues.local` to select the same scope. Its presence
+enables the setting for regular runs in that workspace. Remove the file to
+restore broad collection. Explicit soccer-only runs use their own scope.
+
 The daily Windows and Linux pipelines log `NBA quote timing` after the paid
 gate or its skip. The report measures paper attempts and recorded decisions
 linked to the fresh receipt, and gives the receipt age at the paid command

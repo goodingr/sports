@@ -28,6 +28,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
 
+if (-not $SoccerOnly -and (Test-Path -LiteralPath "config/research_provider_leagues.local" -PathType Leaf)) {
+    $ResearchProviderLeagues = $true
+}
+
 $paperEnabled = -not $SkipPaper -and (Test-Path -LiteralPath "config/paper_trial.yml" -PathType Leaf)
 $paperFailed = $false
 $runBenchmark = -not $SkipTraining -and -not $SkipBenchmark

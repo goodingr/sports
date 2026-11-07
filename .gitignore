@@ -11,6 +11,7 @@ env*/
 .env
 .env.*
 !.env.example
+/config/research_provider_leagues.local
 
 ## Packaging / build
 build/

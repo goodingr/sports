@@ -95,9 +95,11 @@ export -f python
             "skip_paper": "--skip-paper", "skip_prediction": "--skip-prediction",
         }
 
-    def run(*options, fail_quality=False, fail_schedule=False, daily=False):
+    def run(*options, fail_quality=False, fail_schedule=False, daily=False, local_focus=False):
         if not daily:
             options += ("skip_benchmark",)
+        if local_focus:
+            (config / "research_provider_leagues.local").touch()
         result = subprocess.run(
             [*command, *(flags[option] for option in options)], cwd=tmp_path,
             env={
@@ -119,15 +121,16 @@ def commands(calls, module):
 
 
 @pytest.mark.parametrize(
-    "options,expected_odds,expected_scores",
+    "options,local_focus,expected_odds,expected_scores",
     [
-        ((), ["NBA"] + [league for league in LEAGUES if league != "NBA"], LEAGUES),
-        (("focus",), RESEARCH, RESEARCH),
-        (("focus", "skip"), [], []),
+        ((), False, ["NBA"] + [league for league in LEAGUES if league != "NBA"], LEAGUES),
+        (("focus",), False, RESEARCH, RESEARCH),
+        ((), True, RESEARCH, RESEARCH),
+        (("focus", "skip"), False, [], []),
     ],
 )
-def test_provider_scope_preserves_pipeline(pipeline, options, expected_odds, expected_scores):
-    result, calls = pipeline(*options)
+def test_provider_scope_preserves_pipeline(pipeline, options, local_focus, expected_odds, expected_scores):
+    result, calls = pipeline(*options, local_focus=local_focus)
     assert result.returncode == 0, result.stdout + result.stderr
     odds = commands(calls, "src.data.ingest_odds")
     assert [args[:4] for args in odds] == [
@@ -165,6 +168,15 @@ def test_conflicting_scope_exits_before_any_commands(pipeline):
     assert result.returncode == 64
     assert "cannot be combined" in result.stderr
     assert calls == []
+
+
+def test_workspace_provider_scope_keeps_explicit_soccer_collection(pipeline):
+    result, calls = pipeline("soccer", "skip_prediction", local_focus=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [args[1] for args in commands(calls, "src.data.ingest_odds")] == LEAGUES[5:]
+    assert [args[:2] for args in commands(calls, "src.data.ingest_scores")] == [
+        ["--leagues", ",".join(LEAGUES[5:])]
+    ]
 
 
 def test_daily_schedule_audit_runs_after_quote_timing_and_is_diagnostic_only(pipeline):

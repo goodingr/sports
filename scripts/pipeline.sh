@@ -56,6 +56,9 @@ if (( RESEARCH_PROVIDER_LEAGUES && SOCCER_ONLY )); then
 	echo "--research-provider-leagues cannot be combined with --soccer-only." >&2
 	exit 64
 fi
+if (( ! SOCCER_ONLY )) && [[ -f config/research_provider_leagues.local ]]; then
+	RESEARCH_PROVIDER_LEAGUES=1
+fi
 
 mkdir -p logs
 TS=$(date -u +%Y%m%d_%H%M%S)
