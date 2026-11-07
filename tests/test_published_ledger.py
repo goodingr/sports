@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -11,6 +12,7 @@ import pandas as pd
 import pytest
 
 import src.predict.published_ledger as ledger
+from scripts.backup_evidence import EVIDENCE_ZIP, create_evidence_zip
 from src.db.core import initialize, store_odds_snapshot_game_starts
 from src.predict.paper_approval import rule_for_trial
 from src.predict.paper_ledger import load_trial
@@ -161,20 +163,72 @@ def test_exact_latest_clock_conflict_blocks_issuance_and_live_visibility(
     assert load_active_release(path)["bets"][0]["quote_snapshot_id"] == "0-later"
 
 
-@pytest.mark.parametrize(("provider_lead", "issued"), [(12, False), (15, True), (31, False), (None, False)])
+@pytest.mark.parametrize(
+    ("provider_lead", "receipt_case", "issued"),
+    [
+        (12, "original", False),
+        (15, "original", True),
+        (15, "restored", True),
+        (31, "original", False),
+        (None, "missing", False),
+        (15, "missing", False),
+        (15, "moneyline_mismatch", False),
+        (15, "totals_mismatch", False),
+    ],
+)
 def test_paper_approved_pick_uses_provider_tipoff_at_publication_and_live_read(
-    warehouse, monkeypatch, provider_lead, issued
+    warehouse, monkeypatch, provider_lead, receipt_case, issued
 ):
     path, current_start = warehouse
     published_at = current_start - timedelta(minutes=20)
+    fetched_at = published_at - timedelta(minutes=1)
     provider_start = (
         published_at + timedelta(minutes=provider_lead) if provider_lead is not None else None
     )
+    receipt_path = None
+    if receipt_case != "missing":
+        assert provider_start is not None
+        raw_dir = path.parent / "data" / "raw" / "odds" / "basketball_nba"
+        raw_dir.mkdir(parents=True)
+        receipt_path = raw_dir / "original-quote.json"
+        home_price = -135 if receipt_case == "moneyline_mismatch" else -130
+        under_price = -115 if receipt_case == "totals_mismatch" else -110
+        receipt = {
+            "source": "the-odds-api",
+            "fetched_at": fetched_at.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+            "results": [{
+                "id": "provider-game",
+                "sport_key": "basketball_nba",
+                "home_team": "Boston Celtics",
+                "away_team": "New York Knicks",
+                "commence_time": provider_start.isoformat(),
+                "bookmakers": [{
+                    "key": "draftkings",
+                    "markets": [
+                        {"key": "h2h", "outcomes": [
+                            {"name": "Boston Celtics", "price": home_price},
+                            {"name": "New York Knicks", "price": 110},
+                        ]},
+                        {"key": "totals", "outcomes": [
+                            {"name": "Over", "price": -110, "point": 220},
+                            {"name": "Under", "price": under_price, "point": 220},
+                        ]},
+                    ],
+                }],
+            }],
+        }
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        if receipt_case == "restored":
+            create_evidence_zip(path.parent / EVIDENCE_ZIP, [("raw", raw_dir.parents[1])])
+            receipt_path.unlink()
     with sqlite3.connect(path) as conn:
         conn.execute(
-            "UPDATE odds_snapshots SET fetched_at_utc = ? WHERE snapshot_id = 'quote'",
-            ((published_at - timedelta(minutes=1)).isoformat(),),
+            "UPDATE odds_snapshots SET fetched_at_utc = ?, raw_path = ? WHERE snapshot_id = 'quote'",
+            (fetched_at.isoformat(), str(receipt_path) if receipt_path is not None else None),
         )
+        conn.execute("UPDATE games SET odds_api_id = 'provider-game' WHERE game_id = 'g'")
+        conn.execute("UPDATE teams SET code = CASE team_id WHEN 1 THEN 'BOS' ELSE 'NYK' END")
         conn.execute("UPDATE odds SET price_american = -110 WHERE market = 'totals'")
         conn.execute(
             """
@@ -233,6 +287,16 @@ def test_paper_approved_pick_uses_provider_tipoff_at_publication_and_live_read(
     monkeypatch.setattr(ledger, "datetime", LiveClock)
     assert load_active_release(path)["bet_count"] == 1
     assert checkout_has_recent_delivery(path, now=published_at)
+    if receipt_case == "original":
+        original = receipt_path.read_bytes()
+        mutated = json.loads(original)
+        mutated["results"][0]["bookmakers"][0]["markets"][0]["outcomes"][1]["price"] = 120
+        receipt_path.write_text(json.dumps(mutated), encoding="utf-8")
+        assert load_active_release(path)["bets"] == []
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == 1
+        receipt_path.write_bytes(original)
+        assert load_active_release(path)["bet_count"] == 1
     LiveClock.current = deadline + timedelta(microseconds=1)
     active = load_active_release(path)
     assert active["release_id"] == result["release_id"]

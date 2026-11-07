@@ -299,8 +299,10 @@ snapshot, must match the predicted line and price, and must be at most 15 minute
 old when issued. Untraced legacy rows cannot be issued. Quarter-point totals
 are excluded because the current grader supports integer and half-point totals.
 Paid NBA totals use the earliest verified warehouse or provider tipoff for
-the same minimum lead as the paper trial. The original provider tipoff is
-retained with the issued quote and the API rechecks the lead when serving it.
+the same minimum lead as the paper trial. Issuance and live reads verify the
+provider kickoff and both DraftKings price pairs against the retained original
+receipt. The API hides an active quote if that proof is missing or conflicts
+with the warehouse. The issued record keeps the original line and price.
 
 The original price and line remain fixed in the record. Changed prices or
 opposite signals cannot replace an issued selection. Provider aliases representing

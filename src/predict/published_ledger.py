@@ -18,7 +18,11 @@ from src.models.prediction_quality import (
     settle_moneyline_side,
     settle_total_side,
 )
-from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start
+from src.predict.paper_settlement import (
+    _START_TOLERANCE,
+    _normalized_h2h_prices,
+    _quote_source_start,
+)
 from src.predict.quote_order import latest_market_snapshot_id
 
 SCHEMA_PATH = Path(__file__).with_name("published_schema.sql")
@@ -214,45 +218,42 @@ def _verified_quote(
     if contract:
         if quote["book"].lower() != contract["book"] or quote["source"] != contract["odds_source"]:
             return None
+        quote_identity = {
+            "snapshot_id": pick["quote_snapshot_id"],
+            "game_id": pick["game_id"],
+            "book_id": pick["quote_book_id"],
+            "sport_id": quote["sport_id"],
+            "source": quote["source"],
+        }
         prices = {row["outcome"]: row["price_american"] for row in rows}
         first, second = ("over", "under") if market == "totals" else ("home", "away")
         fair = dict(zip((first, second), no_vig_pair(prices[first], prices[second])))
         if pick["model_probability"] - fair[pick["side"]] < contract["min_edge"]:
             return None
+        moneylines = None
         if contract.get("same_snapshot_moneyline_inputs"):
             if (
                 pick.get("input_h2h_snapshot_id") != pick["quote_snapshot_id"]
                 or pick.get("input_h2h_book_id") != pick["quote_book_id"]
             ):
                 return None
-            inputs = conn.execute(
-                """
-                SELECT lower(outcome) AS outcome, price_american FROM odds
-                WHERE game_id = ? AND snapshot_id = ? AND book_id = ? AND market = 'h2h'
-                """,
-                (pick["game_id"], pick["quote_snapshot_id"], pick["quote_book_id"]),
-            ).fetchall()
-            expected_inputs = {"home": pick.get("input_home_moneyline"), "away": pick.get("input_away_moneyline")}
-            if (
-                not all(isinstance(price, (int, float)) and math.isfinite(price) and abs(price) >= 100
-                        for price in expected_inputs.values())
-                or len(inputs) != 2
-                or {row["outcome"]: row["price_american"] for row in inputs} != expected_inputs
+            moneylines = _normalized_h2h_prices(conn, quote_identity)
+            if moneylines is None or moneylines != (
+                pick.get("input_home_moneyline"), pick.get("input_away_moneyline")
             ):
                 return None
         if market == "totals":
             provider_start = _quote_source_start(
                 conn,
                 {
-                    "snapshot_id": pick["quote_snapshot_id"],
-                    "game_id": pick["game_id"],
-                    "sport_id": quote["sport_id"],
-                    "source": quote["source"],
+                    **quote_identity,
                     "line": pick["total_line"],
                     "over_price": prices["over"],
                     "under_price": prices["under"],
                 },
                 fetched,
+                require_original=True,
+                moneylines=moneylines,
             )
             if provider_start is None or abs(start - provider_start) > _START_TOLERANCE:
                 return None
