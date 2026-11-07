@@ -20,6 +20,7 @@ import yaml
 from src.db.core import connect, resolve_db_path
 from src.models.prediction_quality import expected_value, no_vig_pair
 from src.predict.paper_report import build_paper_report
+from src.predict.paper_schedule import record_known_fixtures
 from src.predict.paper_settlement import settle_open_trials
 
 DEFAULT_RULES = Path("config/paper_trial.yml")
@@ -106,7 +107,16 @@ def register_trial(trial: PaperTrial, db_path: Path | None = None) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute("BEGIN IMMEDIATE")
-        _register(conn, trial, datetime.now(timezone.utc))
+        now = datetime.now(timezone.utc)
+        _register(conn, trial, now)
+        record_known_fixtures(
+            conn,
+            trial.trial_id,
+            trial.league,
+            now,
+            _utc(trial.review_at),
+            max_lead_hours=trial.max_hours_before_start,
+        )
 
 
 def _eligible_game(conn: sqlite3.Connection, game_id: str, league: str) -> sqlite3.Row | None:
@@ -364,6 +374,14 @@ def record_capture_failure(trial: PaperTrial, db_path: Path | None = None) -> No
         now = datetime.now(timezone.utc)
         _register(conn, trial, now)
         if now < _utc(trial.review_at):
+            record_known_fixtures(
+                conn,
+                trial.trial_id,
+                trial.league,
+                now,
+                _utc(trial.review_at),
+                max_lead_hours=trial.max_hours_before_start,
+            )
             _record_observations(conn, trial, now, "failed", {})
 
 
@@ -384,6 +402,14 @@ def capture_predictions(
         registered = _register(conn, trial, now)
         if now >= _utc(trial.review_at):
             return {"trial_closed": 1}
+        record_known_fixtures(
+            conn,
+            trial.trial_id,
+            trial.league,
+            now,
+            _utc(trial.review_at),
+            max_lead_hours=trial.max_hours_before_start,
+        )
         outcomes: dict[str, tuple[str, str | None]] = {}
         if predictions is not None:
             for row in predictions.itertuples(index=False):
@@ -404,6 +430,14 @@ def update(trial: PaperTrial, db_path: Path | None = None) -> dict[str, Any]:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
         _register(conn, trial, now)
+        record_known_fixtures(
+            conn,
+            trial.trial_id,
+            trial.league,
+            now,
+            _utc(trial.review_at),
+            max_lead_hours=trial.max_hours_before_start,
+        )
         newly_settled = settle_open_trials(conn, now)
         return {**build_paper_report(conn, now), "newly_settled": newly_settled}
 

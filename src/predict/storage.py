@@ -48,12 +48,12 @@ def _normalize_outcome(outcome: Any, home_team: str, away_team: str) -> str:
     value = str(outcome or "").strip().lower()
     home_norm = home_team.lower().strip()
     away_norm = away_team.lower().strip()
+    if value in {"home", "away", "over", "under", "draw"}:
+        return value
     if value in {"home", home_norm} or (value and (value in home_norm or home_norm in value)):
         return "home"
     if value in {"away", away_norm} or (value and (value in away_norm or away_norm in value)):
         return "away"
-    if value in {"over", "under", "draw"}:
-        return value
     return value
 
 

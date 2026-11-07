@@ -927,6 +927,16 @@ def show_paper_trials(_n_clicks: Optional[int]):
                             )
                         )
                     )
+            known = coverage.get("known_windows", {})
+            if known.get("available"):
+                coverage_details.append(
+                    html.Div(
+                        f"Known fixtures {known['known_fixtures']} · "
+                        f"Passed capture windows {known['passed_window_fixtures']} · "
+                        f"Unobserved windows {known['missed_known_window_fixtures']} · "
+                        f"Ambiguous schedules {known['ambiguous_schedule_fixtures']}"
+                    )
+                )
         cards.append(
             dbc.Card(
                 dbc.CardBody(

@@ -376,6 +376,12 @@ failures. Empty runs retain their timestamps. This coverage starts with the firs
 retained run and covers observations made since that time. Upgrading the worker
 adds these tables without reconstructing earlier opportunities.
 
+Known future fixture schedules are also retained prospectively. The report
+separately counts known capture windows that elapsed without an observation,
+including a fixture that never appeared in an in-window run. Large schedule or
+identity changes are reported as ambiguous. These counts use retained schedule
+observations rather than reconstructing arrival times from current game rows.
+
 Settlement uses full-game final scores, including overtime, at one paper unit
 per decision. A push returns the stake. Cancelled games and starts that moved
 more than 10 minutes are voided. A small start-time correction uses the earlier

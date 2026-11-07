@@ -7,6 +7,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
+from src.predict.paper_schedule import known_window_coverage
+
 _FULLY_EVALUATED = {"recorded", "already_recorded", "below_edge_threshold"}
 _COVERAGE_TABLES = {"paper_capture_runs", "paper_fixture_observations"}
 
@@ -24,6 +26,9 @@ def capture_coverage(
     registered_at: datetime,
     review_at: datetime,
     observed_at: datetime,
+    *,
+    min_lead_minutes: int = 15,
+    max_lead_hours: int = 12,
 ) -> dict[str, Any]:
     """Summarize retained observations without reconstructing past opportunities."""
     registered_at = _utc(registered_at)
@@ -90,5 +95,14 @@ def capture_coverage(
         "below_edge_fixtures": len(below_edge_fixtures),
         "fully_evaluated_share": (
             len(evaluated_fixtures) / len(observed_fixtures) if observed_fixtures else None
+        ),
+        "known_windows": known_window_coverage(
+            conn,
+            trial_id,
+            registered_at,
+            review_at,
+            observed_at,
+            min_lead_minutes=min_lead_minutes,
+            max_lead_hours=max_lead_hours,
         ),
     }

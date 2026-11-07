@@ -62,3 +62,13 @@ CREATE TABLE IF NOT EXISTS paper_fixture_observations (
     snapshot_id TEXT,
     PRIMARY KEY (run_id, game_id)
 );
+
+CREATE TABLE IF NOT EXISTS paper_fixture_schedule (
+    trial_id TEXT NOT NULL REFERENCES paper_trials(trial_id),
+    game_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    start_time_utc TEXT NOT NULL,
+    home_team_id INTEGER NOT NULL,
+    away_team_id INTEGER NOT NULL,
+    PRIMARY KEY (trial_id, game_id, start_time_utc, home_team_id, away_team_id)
+);

@@ -233,6 +233,54 @@ def test_selected_quote_preserves_intact_pair_instead_of_newer_mixed_sides():
     assert selected["selected_totals_fetched_at"] == "2026-11-06T23:00:00+00:00"
 
 
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        ("Under", "under"),
+        ("Over", "over"),
+        ("Draw", "draw"),
+        ("home", "home"),
+        ("away", "away"),
+        ("Oklahoma City Thunder", "home"),
+        ("Thunder", "home"),
+        ("Washington Wizards", "away"),
+        ("Wizards", "away"),
+    ],
+)
+def test_explicit_outcomes_take_precedence_over_thunder_team_name(outcome, expected):
+    assert storage._normalize_outcome(
+        outcome, "Oklahoma City Thunder", "Washington Wizards"
+    ) == expected
+
+
+@pytest.mark.parametrize("hannover_is_home", [True, False])
+def test_over_does_not_match_hannover_team_name(hannover_is_home):
+    teams = ["Hannover 96", "Hamburger SV"]
+    if not hannover_is_home:
+        teams.reverse()
+    assert storage._normalize_outcome("Over", *teams) == "over"
+
+
+@pytest.mark.parametrize("thunder_is_home", [True, False])
+def test_thunder_totals_preserve_under_price_and_paired_quote_provenance(thunder_is_home):
+    games, odds = _game_and_odds()
+    teams = ["Oklahoma City Thunder", "Washington Wizards"]
+    if not thunder_is_home:
+        teams.reverse()
+    games.loc[0, ["home_team", "away_team"]] = teams
+    odds["outcome"] = odds["outcome"].str.title()
+    selected = storage._apply_deterministic_odds(games, odds).iloc[0]
+    assert (selected["total_line"], selected["over_moneyline"], selected["under_moneyline"]) == (
+        220.5,
+        -105,
+        -115,
+    )
+    assert selected["selected_totals_snapshot_id"] == "old"
+    assert selected["selected_totals_book_id"] == 2
+    assert selected["selected_totals_book"] == "FanDuel"
+    assert selected["selected_totals_fetched_at"] == "2026-11-06T23:00:00+00:00"
+
+
 def test_unpaired_prices_remain_diagnostic_with_empty_quote_provenance():
     games, odds = _game_and_odds()
     selected = storage._apply_deterministic_odds(games, odds[odds["snapshot_id"] == "new"]).iloc[0]

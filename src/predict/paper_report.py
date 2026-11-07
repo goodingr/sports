@@ -196,7 +196,13 @@ def build_paper_report(conn: sqlite3.Connection, observed_at: datetime) -> dict[
                 "review_verdict": verdict,
                 "review_failures": failures,
                 "capture_coverage": capture_coverage(
-                    conn, row["trial_id"], registered_at, review_at, observed_at
+                    conn,
+                    row["trial_id"],
+                    registered_at,
+                    review_at,
+                    observed_at,
+                    min_lead_minutes=spec.get("min_minutes_before_start", 15),
+                    max_lead_hours=spec.get("max_hours_before_start", 12),
                 ),
                 "metrics": metrics,
             }
