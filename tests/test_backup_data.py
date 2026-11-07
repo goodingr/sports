@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import sys
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
@@ -86,6 +87,31 @@ def test_backup_copies_extras_when_present(backup_module, tmp_path):
 
     assert (snapshot / "predictions_master.parquet").read_bytes() == b"PAR1"
     assert not (snapshot / "does_not_exist.parquet").exists()
+
+
+def test_main_preserves_project_raw_when_warehouse_is_outside_project(backup_module, tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    marker = project / "data" / "raw" / "odds" / "original.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b'{"fetched_at":"2025-11-25T00:30:00Z"}')
+    db_path = tmp_path / "external-warehouse" / "betting.db"
+    _seed_db(db_path)
+    decoy = db_path.parent / "raw" / "decoy.json"
+    decoy.parent.mkdir()
+    decoy.write_bytes(b"warehouse sibling")
+    models = project / "models"
+    models.mkdir()
+    (models / "model.pkl").write_bytes(b"frozen model")
+    monkeypatch.setattr(backup_module, "_PROJECT_ROOT", project)
+    monkeypatch.setenv("SPORTS_DB_PATH", str(db_path))
+    monkeypatch.setenv("MODELS_DIR", str(models))
+
+    assert backup_module.main() == 0
+
+    snapshot = next((tmp_path / "backups").iterdir())
+    with zipfile.ZipFile(snapshot / "source_evidence.zip") as archive:
+        assert archive.read("raw/odds/original.json") == marker.read_bytes()
+        assert "raw/decoy.json" not in archive.namelist()
 
 
 def test_backup_aborts_when_source_missing(backup_module, tmp_path):

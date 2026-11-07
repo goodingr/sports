@@ -50,7 +50,8 @@ targets. The existing flat date layout and older pointers remain readable.
 Older local snapshots without models are packaged with the configured models
 directory before upload. New local snapshots freeze models at capture time.
 
-The evidence ZIP preserves the full `raw/` tree beside the configured database,
+The evidence ZIP preserves the ingestion tree at `<project>/data/raw/`,
+including when `SPORTS_DB_PATH` places the warehouse elsewhere,
 plus `reports/research/` and JSON records under `reports/data_quality/` and
 `reports/odds_coverage/` and `reports/betting_benchmarks/`. Benchmark results and
 triage records preserve the cohorts and strategy rules already examined.

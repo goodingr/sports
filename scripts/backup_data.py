@@ -79,9 +79,9 @@ def _extra_files_to_copy() -> list[Path]:
     ]
 
 
-def _evidence_roots(db_path: Path) -> list[tuple[str, Path]]:
+def _evidence_roots() -> list[tuple[str, Path]]:
     return [
-        ("raw", db_path.resolve().parent / "raw"),
+        ("raw", _PROJECT_ROOT / "data" / "raw"),
         ("reports/research", _PROJECT_ROOT / "reports" / "research"),
         ("reports/data_quality", _PROJECT_ROOT / "reports" / "data_quality"),
         ("reports/odds_coverage", _PROJECT_ROOT / "reports" / "odds_coverage"),
@@ -261,7 +261,7 @@ def main() -> int:
     try:
         create_backup(
             db_path, backup_root, _extra_files_to_copy(), models_dir=_resolve_models_dir(),
-            evidence_roots=_evidence_roots(db_path),
+            evidence_roots=_evidence_roots(),
         )
         print(f"Cleaning up; keeping last {retention_days} snapshots ...")
         cleanup_old_backups(backup_root, retention_days)
