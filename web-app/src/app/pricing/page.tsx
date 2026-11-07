@@ -22,6 +22,7 @@ export default function Page() {
                 <p className="text-base sm:text-xl text-muted-foreground">
                     Access pregame picks that pass our model validation checks. Pick availability varies by slate.
                 </p>
+                <Link href="/record" className="mt-3 inline-block text-sm text-primary hover:underline">View the published pick record</Link>
             </div>
 
             <div className="max-w-md mx-auto bg-card border border-primary/20 rounded-2xl overflow-hidden shadow-2xl shadow-primary/10">
@@ -130,7 +131,7 @@ function CheckoutButton() {
                     <>
                         <p className="font-semibold text-foreground">Subscriptions are currently paused</p>
                         <p className="mt-1">Enrollment opens after the picks pass validation and the service is ready.</p>
-                        <Link href="/" className="mt-2 inline-block text-primary hover:underline">Explore model tracking</Link>
+                        <Link href="/#model-history" className="mt-2 inline-block text-primary hover:underline">Explore model tracking</Link>
                     </>
                 )}
             </div>

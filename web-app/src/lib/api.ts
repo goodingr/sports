@@ -89,6 +89,7 @@ export interface PublishedRecordResponse {
     roi_percent: number | null;
     win_rate_percent: number | null;
     basis: string;
+    published_picks?: number;
     pending_picks?: number;
     grading_corrections?: number;
     last_processed_at?: string | null;

@@ -6,7 +6,7 @@ import { Container } from '@/components/ui/Container';
 import { TrendingUp, DollarSign, Percent, ChevronUp, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 
-export function HeroStats() {
+export function HistoricalModelStats() {
     const { stats, loading, error } = useStats();
     const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
@@ -57,7 +57,7 @@ export function HeroStats() {
                     <div className="py-8">
                         <Container>
                             <div className="max-w-2xl mx-auto mb-3 text-center">
-                                <h2 className="text-sm font-semibold text-foreground">Historical totals model results</h2>
+                                <h4 className="text-sm font-semibold text-foreground">Historical totals model summary</h4>
                                 <p className="mt-1 text-xs text-muted-foreground">
                                     {hasResults ? 'Settled model selections using simulated stakes.' : 'No settled model selections yet.'}
                                 </p>
@@ -68,10 +68,10 @@ export function HeroStats() {
                                     label="Simulated P&L"
                                     value={stats.total_profit.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                                     icon={<DollarSign className="h-4 w-4 text-primary" />}
-                                    trend="All Time"
+                                    trend="Tracked selections"
                                 />
                                 <StatCard
-                                    label="ROI"
+                                    label="Simulated ROI"
                                     value={`${stats.roi}%`}
                                     icon={<TrendingUp className="h-4 w-4 text-primary" />}
                                     trend="Return on Investment"

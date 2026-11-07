@@ -23,7 +23,7 @@ test('empty issued record remains separate from historical model performance', a
     await expect(page.getByRole('heading', { name: 'Published pick record', exact: true })).toBeVisible();
     await expect(page.getByText('No settled published picks yet')).toBeVisible();
     await expect(page.getByText('ROI', { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'View separate historical model tracking' })).toHaveAttribute('href', '/');
+    await expect(page.getByRole('link', { name: 'View separate historical model tracking' })).toHaveAttribute('href', '/#model-history');
     await expect(page.getByRole('button', { name: /subscribe/i })).toHaveCount(0);
 });
 

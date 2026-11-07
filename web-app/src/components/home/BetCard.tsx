@@ -42,7 +42,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
     const oddsLabel = formatOdds(bet.odds);
     const ariaLabel = isLocked
         ? `${bet.away_team} at ${bet.home_team}, locked. Subscribe to unlock pick.`
-        : `${bet.away_team} at ${bet.home_team}, ${bet.prediction || 'pick'}, odds ${oddsLabel}`;
+        : `${bet.away_team} at ${bet.home_team}, ${bet.prediction || 'pick'}, odds ${oddsLabel}${isCompleted ? ', simulated model result' : ''}`;
 
     return (
         <>
@@ -144,6 +144,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                 >
                                     {isCompleted ? (bet.profit != null ? formatMoney(bet.profit) : '–') : oddsLabel}
                                 </div>
+                                {isCompleted && <div className="text-[10px] text-muted-foreground">Simulated</div>}
                             </div>
                         )}
                     </div>

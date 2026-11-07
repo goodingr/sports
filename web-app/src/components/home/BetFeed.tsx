@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { fetchAPI, normalizeBet, normalizeUpcomingBets, type Bet, type PaginatedBetsResponse, type UpcomingBetsResponse } from '@/lib/api';
 import { BetCard } from './BetCard';
+import { HistoricalModelStats } from './HistoricalModelStats';
 import { Lock, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useUser, useAuth } from '@clerk/nextjs';
@@ -50,6 +51,15 @@ export function BetFeed() {
     const isPremium = apiPremium ?? hasPremium;
 
     useEffect(() => {
+        function openModelHistory() {
+            if (window.location.hash === '#model-history') setActiveTab('history');
+        }
+        openModelHistory();
+        window.addEventListener('hashchange', openModelHistory);
+        return () => window.removeEventListener('hashchange', openModelHistory);
+    }, []);
+
+    useEffect(() => {
         let cancelled = false;
         let upcomingInFlight = false;
         const lifecycle = new AbortController();
@@ -79,7 +89,7 @@ export function BetFeed() {
                 if (!cancelled) {
                     setUpcoming([]);
                     setApiPremium(null);
-                    setPartialError('Upcoming picks are temporarily unavailable. Model results are available under Past.');
+                    setPartialError('Upcoming picks are temporarily unavailable. Model history is available.');
                 }
             } finally {
                 upcomingInFlight = false;
@@ -140,12 +150,12 @@ export function BetFeed() {
                 } else if (upcomingResult.status === 'rejected') {
                     console.error('Failed to load upcoming bets:', upcomingResult.reason);
                     setPartialError(
-                        "Upcoming picks are temporarily unavailable. Model results are available under Past.",
+                        "Upcoming picks are temporarily unavailable. Model history is available.",
                     );
                 } else if (historyResult.status === 'rejected') {
                     console.error('Failed to load history:', historyResult.reason);
                     setPartialError(
-                        "Model results are temporarily unavailable. Upcoming picks are available under Odds.",
+                        "Model history is temporarily unavailable. Upcoming picks are available.",
                     );
                 }
             } catch (err) {
@@ -271,7 +281,7 @@ export function BetFeed() {
                             : 'border-transparent text-muted-foreground hover:text-foreground'
                     }`}
                 >
-                    Odds
+                    Upcoming picks
                 </button>
                 <button
                     role="tab"
@@ -283,7 +293,7 @@ export function BetFeed() {
                             : 'border-transparent text-muted-foreground hover:text-foreground'
                     }`}
                 >
-                    Past
+                    Model history
                 </button>
             </div>
 
@@ -330,8 +340,9 @@ export function BetFeed() {
                 </section>
             ) : (
                 <section className="space-y-6">
-                    <h3 className="text-base sm:text-lg font-bold text-foreground">Model Results</h3>
-                    <p className="text-sm text-muted-foreground">Tracked totals model results at simulated stakes.</p>
+                    <h3 className="text-base sm:text-lg font-bold text-foreground">Model history</h3>
+                    <p className="text-sm text-muted-foreground">These tracked totals selections use simulated stakes. The published pick record shows what subscribers received.</p>
+                    <HistoricalModelStats />
                     {historyGroups.length > 0 ? (
                         <>
                             <div className="space-y-8">

@@ -16,16 +16,17 @@ function units(value: number): string {
     return `${value > 0 ? '+' : ''}${value.toFixed(2)}u`;
 }
 
-export function PublishedRecord() {
+export function PublishedRecord({ summary = false }: { summary?: boolean }) {
     const [record, setRecord] = useState<PublishedRecordResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
     const [request, setRequest] = useState({ page: 1 });
     const [loadedAt, setLoadedAt] = useState<string | null>(null);
+    const limit = summary ? 1 : 20;
 
     useEffect(() => {
         let active = true;
-        fetchAPI<PublishedRecordResponse>(`/api/bets/record?page=${request.page}&limit=20`, {
+        fetchAPI<PublishedRecordResponse>(`/api/bets/record?page=${request.page}&limit=${limit}`, {
             cache: 'no-store', signal: AbortSignal.timeout(10000),
         }).then((data) => {
             if (active) {
@@ -38,12 +39,38 @@ export function PublishedRecord() {
             if (active) setLoading(false);
         });
         return () => { active = false; };
-    }, [request]);
+    }, [limit, request]);
 
     function loadPage(page: number) {
         setLoading(true);
         setError(false);
         setRequest({ page });
+    }
+
+    if (summary) {
+        const issued = record ? record.published_picks ?? record.total + (record.pending_picks ?? 0) : null;
+        return (
+            <section aria-labelledby="published-summary" className="rounded-xl border border-white/10 bg-card p-5 sm:p-6">
+                <h1 id="published-summary" className="text-xl font-semibold text-foreground">Published pick record</h1>
+                {loading ? (
+                    <p role="status" className="mt-2 text-sm text-muted-foreground">Loading published results…</p>
+                ) : error || !record ? (
+                    <p role="alert" className="mt-2 text-sm text-muted-foreground">Published results are temporarily unavailable.</p>
+                ) : issued === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">No picks have been published yet.</p>
+                ) : (
+                    <>
+                        <dl className="mt-4 grid grid-cols-3 gap-3">
+                            <div><dt className="text-xs text-muted-foreground">Published picks</dt><dd className="font-semibold">{issued}</dd></div>
+                            <div><dt className="text-xs text-muted-foreground">Graded picks</dt><dd className="font-semibold">{record.graded_picks}</dd></div>
+                            <div><dt className="text-xs text-muted-foreground">Published ROI</dt><dd className="font-semibold">{record.roi_percent == null ? '–' : `${record.roi_percent.toFixed(2)}%`}</dd></div>
+                        </dl>
+                        <p className="mt-2 text-xs text-muted-foreground">One unit per pick at its original price, before subscription fees.</p>
+                    </>
+                )}
+                <Link href="/record" className="mt-3 inline-block text-sm text-primary hover:underline">View the full published pick record</Link>
+            </section>
+        );
     }
 
     if (loading) {
@@ -161,7 +188,7 @@ export function PublishedRecord() {
                 {(record.grading_corrections ?? 0) > 0 && <p>{record.grading_corrections} grading corrections are included, with prior grades retained in the audit history.</p>}
                 {loadedAt && <p>Loaded <time dateTime={loadedAt}>{formatTimestamp(loadedAt)}</time>. Times shown in UTC.</p>}
                 <p>One unit is a fixed stake used to compare results before subscription fees. Customer returns depend on the price and stake obtained.</p>
-                <Link href="/" className="inline-block text-primary hover:underline">View separate historical model tracking</Link>
+                <Link href="/#model-history" className="inline-block text-primary hover:underline">View separate historical model tracking</Link>
             </div>
         </div>
     );

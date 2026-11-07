@@ -30,7 +30,7 @@ test.describe('Premium-mock view (history tab)', () => {
     test('completed picks show team names, prediction, and profit (never blank)', async ({ page }) => {
         await page.goto('/');
         // Switch to the history tab
-        await page.getByRole('tab', { name: /Past/i }).click();
+        await page.getByRole('tab', { name: 'Model history' }).click();
 
         await expect(page.getByText('Past Home')).toBeVisible({ timeout: 15_000 });
         await expect(page.getByText('Past Away')).toBeVisible();
@@ -42,7 +42,7 @@ test.describe('Premium-mock view (history tab)', () => {
 
     test('completed card opens modal without paywall overlay', async ({ page }) => {
         await page.goto('/');
-        await page.getByRole('tab', { name: /Past/i }).click();
+        await page.getByRole('tab', { name: 'Model history' }).click();
         await page.getByText('Past Home').first().click();
         await expect(page.getByRole('dialog')).toBeVisible();
         // Premium Only headline should NOT be visible for completed picks.
