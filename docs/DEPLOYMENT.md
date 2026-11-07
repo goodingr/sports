@@ -87,11 +87,14 @@ curl -fsS https://${APP_DOMAIN}/ | head
 docker compose exec worker cat /etc/cron.d/sports
 ```
 
-When moving the paper trial to this worker, pause the Windows prediction and
-closing jobs before taking the warehouse snapshot. Restore it and set
-`WORKER_PAPER_CLOSE_ENABLED=1` in the worker's `.env` before starting the worker.
-It checks on each UTC quarter hour and records the outcome in its job logs and
-health heartbeat. It uses the same request cap and reserve as the Windows collector.
+When moving the paper trial to this worker, pause the Windows prediction,
+fixture discovery, early entry and closing jobs before taking the warehouse
+snapshot. Restore it and the pinned model, then set `WORKER_PAPER_CLOSE_ENABLED`,
+`WORKER_PAPER_ENTRY_ENABLED` and `WORKER_PAPER_EVENTS_ENABLED` to `1` in `.env`
+on one worker. Closing checks start on each UTC quarter hour. Early entry and
+fixture discovery checks start five and ten minutes later. Each job writes
+its own log and health heartbeat. The same trial cutoffs, quota reserve and
+request caps apply on both platforms.
 
 ## Rebuild / redeploy
 

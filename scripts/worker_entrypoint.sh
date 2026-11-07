@@ -98,6 +98,12 @@ EOF
 if [[ ${WORKER_PAPER_CLOSE_ENABLED:-0} == 1 ]]; then
 	printf '*/15 * * * * app /app/scripts/run_job.sh paper_close >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
 fi
+if [[ ${WORKER_PAPER_ENTRY_ENABLED:-0} == 1 ]]; then
+	printf '5,20,35,50 * * * * app /app/scripts/run_job.sh paper_entry >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
+if [[ ${WORKER_PAPER_EVENTS_ENABLED:-0} == 1 ]]; then
+	printf '10,25,40,55 * * * * app /app/scripts/run_job.sh paper_events >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
 chmod 0644 "$CRON_FILE"
 
 echo "[worker] crontab installed:"

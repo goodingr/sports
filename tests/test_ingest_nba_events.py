@@ -110,7 +110,7 @@ def test_preview_reads_no_keys_and_creates_no_records(warehouse, monkeypatch):
         assert conn.execute("SELECT count(*) FROM data_sources").fetchone()[0] == 0
 
 
-def test_scheduled_observation_retries_during_cooldown(monkeypatch, capsys):
+def test_scheduled_observation_retries_during_cooldown(warehouse, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["ingest_nba_events", "--collect", "--observe-paper"])
     calls = []
     monkeypatch.setattr(discovery, "discover_events", lambda *, collect: {"status": "cooldown"})
@@ -120,6 +120,18 @@ def test_scheduled_observation_retries_during_cooldown(monkeypatch, capsys):
 
     assert calls == [paper_ledger.load_trial()]
     assert json.loads(capsys.readouterr().out) == {"status": "cooldown"}
+
+
+def test_scheduled_observation_stops_at_capture_deadline(warehouse, monkeypatch, capsys):
+    _, _, clock = warehouse
+    clock.current = datetime.fromisoformat(paper_ledger.load_trial().review_at)
+    monkeypatch.setattr(sys, "argv", ["ingest_nba_events", "--collect", "--observe-paper"])
+    monkeypatch.setattr(discovery, "discover_events", _unexpected)
+    monkeypatch.setattr(paper_ledger, "register_trial", _unexpected)
+
+    discovery.main()
+
+    assert json.loads(capsys.readouterr().out) == {"status": "trial_inactive"}
 
 
 def test_archives_free_events_and_applies_only_fixture_links_or_inserts(warehouse, monkeypatch):

@@ -140,6 +140,38 @@ jobs:
       - name: Readiness (/ready) smoke
         run: poetry run pytest tests/api/test_readiness.py -q -rs
 
+  worker-image:
+    name: Backend image and paper worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start the worker with paper jobs enabled
+        run: |
+          docker build --tag sports-worker-ci .
+          docker run --detach --name sports-worker-ci --network none --user 0:0 \
+            --env 'WORKER_PREDICT_CRON=0 0 31 2 *' --env 'WORKER_TRAIN_CRON=0 0 31 2 *' \
+            --env 'WORKER_BENCHMARK_CRON=0 0 31 2 *' --env 'WORKER_BACKUP_CRON=0 0 31 2 *' \
+            --env 'WORKER_REMOTE_BACKUP_CRON=0 0 31 2 *' \
+            --env WORKER_PAPER_CLOSE_ENABLED=1 --env WORKER_PAPER_ENTRY_ENABLED=1 \
+            --env WORKER_PAPER_EVENTS_ENABLED=1 --entrypoint /usr/bin/tini \
+            sports-worker-ci -- /app/scripts/worker_entrypoint.sh
+          trap 'docker logs sports-worker-ci; docker rm -f sports-worker-ci >/dev/null' EXIT
+
+          for attempt in {1..20}; do
+            if docker exec sports-worker-ci /app/scripts/worker_health.sh; then break; fi
+            sleep 1
+          done
+          docker exec sports-worker-ci /app/scripts/worker_health.sh
+
+          for job in paper_close paper_entry paper_events; do
+            docker exec sports-worker-ci grep -F "/app/scripts/run_job.sh $job" /etc/cron.d/sports
+            docker exec --user app --workdir /tmp sports-worker-ci /app/scripts/run_job.sh "$job"
+            docker exec sports-worker-ci test -f "/app/logs/heartbeat/$job.ok"
+          done
+
   web:
     name: Web (lint, typecheck, unit, build, e2e)
     # Playwright 1.59 supports Ubuntu 24.04; ubuntu-latest has moved to 26.04.

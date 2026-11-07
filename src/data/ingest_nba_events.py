@@ -463,11 +463,18 @@ def main() -> None:
     if args.observe_paper and not args.collect:
         parser.error("--observe-paper requires --collect")
     try:
-        result = discover_events(collect=args.collect)
-        if args.observe_paper and result["status"] in {"discovered", "cooldown"}:
+        if args.observe_paper:
             from src.predict.paper_ledger import load_trial, register_trial
 
-            register_trial(load_trial())
+            trial = load_trial()
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(trial.review_at):
+                print(json.dumps({"status": "trial_inactive"}))
+                return
+            result = discover_events(collect=True)
+            if result["status"] in {"discovered", "cooldown"}:
+                register_trial(trial)
+        else:
+            result = discover_events(collect=args.collect)
     except (RuntimeError, sqlite3.Error, ValueError) as exc:
         parser.exit(1, f"{exc}\n")
     print(json.dumps(result))

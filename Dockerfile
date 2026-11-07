@@ -46,12 +46,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin"
+    PATH="/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Runtime libs only — keep the image small.
 # - libgomp1: lightgbm/xgboost
 # - tini: PID 1 + signal forwarding
 # - cron: worker scheduler
+# - procps: worker healthcheck process detection
 # - curl, ca-certificates: healthchecks + S3 backups
 # - awscli (via pip, see below): external object-storage backups
 RUN apt-get update \
@@ -60,6 +61,7 @@ RUN apt-get update \
         curl \
         cron \
         libgomp1 \
+        procps \
         tini \
         tzdata \
  && rm -rf /var/lib/apt/lists/*
