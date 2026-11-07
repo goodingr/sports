@@ -216,7 +216,7 @@ signed-in account can confirm a paid session and recover access while webhook
 delivery is pending. The same reconciliation handles webhook updates, including
 later cancellations. Stored access ends at the verified billing period
 boundary or an earlier applicable cancellation or trial end. A signed-in
-subscriber can use **Refresh billing status** on the account page if a
+subscriber can use **Refresh subscription status** on the account page if a
 renewal webhook is delayed. The refresh reads the existing Stripe account,
 customer, and subscription. It works while new enrollment is closed.
 The paid feed can take up to the configured Clerk cache lifetime to reflect

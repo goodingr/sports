@@ -7,10 +7,10 @@ import {
     configuredStripeScope,
     getStoredCustomerId,
     getVerifiedStripeAccount,
-    isPremiumStatus,
     ownsStripeCustomer,
     revokedSnapshot,
     snapshotFromSubscription,
+    type PremiumSnapshot,
     type StripeScope,
 } from "./billing";
 
@@ -87,7 +87,8 @@ export async function reconcileStripeSubscription(
         return false;
     }
 
-    return synchronizeCustomer(stripe, scope, customerId, userId, eventId, expectedUserId ? sub.id : undefined);
+    const snapshot = await synchronizeCustomer(stripe, scope, customerId, userId, eventId, expectedUserId ? sub.id : undefined);
+    return snapshot !== null;
 }
 
 /** Recover an existing current-price entitlement when verified checkout detects an existing subscription. */
@@ -100,18 +101,34 @@ export async function reconcileExistingCheckoutCustomer(
     await synchronizeCustomer(stripe, scope, customerId, userId, `checkout_existing:${customerId}:${scope.priceId}`, undefined, true);
 }
 
+export async function reconcileAccountSubscription(
+    stripe: Stripe, scope: StripeScope, userId: string,
+): Promise<boolean> {
+    const customerId = await getStoredCustomerId(userId, scope);
+    if (!customerId) return false;
+    await getVerifiedStripeAccount(stripe, scope);
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.id !== customerId || !ownsStripeCustomer(customer, userId, scope.livemode)) {
+        throw new Error("Stripe customer ownership could not be verified");
+    }
+    const snapshot = await synchronizeCustomer(stripe, scope, customerId, userId, "account_refresh");
+    if (!snapshot) throw new Error("Stripe customer binding changed during refresh");
+    return snapshot.is_premium;
+}
+
 async function synchronizeCustomer(
     stripe: Stripe, scope: StripeScope, customerId: string, userId: string, eventId: string,
     requiredActiveId?: string, requireInitialPremium = false,
-): Promise<boolean> {
+): Promise<PremiumSnapshot | null> {
     // Re-read current provider state after writing to handle delayed and racing updates.
     for (let attempt = 0; attempt < 3; attempt += 1) {
         const state = await currentCustomerState(stripe, customerId, userId, scope, requiredActiveId);
-        if (attempt === 0 && (!state.verified || (requireInitialPremium && !state.snapshot.is_premium))) return false;
+        if (attempt === 0 && (!state.verified || (requireInitialPremium && !state.snapshot.is_premium))) return null;
         await applySnapshot(userId, state.snapshot, eventId, scope);
         const confirmed = await currentCustomerState(stripe, customerId, userId, scope, requiredActiveId);
         if (JSON.stringify(state) === JSON.stringify(confirmed)) {
-            return confirmed.verified && await getStoredCustomerId(userId, scope) === customerId;
+            return confirmed.verified && await getStoredCustomerId(userId, scope) === customerId
+                ? confirmed.snapshot : null;
         }
     }
     throw new Error("Subscription state changed during synchronization");
@@ -137,9 +154,11 @@ async function currentCustomerState(
         }
     }
     subscriptions.sort((left, right) => right.created - left.created);
-    const current = subscriptions.find((sub) => isPremiumStatus(sub.status)) ?? subscriptions[0];
+    const snapshots = subscriptions.map((sub) => ({ sub, snapshot: snapshotFromSubscription(sub, priceId) }));
+    const current = snapshots.find(({ snapshot }) => snapshot.is_premium) ?? snapshots[0];
     return {
-        snapshot: current ? snapshotFromSubscription(current, priceId) : revokedSnapshot(customerId, "canceled"),
-        verified: !requiredActiveId || subscriptions.some((sub) => sub.id === requiredActiveId && sub.status === "active"),
+        snapshot: current?.snapshot ?? revokedSnapshot(customerId, "canceled"),
+        verified: !requiredActiveId || snapshots.some(({ sub, snapshot }) =>
+            sub.id === requiredActiveId && sub.status === "active" && snapshot.is_premium),
     };
 }

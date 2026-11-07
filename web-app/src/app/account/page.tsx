@@ -7,6 +7,7 @@ import { ManageSubscriptionButton } from "@/components/account/ManageSubscriptio
 import { isCheckoutSessionId } from "@/lib/stripe-entitlements";
 import { configuredStripeScope, hasScopedPremium, isPremiumStatus, scopedCustomerId } from "@/lib/billing";
 import { CheckoutReturnStatus } from "./CheckoutReturnStatus";
+import { RefreshSubscriptionButton } from "./RefreshSubscriptionButton";
 
 export const metadata: Metadata = {
     title: "Account | Sports Analytics",
@@ -115,6 +116,8 @@ export default async function AccountPage({ searchParams }: PageProps) {
                         </Link>
                     )}
                 </div>
+
+                {hasCustomer && <div className="mt-3"><RefreshSubscriptionButton /></div>}
 
                 <p className="mt-4 text-xs text-muted-foreground">
                     Manage payment method, update billing, or cancel at any time. Cancellation

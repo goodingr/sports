@@ -58,6 +58,7 @@ describe("account checkout return", () => {
         vi.stubEnv("STRIPE_PRICE_ID", "price_live");
         const publicMetadata = {
             is_premium: true, subscription_status: "active",
+            subscription_current_period_end: Math.floor(Date.now() / 1000) + 3600,
             stripe_customer_id: "cus_fixture", stripe_customer_account_id: "acct_fixture",
             stripe_customer_livemode: false,
             stripe_entitlement: {
@@ -77,5 +78,11 @@ describe("account checkout return", () => {
         const current = renderToStaticMarkup(await AccountPage(props));
         expect(current).toContain("Subscription confirmed.");
         expect(current).toContain("Pro Access");
+
+        publicMetadata.subscription_current_period_end = Math.floor(Date.now() / 1000);
+        const expired = renderToStaticMarkup(await AccountPage(props));
+        expect(expired).toContain("No active subscription");
+        expect(expired).toContain("Refresh subscription status");
+        expect(expired).not.toContain("Pro Access");
     });
 });

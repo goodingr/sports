@@ -116,14 +116,23 @@ function isStripeCustomerId(value: unknown): value is string {
     return typeof value === "string" && /^cus_[A-Za-z0-9_]+$/.test(value);
 }
 
-export function hasScopedPremium(metadata: Record<string, unknown>, scope: StripeScope | null): boolean {
-    if (!scope || metadata.is_premium !== true) return false;
+function isBillingEnd(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function hasScopedProof(metadata: Record<string, unknown>, scope: StripeScope): boolean {
     const customerId = scopedCustomerId(metadata, scope);
     const entitlement = metadata.stripe_entitlement;
     if (!customerId || !entitlement || typeof entitlement !== "object" || Array.isArray(entitlement)) return false;
     const proof = entitlement as Record<string, unknown>;
     return proof.customer_id === customerId && proof.account_id === scope.account
         && proof.livemode === scope.livemode && proof.price_id === scope.priceId;
+}
+
+export function hasScopedPremium(metadata: Record<string, unknown>, scope: StripeScope | null): boolean {
+    const periodEnd = metadata.subscription_current_period_end;
+    return !!scope && metadata.is_premium === true && isBillingEnd(periodEnd)
+        && periodEnd > Date.now() / 1000 && hasScopedProof(metadata, scope);
 }
 
 export function scopedCustomerId(metadata: Record<string, unknown>, scope: StripeScope | null): string | null {
@@ -180,24 +189,23 @@ function customerIdOf(sub: Stripe.Subscription): string | null {
 }
 
 function periodEndOf(sub: Stripe.Subscription, priceId?: string): number | null {
-    // In Stripe API 2025+, current_period_end lives on subscription items.
     const items = sub.items?.data;
-    const item = (priceId ? items?.find(({ price }) => price.id === priceId) : items?.[0]) as
-        | (Stripe.SubscriptionItem & { current_period_end?: number })
-        | undefined;
-    // Fallback for older API versions where it sat on the subscription itself.
-    const legacy = (sub as unknown as { current_period_end?: number }).current_period_end;
-    const periodEnd = item?.current_period_end ?? legacy;
-    if (typeof periodEnd !== "number") return null;
-    return sub.cancel_at ? Math.min(periodEnd, sub.cancel_at) : periodEnd;
+    const item = priceId ? items?.find(({ price }) => price?.id === priceId) : items?.[0];
+    const periodEnd = item?.current_period_end;
+    if (!isBillingEnd(periodEnd)) return null;
+    const cancelAt = sub.cancel_at ?? periodEnd;
+    const trialEnd = sub.status === "trialing" ? sub.trial_end : periodEnd;
+    if (!isBillingEnd(cancelAt) || !isBillingEnd(trialEnd)) return null;
+    return Math.min(periodEnd, cancelAt, trialEnd);
 }
 
 export function snapshotFromSubscription(sub: Stripe.Subscription, priceId?: string): PremiumSnapshot {
+    const periodEnd = periodEndOf(sub, priceId);
     return {
-        is_premium: isPremiumStatus(sub.status),
+        is_premium: isPremiumStatus(sub.status) && periodEnd !== null && periodEnd > Date.now() / 1000,
         subscription_status: sub.status,
         stripe_customer_id: customerIdOf(sub),
-        subscription_current_period_end: periodEndOf(sub, priceId),
+        subscription_current_period_end: periodEnd,
         subscription_cancel_at_period_end: sub.cancel_at_period_end || sub.cancel_at != null,
     };
 }
@@ -244,7 +252,7 @@ export async function applySnapshot(
             stripe_customer_livemode: scope.livemode,
         }),
     };
-    const matchesStored = (proof ? hasScopedPremium(pub, scope) : pub.stripe_entitlement == null)
+    const matchesStored = (proof ? hasScopedProof(pub, scope) : pub.stripe_entitlement == null)
         && Object.entries(nextPublic).every(([key, value]) =>
             value === null ? pub[key] == null : pub[key] === value,
         );

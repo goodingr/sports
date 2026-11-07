@@ -16,6 +16,7 @@ import {
 } from "./billing";
 
 const scope: StripeScope = { account: 'acct_test', livemode: false, priceId: 'price_test' };
+const NOW = 1_780_000_000;
 
 type StoredUser = {
     id: string;
@@ -69,9 +70,13 @@ function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.
 }
 
 beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW * 1000);
     setStripeForTests(null);
     setClerkForTests(null);
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("getVerifiedCheckoutPrice", () => {
     const product = { id: "prod_test", object: "product", active: true } as Stripe.Product;
@@ -162,6 +167,46 @@ describe("snapshotFromSubscription", () => {
         expect(snap.subscription_cancel_at_period_end).toBe(true);
         expect(snap.subscription_current_period_end).toBe(1_790_000_000);
     });
+
+    it("limits an authorized trial to its explicit end", () => {
+        const trial = makeSubscription({ status: "trialing", trial_end: NOW + 100 });
+        expect(snapshotFromSubscription(trial)).toMatchObject({
+            is_premium: true, subscription_current_period_end: NOW + 100,
+        });
+        vi.setSystemTime((NOW + 100) * 1000);
+        expect(snapshotFromSubscription(trial).is_premium).toBe(false);
+        expect(snapshotFromSubscription(makeSubscription({ status: "trialing", trial_end: null })).is_premium).toBe(false);
+    });
+
+    it("needs the exact product item with a valid end", () => {
+        const sub = makeSubscription();
+        sub.items.data[0].price = { id: "price_other" } as Stripe.Price;
+        Object.assign(sub, { current_period_end: NOW + 1000 });
+        expect(snapshotFromSubscription(sub, scope.priceId)).toMatchObject({
+            is_premium: false, subscription_current_period_end: null,
+        });
+        sub.items.data[0].price.id = scope.priceId;
+        sub.items.data[0].current_period_end = Infinity;
+        expect(snapshotFromSubscription(sub, scope.priceId)).toMatchObject({
+            is_premium: false, subscription_current_period_end: null,
+        });
+    });
+});
+
+describe("hasScopedPremium", () => {
+    it.each([undefined, null, NOW, NOW - 1, `${NOW + 1}`, NOW + 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+        "rejects an expired or malformed period end (%s) despite verified scope",
+        (end) => {
+            const metadata = {
+                is_premium: true, stripe_customer_id: "cus_abc",
+                stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
+                stripe_entitlement: { customer_id: "cus_abc", account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId },
+                subscription_current_period_end: end,
+            };
+            expect(hasScopedPremium(metadata, scope)).toBe(false);
+            expect(hasScopedPremium({ ...metadata, subscription_current_period_end: NOW + 1 }, scope)).toBe(true);
+        },
+    );
 });
 
 describe("applySnapshot", () => {

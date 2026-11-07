@@ -111,6 +111,8 @@ async function completeCheckout() {
 
 beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_780_000_000_000);
     directory = mkdtempSync(join(tmpdir(), 'sports-checkout-route-'));
     path = join(directory, 'intents.db');
     new CheckoutStore(path).close();
@@ -170,6 +172,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    vi.useRealTimers();
     setClerkForTests(null);
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -241,6 +244,7 @@ describe('POST /api/checkout', () => {
     it('blocks a second checkout for an existing Clerk subscriber', async () => {
         Object.assign(metadata, {
             is_premium: true, stripe_customer_id: 'cus_test',
+            subscription_current_period_end: 1_803_000_000,
             stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
             stripe_entitlement: {
                 customer_id: 'cus_test', account_id: scope.account, livemode: scope.livemode, price_id: validPrice.id,

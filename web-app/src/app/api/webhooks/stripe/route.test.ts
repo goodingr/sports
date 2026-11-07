@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import Stripe from "stripe";
 
 vi.mock("server-only", () => ({}));
@@ -142,10 +142,14 @@ function makeFakeClerk(users: Record<string, StoredUser>) {
 }
 
 beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_780_000_000_000);
     setStripeForTests(null);
     setClerkForTests(null);
     headersStore.clear();
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("POST /api/webhooks/stripe", () => {
     it("rejects requests with an invalid signature", async () => {
