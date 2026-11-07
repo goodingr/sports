@@ -436,3 +436,65 @@ def test_capture_rejects_stale_superseded_and_future_predictions(warehouse):
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {
         "quote_not_current_at_trial_book": 1
     }
+
+
+@pytest.mark.parametrize(
+    ("clock", "complete", "new_outcome"),
+    [
+        ("utc", True, "recorded"),
+        ("offset", True, "recorded"),
+        ("utc", False, "quote_not_current_at_trial_book"),
+        ("naive", False, "quote_not_current_at_trial_book"),
+        ("naive", True, "invalid_time"),
+    ],
+)
+def test_paper_quote_order_preserves_submillisecond_and_legacy_clocks(
+    warehouse, clock, complete, new_outcome
+):
+    db, trial, predictions, now = warehouse
+    base = (now - timedelta(seconds=1)).replace(microsecond=0)
+    older = base + timedelta(microseconds=100)
+    newer = base + timedelta(microseconds=200)
+    if clock == "offset":
+        newer = newer.astimezone(timezone(timedelta(hours=-5)))
+    elif clock == "naive":
+        newer = newer.replace(tzinfo=None)
+    with connect(db) as conn:
+        conn.execute(
+            "UPDATE odds_snapshots SET fetched_at_utc = ? WHERE snapshot_id = 'snapshot'",
+            (older.isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('a-new', ?, 1, 'the-odds-api', NULL)",
+            (newer.isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds_snapshot_game_starts
+            SELECT 'a-new', game_id, observed_start_utc FROM odds_snapshot_game_starts
+            WHERE snapshot_id = 'snapshot' AND game_id = 'game'
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            SELECT 'a-new', game_id, book_id, market, outcome, price_american,
+                   CASE WHEN market = 'totals' THEN 229.5 ELSE line END
+            FROM odds WHERE snapshot_id = 'snapshot' AND game_id = 'game'
+              AND (? OR (market = 'totals' AND outcome = 'Over'))
+            """,
+            (complete,),
+        )
+    assert capture_predictions(trial, predictions, trial.model_sha256, db) == {
+        "quote_not_current_at_trial_book": 1
+    }
+    latest = predictions.assign(
+        selected_totals_snapshot_id="a-new", selected_h2h_snapshot_id="a-new", total_line=229.5
+    )
+    assert capture_predictions(trial, latest, trial.model_sha256, db) == {new_outcome: 1}
+    with connect(db) as conn:
+        decision = conn.execute("SELECT snapshot_id, line FROM paper_decisions").fetchone()
+    if new_outcome == "recorded":
+        assert tuple(decision) == ("a-new", 229.5)
+    else:
+        assert decision is None

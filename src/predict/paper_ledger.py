@@ -23,6 +23,7 @@ from src.models.prediction_quality import expected_value, no_vig_pair
 from src.predict.paper_report import build_paper_report
 from src.predict.paper_schedule import record_known_fixtures
 from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start, settle_open_trials
+from src.predict.quote_order import latest_market_snapshot_id
 
 DEFAULT_RULES = Path("config/paper_trial.yml")
 SCHEMA_PATH = Path(__file__).with_name("paper_schema.sql")
@@ -146,7 +147,7 @@ def _eligible_game(conn: sqlite3.Connection, game_id: str, league: str) -> sqlit
 def _decision_quote(
     conn: sqlite3.Connection, trial: PaperTrial, row: Any, game: sqlite3.Row
 ) -> sqlite3.Row | None:
-    return conn.execute(
+    quote = conn.execute(
         """
         SELECT sn.snapshot_id, over.game_id, sn.sport_id, sn.source,
                sn.fetched_at_utc, b.book_id, b.name AS book,
@@ -166,17 +167,6 @@ def _decision_quote(
             WHERE paired.snapshot_id = sn.snapshot_id AND paired.game_id = over.game_id
               AND paired.book_id = b.book_id AND paired.market = 'totals'
           ) = 2
-          AND sn.snapshot_id = (
-            SELECT newest.snapshot_id FROM odds_snapshots newest
-            WHERE newest.sport_id = sn.sport_id AND newest.source = sn.source
-              AND EXISTS (
-                SELECT 1 FROM odds recent
-                WHERE recent.snapshot_id = newest.snapshot_id AND recent.game_id = over.game_id
-                  AND recent.market = 'totals'
-              )
-            ORDER BY julianday(newest.fetched_at_utc) DESC, newest.snapshot_id DESC
-            LIMIT 1
-          )
         """,
         (
             row.selected_totals_snapshot_id,
@@ -187,6 +177,12 @@ def _decision_quote(
             trial.book,
         ),
     ).fetchone()
+    if quote is None:
+        return None
+    latest = latest_market_snapshot_id(
+        conn, game_id=row.game_id, sport_id=game["sport_id"], source=trial.odds_source, market="totals"
+    )
+    return quote if quote["snapshot_id"] == latest else None
 
 
 def _model_inputs_match(conn: sqlite3.Connection, row: Any, quote: sqlite3.Row) -> bool:

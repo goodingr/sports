@@ -71,6 +71,49 @@ def publish_at_evaluation(payload, path):
     return publish_release(payload, path, commit_at=datetime.fromisoformat(payload["generated_at"]))
 
 
+@pytest.mark.parametrize(
+    ("clock", "complete", "issue_latest"),
+    [("utc", True, True), ("offset", True, True), ("utc", False, False), ("naive", True, False)],
+)
+def test_publication_rejects_older_quote_even_when_sqlite_clocks_tie(
+    warehouse, clock, complete, issue_latest
+):
+    path, start = warehouse
+    original = release(start)
+    evaluated_at = datetime.fromisoformat(original["generated_at"])
+    base = (evaluated_at - timedelta(seconds=1)).replace(microsecond=0)
+    older = base + timedelta(microseconds=100)
+    newer = base + timedelta(microseconds=200)
+    if clock == "offset":
+        newer = newer.astimezone(timezone(timedelta(hours=-5)))
+    elif clock == "naive":
+        newer = newer.replace(tzinfo=None)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE odds_snapshots SET fetched_at_utc = ? WHERE snapshot_id = 'quote'",
+            (older.isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('a-new', ?, 1, 'the-odds-api', NULL)",
+            (newer.isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            SELECT 'a-new', game_id, book_id, market, outcome, price_american, 225.5
+            FROM odds WHERE snapshot_id = 'quote' AND (? OR outcome = 'Over')
+            """,
+            (complete,),
+        )
+    assert publish_at_evaluation(original, path)["bets"] == []
+    latest = deepcopy(original)
+    latest["bets"][0].update(quote_snapshot_id="a-new", total_line=225.5)
+    result = publish_at_evaluation(latest, path)
+    assert result["bet_count"] == int(issue_latest)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == int(issue_latest)
+
+
 @pytest.mark.parametrize(("provider_lead", "issued"), [(12, False), (15, True), (31, False), (None, False)])
 def test_paper_approved_pick_uses_provider_tipoff_at_publication_and_live_read(
     warehouse, monkeypatch, provider_lead, issued

@@ -19,6 +19,7 @@ from src.models.prediction_quality import (
     settle_total_side,
 )
 from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start
+from src.predict.quote_order import latest_market_snapshot_id
 
 SCHEMA_PATH = Path(__file__).with_name("published_schema.sql")
 VOID_STATUSES = {"cancelled", "canceled", "voided", "no_contest", "postponed"}
@@ -172,15 +173,6 @@ def _verified_quote(
         FROM odds o JOIN odds_snapshots sn USING (snapshot_id) JOIN books b USING (book_id)
         JOIN games g ON g.game_id = o.game_id AND g.sport_id = sn.sport_id
         WHERE o.game_id = ? AND o.snapshot_id = ? AND o.book_id = ? AND o.market = ?
-          AND sn.snapshot_id = (
-              SELECT newest.snapshot_id FROM odds_snapshots newest
-              WHERE newest.sport_id = g.sport_id AND newest.source = sn.source
-                AND EXISTS (
-                    SELECT 1 FROM odds recent WHERE recent.snapshot_id = newest.snapshot_id
-                      AND recent.game_id = g.game_id AND recent.market = o.market
-                )
-              ORDER BY julianday(newest.fetched_at_utc) DESC, newest.snapshot_id DESC LIMIT 1
-          )
         """,
         (pick["game_id"], pick["quote_snapshot_id"], pick["quote_book_id"], market),
     ).fetchall()
@@ -188,6 +180,11 @@ def _verified_quote(
     if len(rows) != 2 or {row["outcome"] for row in rows} != expected:
         return None
     quote = rows[0]
+    latest = latest_market_snapshot_id(
+        conn, game_id=pick["game_id"], sport_id=quote["sport_id"], source=quote["source"], market=market
+    )
+    if pick["quote_snapshot_id"] != latest:
+        return None
     contract = pick.get("execution_contract") or {}
     max_age = min(15, contract.get("max_quote_age_minutes", 15))
     try:

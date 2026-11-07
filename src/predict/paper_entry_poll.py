@@ -191,6 +191,7 @@ def _plan(
 def _fresh_quotes(
     conn: sqlite3.Connection, trial: PaperTrial, due: dict[str, _ClosingFixture], now: datetime
 ) -> _FreshQuotes:
+    earliest = now - timedelta(minutes=trial.max_quote_age_minutes)
     fixture_starts = {fixture.game_id: fixture.start for fixture in due.values()}
     game_ids = list(fixture_starts)
     markers = ", ".join("?" for _ in game_ids)
@@ -216,10 +217,12 @@ def _fresh_quotes(
         conn,
         params=[
             *game_ids,
-            (now - timedelta(minutes=trial.max_quote_age_minutes)).isoformat(),
+            earliest.isoformat(),
             now.isoformat(),
         ],
     )
+    fetched = odds["fetched_at_utc"].map(_utc_timestamp)
+    odds = odds.loc[fetched.between(earliest, now)]
     raw_paths = dict(zip(odds["snapshot_id"], odds["raw_path"], strict=True))
     stored_starts = {}
     if _has_table(conn, "paper_entry_quote_starts"):

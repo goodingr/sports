@@ -390,6 +390,20 @@ def test_fresh_exact_pairs_reuse_without_quota_or_daily_reservation(warehouse):
 
 
 @pytest.mark.parametrize(
+    ("fetch_offset", "status"),
+    [
+        (timedelta(minutes=-10), "reusable"),
+        (timedelta(minutes=-10, microseconds=-1), "due"),
+        (timedelta(microseconds=1), "due"),
+    ],
+)
+def test_reuse_requires_the_exact_freshness_window(warehouse, fetch_offset, status):
+    _, _, events, _, _ = warehouse
+    _seed_quotes(events, fetched=NOW + fetch_offset)
+    assert paper_entry_poll.poll_entry() == {"status": status, "due_events": 2}
+
+
+@pytest.mark.parametrize(
     ("provider_lead", "outcome"),
     [(12, "outside_decision_window"), (15, "recorded")],
 )
