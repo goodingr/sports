@@ -1,0 +1,171 @@
+import json
+from datetime import datetime
+from unittest.mock import MagicMock
+
+import pytest
+import requests
+
+from scripts import commercial_interest_report as report
+
+FIRST_VIEW = "2026-11-01T00:00:00Z"
+JOIN = "2026-11-02T12:00:00Z"
+WITHDRAW = "2026-11-06T12:00:00Z"
+
+
+def user(user_id, *, source="direct", viewed=FIRST_VIEW, joined=None, withdrawn=None):
+    return {
+        "id": user_id,
+        "email_addresses": [{"email_address": "private@example.test"}],
+        "private_metadata": {
+            "commercialPriceInterest": {
+                "offerVersion": report.OFFER_VERSION,
+                "source": source,
+                "viewedAt": viewed,
+                "joinedAt": joined,
+                "withdrawnAt": withdrawn,
+            }
+        },
+    }
+
+
+def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
+    active = user("active", source="community", joined=JOIN)
+    old_offer = user("old_offer")
+    old_offer["private_metadata"]["commercialPriceInterest"]["offerVersion"] = "old-version"
+    result = report.build_report(
+        [
+            active,
+            active,
+            user("withdrawn", source="community", joined=JOIN, withdrawn=WITHDRAW),
+            user("viewed"),
+            user("excluded", source="email", joined=JOIN),
+            user("too_early", viewed="2026-10-31T23:59:59Z"),
+            user("at_cutoff", viewed="2026-11-02T00:00:00Z"),
+            user("bad_source", source="arbitrary account data"),
+            user("invalid_state", withdrawn=WITHDRAW),
+            old_offer,
+            {"id": "no_offer", "private_metadata": {}},
+        ],
+        viewed_from=datetime.fromisoformat(FIRST_VIEW),
+        viewed_before=datetime.fromisoformat("2026-11-02T00:00:00Z"),
+        exclude_user_ids={"excluded"},
+    )
+
+    assert result["population"] == "signed_in_price_offer_viewers"
+    assert result["totals"] == {"viewed": 3, "active": 1, "withdrawn": 1, "never_opted_in": 1}
+    assert result["by_source"]["community"] == {
+        "viewed": 2,
+        "active": 1,
+        "withdrawn": 1,
+        "never_opted_in": 0,
+    }
+    assert result["by_source"]["email"]["viewed"] == 0
+    assert result["invalid_offer_records"] == 2
+    serialized = json.dumps(result)
+    assert "private@example.test" not in serialized
+    assert "arbitrary account data" not in serialized
+
+
+def test_cli_paginates_and_prints_only_aggregates(monkeypatch, capsys):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_live_mock-secret")
+    monkeypatch.setattr(report, "_load_dotenv_if_available", lambda: None)
+    monkeypatch.setattr(report, "PAGE_SIZE", 2)
+    session = MagicMock()
+    session.get.side_effect = [
+        MagicMock(status_code=200, json=lambda: [user("mock-one"), user("mock-two")]),
+        MagicMock(status_code=200, json=lambda: [user("mock-three", joined=JOIN)]),
+    ]
+    monkeypatch.setattr(
+        report.requests, "Session", lambda: MagicMock(__enter__=lambda self: session)
+    )
+
+    assert report.main(["--exclude-user-id", "mock-two"]) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert "mock-secret" not in output.out and "mock-one" not in output.out
+    assert json.loads(output.out)["clerk_mode"] == "live"
+    assert json.loads(output.out)["totals"]["viewed"] == 2
+    assert json.loads(output.out)["totals"]["active"] == 1
+    assert [call.kwargs["params"]["offset"] for call in session.get.call_args_list] == [0, 2]
+    assert all(call.args[0] == report.CLERK_USERS_URL for call in session.get.call_args_list)
+
+
+def test_failed_page_emits_no_partial_report_or_private_error(monkeypatch, capsys):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_live_mock-secret")
+    monkeypatch.setattr(report, "_load_dotenv_if_available", lambda: None)
+    monkeypatch.setattr(report, "PAGE_SIZE", 1)
+    session = MagicMock()
+    session.get.side_effect = [
+        MagicMock(status_code=200, json=lambda: [user("mock-one")]),
+        requests.ConnectionError("mock-secret private@example.test"),
+    ]
+    monkeypatch.setattr(
+        report.requests, "Session", lambda: MagicMock(__enter__=lambda self: session)
+    )
+
+    assert report.main([]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Clerk user request or response could not be read.\n"
+
+
+def test_test_credential_rejected_by_default_before_any_request(monkeypatch, capsys):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_mock-secret")
+    monkeypatch.setattr(report, "_load_dotenv_if_available", lambda: None)
+    fetch_users = MagicMock()
+    monkeypatch.setattr(report, "fetch_users", fetch_users)
+
+    assert report.main([]) == 1
+    fetch_users.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "CLERK_SECRET_KEY does not match the expected live mode.\n"
+
+
+def test_explicit_dotenv_selects_test_key_without_overwriting_inherited_key(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_live_inherited-secret")
+    default_loader = MagicMock()
+    monkeypatch.setattr(report, "_load_dotenv_if_available", default_loader)
+    fetch_users = MagicMock(return_value=[])
+    monkeypatch.setattr(report, "fetch_users", fetch_users)
+    dotenv_path = tmp_path / "pilot.env"
+    dotenv_path.write_text("CLERK_SECRET_KEY='sk_test_file-secret'\n", encoding="utf-8")
+
+    assert report.main(["--dotenv", str(dotenv_path), "--expected-mode", "test"]) == 0
+    fetch_users.assert_called_once_with("sk_test_file-secret")
+    default_loader.assert_not_called()
+    output = capsys.readouterr()
+    assert json.loads(output.out)["clerk_mode"] == "test"
+    assert output.err == ""
+    assert "file-secret" not in output.out
+    assert report.os.environ["CLERK_SECRET_KEY"] == "sk_live_inherited-secret"
+
+
+@pytest.mark.parametrize(
+    ("dotenv_content", "expected_error"),
+    [
+        (None, "Clerk credential configuration could not be read.\n"),
+        ("OTHER_KEY=example\n", "CLERK_SECRET_KEY is required.\n"),
+        (
+            "CLERK_SECRET_KEY=${CLERK_SECRET_KEY}\n",
+            "CLERK_SECRET_KEY does not match the expected live mode.\n",
+        ),
+    ],
+)
+def test_explicit_dotenv_never_falls_back_or_exposes_credential_path(
+    monkeypatch, capsys, tmp_path, dotenv_content, expected_error
+):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_live_inherited-secret")
+    fetch_users = MagicMock()
+    monkeypatch.setattr(report, "fetch_users", fetch_users)
+    dotenv_path = tmp_path / "private credential filename.env"
+    if dotenv_content is not None:
+        dotenv_path.write_text(dotenv_content, encoding="utf-8")
+
+    assert report.main(["--dotenv", str(dotenv_path)]) == 1
+    fetch_users.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == expected_error

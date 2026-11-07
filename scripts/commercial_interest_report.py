@@ -1,0 +1,217 @@
+"""Count signed-in users' current interest in the $29 monthly offer."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections.abc import Iterable, Iterator, Sequence, Set
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import requests
+from dotenv import dotenv_values
+
+# Support direct invocation as well as python -m scripts.commercial_interest_report.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.data.config import _load_dotenv_if_available  # noqa: E402
+
+OFFER_VERSION = "premium-29-usd-monthly-v1"
+SOURCES = ("direct", "community", "referral", "email", "other")
+METRICS = ("viewed", "active", "withdrawn", "never_opted_in")
+CLERK_USERS_URL = "https://api.clerk.com/v1/users"
+PAGE_SIZE = 500
+
+
+class ReportError(Exception):
+    """A sanitized error suitable for display without account data."""
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _cohort_timestamp(value: str) -> datetime:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        raise argparse.ArgumentTypeError("expected an ISO 8601 timestamp with a UTC offset")
+    return parsed
+
+
+def _read_clerk_key(dotenv_path: Path | None, expected_mode: str) -> str:
+    try:
+        if dotenv_path is None:
+            _load_dotenv_if_available()
+            value = os.environ.get("CLERK_SECRET_KEY")
+        else:
+            with dotenv_path.open(encoding="utf-8") as stream:
+                values = dotenv_values(stream=stream, interpolate=False)
+            value = values.get("CLERK_SECRET_KEY")
+    except (OSError, ValueError):
+        raise ReportError("Clerk credential configuration could not be read.") from None
+
+    secret_key = (value or "").strip()
+    if not secret_key:
+        raise ReportError("CLERK_SECRET_KEY is required.")
+    prefix = f"sk_{expected_mode}_"
+    if not secret_key.startswith(prefix) or secret_key == prefix:
+        raise ReportError(f"CLERK_SECRET_KEY does not match the expected {expected_mode} mode.")
+    return secret_key
+
+
+def fetch_users(secret_key: str) -> Iterator[dict[str, Any]]:
+    """Page through the Clerk REST API in ascending creation order."""
+    with requests.Session() as session:
+        session.headers.update(
+            {"Authorization": f"Bearer {secret_key}", "Accept": "application/json"}
+        )
+        offset = 0
+        while True:
+            params: dict[str, str | int] = {
+                "limit": PAGE_SIZE,
+                "offset": offset,
+                "order_by": "+created_at",
+            }
+            try:
+                response = session.get(
+                    CLERK_USERS_URL,
+                    params=params,
+                    timeout=20,
+                    allow_redirects=False,
+                )
+                if response.status_code != 200:
+                    raise ReportError(f"Clerk user request returned HTTP {response.status_code}.")
+                users = response.json()
+            except (requests.RequestException, ValueError):
+                raise ReportError("Clerk user request or response could not be read.") from None
+
+            if not isinstance(users, list) or len(users) > PAGE_SIZE:
+                raise ReportError("Clerk returned an unexpected user list format.")
+            yield from users
+            if len(users) < PAGE_SIZE:
+                return
+            offset += len(users)
+
+
+def build_report(
+    users: Iterable[dict[str, Any]],
+    *,
+    viewed_from: datetime | None = None,
+    viewed_before: datetime | None = None,
+    exclude_user_ids: Set[str] = frozenset(),
+) -> dict[str, Any]:
+    """Aggregate current states for an optional half-open cohort of first views."""
+    by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
+    seen: set[str] = set()
+    invalid_offer_records = 0
+    for user in users:
+        if not isinstance(user, dict) or not isinstance(user.get("id"), str) or not user["id"]:
+            raise ReportError("Clerk returned a user without a valid ID.")
+        user_id = user["id"]
+        if user_id in exclude_user_ids or user_id in seen:
+            continue
+        seen.add(user_id)
+
+        metadata = user.get("private_metadata")
+        record = metadata.get("commercialPriceInterest") if isinstance(metadata, dict) else None
+        if not isinstance(record, dict) or record.get("offerVersion") != OFFER_VERSION:
+            continue
+
+        viewed_at = _parse_timestamp(record.get("viewedAt"))
+        if viewed_at is None:
+            invalid_offer_records += 1
+            continue
+        if (viewed_from is not None and viewed_at < viewed_from) or (
+            viewed_before is not None and viewed_at >= viewed_before
+        ):
+            continue
+
+        source = record.get("source")
+        joined_at = _parse_timestamp(record.get("joinedAt"))
+        withdrawn_at = _parse_timestamp(record.get("withdrawnAt"))
+        if (
+            source not in SOURCES
+            or (joined_at is None and record.get("joinedAt") is not None)
+            or (joined_at is not None and joined_at < viewed_at)
+            or (withdrawn_at is None and record.get("withdrawnAt") is not None)
+            or (withdrawn_at is not None and (joined_at is None or withdrawn_at < joined_at))
+        ):
+            invalid_offer_records += 1
+            continue
+
+        counts = by_source[source]
+        counts["viewed"] += 1
+        if withdrawn_at is not None:
+            counts["withdrawn"] += 1
+        elif joined_at is not None:
+            counts["active"] += 1
+        else:
+            counts["never_opted_in"] += 1
+
+    return {
+        "offer_version": OFFER_VERSION,
+        "population": "signed_in_price_offer_viewers",
+        "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "viewed_from": viewed_from.isoformat() if viewed_from else None,
+        "viewed_before": viewed_before.isoformat() if viewed_before else None,
+        "totals": {metric: sum(row[metric] for row in by_source.values()) for metric in METRICS},
+        "by_source": by_source,
+        "invalid_offer_records": invalid_offer_records,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dotenv", type=Path, help="read CLERK_SECRET_KEY only from this .env file"
+    )
+    parser.add_argument(
+        "--expected-mode",
+        choices=("live", "test"),
+        default="live",
+        help="required Clerk credential mode (default: live)",
+    )
+    parser.add_argument(
+        "--viewed-from", type=_cohort_timestamp, help="inclusive first-view timestamp"
+    )
+    parser.add_argument(
+        "--viewed-before", type=_cohort_timestamp, help="exclusive first-view timestamp"
+    )
+    parser.add_argument(
+        "--exclude-user-id", action="append", default=[], help="omit a team or test user"
+    )
+    args = parser.parse_args(argv)
+    if args.viewed_from and args.viewed_before and args.viewed_from >= args.viewed_before:
+        parser.error("--viewed-from must be earlier than --viewed-before")
+
+    try:
+        secret_key = _read_clerk_key(args.dotenv, args.expected_mode)
+        report = build_report(
+            fetch_users(secret_key),
+            viewed_from=args.viewed_from,
+            viewed_before=args.viewed_before,
+            exclude_user_ids=set(args.exclude_user_id),
+        )
+    except ReportError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    report["clerk_mode"] = args.expected_mode
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
