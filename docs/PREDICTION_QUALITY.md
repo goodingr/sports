@@ -517,10 +517,11 @@ For an offline replay, replace `--fetch` with `--fixture` pointing to saved NBA
 HTML or Next.js JSON, and provide its original observation time via
 `--fixture-observed-at`.
 
-Add `--save` to retain the audit for the internal `/paper` dashboard. Its
-coverage panel shows the latest saved reports for today and tomorrow in Eastern
-time. It shows the schedule and warehouse timestamps separately and marks
-observations over six hours old. The dashboard refresh reads those files.
+Add `--save` to retain the audit for the internal `/paper` dashboard. A copy of
+the audit and its exact official response are also saved under
+`data/raw/schedules/nba` for the raw evidence backup. The coverage panel shows
+the latest saved reports for today and tomorrow in Eastern time, verifies the
+retained response checksum, and marks observations over six hours old.
 
 Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
 grades April 19 at midnight Eastern time and requires at least 150 graded

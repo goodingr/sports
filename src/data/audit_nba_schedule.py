@@ -348,6 +348,7 @@ def audit_schedule(
     fixture_observed_at: datetime | None = None,
     fetch: bool = False,
     db_path: Path | None = None,
+    save: bool = False,
 ) -> dict[str, Any]:
     """Read the current warehouse with an explicitly sourced official schedule observation."""
     if fetch == (fixture_path is not None):
@@ -389,17 +390,19 @@ def audit_schedule(
         rows = _audit_rows(
             conn, day, fixtures, provider, now, timedelta(minutes=trial.min_minutes_before_start)
         )
-    return {
+    digest = hashlib.sha256(raw).hexdigest()
+    official_source = {
+        **provenance,
+        "url": source_url,
+        "observed_at_utc": observed_at.isoformat(),
+        "sha256": digest,
+    }
+    report = {
         "report_version": 1,
         "trial_id": trial.trial_id,
         "eastern_date": day.isoformat(),
         "warehouse_audited_at_utc": now.isoformat(),
-        "official_source": {
-            **provenance,
-            "url": source_url,
-            "observed_at_utc": observed_at.isoformat(),
-            "sha256": hashlib.sha256(raw).hexdigest(),
-        },
+        "official_source": official_source,
         "official_calendar_games": count,
         "scheduled_regular_season_games": len(rows),
         "early_games": sum(row["early_entry"] for row in rows),
@@ -422,27 +425,64 @@ def audit_schedule(
         "by_status": dict(sorted(Counter(row["status"] for row in rows).items())),
         "fixtures": rows,
     }
+    if save:
+        name = _official_evidence_name(day, digest)
+        target = path.parent / name
+        if not target.is_file():
+            _write_atomic(target, raw)
+        official_source["raw_path"] = name
+        read_official_schedule_evidence(day, official_source, path.parent)
+        save_schedule_audit(
+            report, AUDIT_REPORTS_DIR, evidence_directory=path.parent / "raw/schedules/nba/audits"
+        )
+    return report
 
 
-def save_schedule_audit(report: dict[str, Any], directory: Path = AUDIT_REPORTS_DIR) -> Path:
+def _official_evidence_name(day: date, digest: str) -> str:
+    return f"raw/schedules/nba/{day.isoformat()}/{digest}.body"
+
+
+def read_official_schedule_evidence(day: date, source: dict[str, Any], data_dir: Path) -> bytes:
+    """Return the original official response only when its audit checksum matches."""
+    digest = source.get("sha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("Invalid official NBA schedule checksum")
+    name = _official_evidence_name(day, digest)
+    if source.get("raw_path") != name:
+        raise ValueError("Invalid official NBA schedule archive path")
+    raw = read_raw_evidence(name, data_dir)
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("Official NBA schedule checksum mismatch")
+    return raw
+
+
+def _write_atomic(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode="wb", dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def save_schedule_audit(
+    report: dict[str, Any], directory: Path = AUDIT_REPORTS_DIR, *, evidence_directory: Path | None = None
+) -> Path:
     """Atomically retain a dated audit without overwriting other observations."""
     day = date.fromisoformat(report["eastern_date"])
     audited_at = _utc(report["warehouse_audited_at_utc"])
     if audited_at is None:
         raise ValueError("Audit time must include a time zone")
-    day_dir = directory / day.isoformat()
-    day_dir.mkdir(parents=True, exist_ok=True)
-    path = day_dir / f"{audited_at:%Y%m%dT%H%M%S%fZ}-{uuid4().hex}.json"
-    temporary = None
-    try:
-        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=day_dir, delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(report, stream, indent=2, allow_nan=False)
-            stream.write("\n")
-        temporary.replace(path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    name = Path(day.isoformat()) / f"{audited_at:%Y%m%dT%H%M%S%fZ}-{uuid4().hex}.json"
+    payload = (json.dumps(report, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    if evidence_directory is not None:
+        _write_atomic(evidence_directory / name, payload)
+    path = directory / name
+    _write_atomic(path, payload)
     return path
 
 
@@ -471,9 +511,8 @@ def main() -> None:
             fetch=args.fetch,
             fixture_path=args.fixture,
             fixture_observed_at=observed_at,
+            save=args.save,
         )
-        if args.save:
-            save_schedule_audit(result)
     except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
         parser.exit(1, f"{exc}\n")
     print(json.dumps(result, indent=2))

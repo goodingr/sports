@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 import requests
 
+from scripts.backup_evidence import EVIDENCE_ZIP, create_evidence_zip, read_raw_evidence
 from src.data import audit_nba_schedule as audit
 from src.db.core import connect, initialize
 
@@ -314,3 +315,35 @@ def test_fetch_uses_only_official_public_url_and_preserves_observation_metadata(
     assert result["scheduled_regular_season_games"] == 1
     assert result["by_status"] == {"missing_warehouse_fixture": 1}
     assert result["official_source"]["etag"] == '"official-etag"'
+
+
+def test_saved_audit_retains_original_bytes_for_replay_after_restore(warehouse, monkeypatch):
+    data_dir = warehouse.parent
+    audits = data_dir / "audits"
+    monkeypatch.setattr(audit, "AUDIT_REPORTS_DIR", audits)
+    raw = _official([_card(1, NOW + timedelta(hours=1), 1, 2)])
+    original = data_dir / "official.html"
+    original.write_bytes(raw)
+
+    for _ in range(2):
+        result = audit.audit_schedule(DAY, fixture_path=original, fixture_observed_at=NOW, save=True)
+
+    source = result["official_source"]
+    assert source["raw_path"].startswith(f"raw/schedules/nba/{DAY}/")
+    assert (data_dir / source["raw_path"]).read_bytes() == raw
+    assert len(list((data_dir / "raw").rglob("*.body"))) == 1
+    saved = sorted((audits / DAY.isoformat()).glob("*.json"))
+    assert len(saved) == 2
+
+    restored = data_dir / "restored"
+    restored.mkdir()
+    create_evidence_zip(restored / EVIDENCE_ZIP, [("raw", data_dir / "raw")])
+    restored_report = json.loads(read_raw_evidence(
+        f"raw/schedules/nba/audits/{DAY}/{saved[-1].name}", restored
+    ))
+    assert restored_report == json.loads(saved[-1].read_bytes())
+    assert audit.read_official_schedule_evidence(DAY, restored_report["official_source"], restored) == raw
+    (data_dir / source["raw_path"]).write_bytes(b"corrupted")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        audit.audit_schedule(DAY, fixture_path=original, fixture_observed_at=NOW, save=True)
+    assert len(list((audits / DAY.isoformat()).glob("*.json"))) == 2

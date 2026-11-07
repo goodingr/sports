@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 import dash_bootstrap_components as dbc
 from dash import html
 
+from src.data.audit_nba_schedule import read_official_schedule_evidence
+
 _EASTERN = ZoneInfo("America/New_York")
 _STALE_AFTER = timedelta(hours=6)
 
@@ -34,8 +36,11 @@ def _deadline_text(row: dict[str, Any], now: datetime) -> str:
     return text
 
 
-def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
-    official = _timestamp(report["official_source"]["observed_at_utc"])
+def _saved_card(
+    day: date, report: dict[str, Any], now: datetime, data_dir: Path | None
+) -> dbc.Card:
+    source = report["official_source"]
+    official = _timestamp(source["observed_at_utc"])
     audited = _timestamp(report["warehouse_audited_at_utc"])
     fixtures = report["fixtures"]
     if (
@@ -85,6 +90,13 @@ def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
         ),
         html.P(f"Provider archives checked {checked}", className="small text-muted mb-2"),
     ]
+    if data_dir is not None and "raw_path" in source:
+        try:
+            read_official_schedule_evidence(day, source, data_dir)
+        except (OSError, ValueError):
+            details.append(dbc.Alert("Archived official response is unavailable or invalid.", color="warning"))
+        else:
+            details.append(html.P("Official response checksum verified.", className="small text-muted mb-2"))
     if unavailable:
         details.append(
             dbc.Alert(f"Provider archives unavailable or invalid · {unavailable}", color="warning")
@@ -135,7 +147,7 @@ def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
     return dbc.Card(dbc.CardBody([html.H5(day.strftime("%a, %b %d")), *details]), className="mb-3")
 
 
-def schedule_coverage_cards(directory: Path, now: datetime) -> list[Any]:
+def schedule_coverage_cards(directory: Path, now: datetime, *, data_dir: Path | None = None) -> list[Any]:
     today = now.astimezone(_EASTERN).date()
     cards = []
     for day in (today, today + timedelta(days=1)):
@@ -144,7 +156,7 @@ def schedule_coverage_cards(directory: Path, now: datetime) -> list[Any]:
             if latest is None:
                 cards.append(dbc.Alert(f"No saved audit for {day:%b %d}.", color="secondary"))
                 continue
-            cards.append(_saved_card(day, json.loads(latest.read_text(encoding="utf-8")), now))
+            cards.append(_saved_card(day, json.loads(latest.read_text(encoding="utf-8")), now, data_dir))
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             cards.append(dbc.Alert(f"Saved audit for {day:%b %d} is unavailable.", color="warning"))
     return cards

@@ -155,14 +155,17 @@ def validate_evidence_zip(path: Path) -> None:
 
 def read_raw_evidence(stored_path: str, data_dir: Path) -> bytes:
     """Resolve captured metadata without rewriting its original stored path."""
-    original = Path(stored_path)
-    if original.is_file():
-        return original.read_bytes()
     normalized = stored_path.replace("\\", "/")
-    marker = "/data/raw/"
-    if marker not in normalized:
-        raise FileNotFoundError(stored_path)
-    name = "raw/" + normalized.split(marker, 1)[1]
+    if normalized.startswith("raw/"):
+        name = normalized
+    else:
+        original = Path(stored_path)
+        if original.is_file():
+            return original.read_bytes()
+        marker = "/data/raw/"
+        if marker not in normalized:
+            raise FileNotFoundError(stored_path)
+        name = "raw/" + normalized.split(marker, 1)[1]
     _safe_name(name)
     relocated = data_dir / PurePosixPath(name)
     if relocated.is_file():

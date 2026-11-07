@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -228,6 +229,27 @@ def test_schedule_panel_marks_elapsed_deadline_without_updating_saved_evidence(t
     assert "Provider evidence at audit" in text
     assert "Missing warehouse fixture · Early start" in text
     assert path.read_bytes() == original
+
+
+def test_schedule_panel_checks_archived_official_response(tmp_path):
+    report = _schedule_report()
+    raw = b"official schedule fixture"
+    digest = hashlib.sha256(raw).hexdigest()
+    relative = f"raw/schedules/nba/{report['eastern_date']}/{digest}.body"
+    report["official_source"].update(raw_path=relative, sha256=digest)
+    audit_dir = tmp_path / "audits"
+    data_dir = tmp_path / "data"
+    archive = data_dir / relative
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(raw)
+    save_schedule_audit(report, audit_dir)
+
+    text = _text(dashboard.schedule_coverage_cards(audit_dir, NOW, data_dir=data_dir))
+    assert "Official response checksum verified." in text
+    archive.write_bytes(b"different input")
+    text = _text(dashboard.schedule_coverage_cards(audit_dir, NOW, data_dir=data_dir))
+    assert "Archived official response is unavailable or invalid." in text
+    assert "Official response checksum verified." not in text
 
 
 def test_schedule_panel_flags_old_or_unusable_audit(tmp_path, monkeypatch):

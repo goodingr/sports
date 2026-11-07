@@ -1025,7 +1025,9 @@ def show_paper_trials(_n_clicks: Optional[int]):
 
 @app.callback(Output("paper-schedule-coverage", "children"), Input("refresh-paper", "n_clicks"))
 def show_schedule_coverage(_n_clicks: Optional[int]):
-    return schedule_coverage_cards(AUDIT_REPORTS_DIR, datetime.now(timezone.utc))
+    return schedule_coverage_cards(
+        AUDIT_REPORTS_DIR, datetime.now(timezone.utc), data_dir=resolve_db_path().resolve().parent
+    )
 
 
 @app.callback(
