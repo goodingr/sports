@@ -320,7 +320,7 @@ if (( ! SKIP_PUBLISH && RELEASE_QUALITY_PASSED )); then
 			--output "$PAID_OUTPUT" \
 			--quality-output reports/publishable_bets/latest_quality_report.json \
 			--leagues "$PAID_LEAGUES_CSV" \
-		--allow-empty && [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
+			--allow-empty && [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
 		paid_timing_args+=(--paid-finished-at "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)")
 	fi
 else

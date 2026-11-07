@@ -78,6 +78,8 @@ def timing_report(
     if paid_started is not None:
         paid = {"status": "command_failed", "gate_started_age_seconds": _age(fetched, paid_started)}
     if paid_started is not None and paid_finished is not None:
+        if paid_finished < paid_started:
+            raise ValueError("The paid command clock moved backward")
         paid.update(status="release_unavailable", gate_finished_age_seconds=_age(fetched, paid_finished))
         releases = []
         if "published_releases" in tables:

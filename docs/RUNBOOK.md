@@ -222,6 +222,13 @@ The entry and closing collectors can both succeed on the same day without
 collecting anything, so their exit codes cannot confirm the daily capture.
 Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
 
+The daily Windows and Linux pipelines log `NBA quote timing` after the paid
+gate or its skip. The report measures paper attempts and recorded decisions
+linked to the fresh receipt, and gives the receipt age at the paid command
+start and finish. It reports a committed release only when the ledger identifies
+one release in that command window. A gate starting after 600 seconds cannot
+issue picks using that receipt under the current NBA freshness rule.
+
 On the current Windows host, `DailyPipelineRun` requires the PC to be awake and
 the task owner to be signed in at its scheduled time. A missed launch can appear
 as Task Scheduler Operational event `153` even when the missed-run counter is
