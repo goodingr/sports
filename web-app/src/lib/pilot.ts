@@ -30,10 +30,14 @@ export function isInterestConfigurationReady(): boolean {
 
     const mode = process.env.COMMERCIAL_PILOT_MODE ?? "live";
     if (mode !== "live" && mode !== "preview") return false;
+
+    // Turbopack inlines direct reads, including env aliases. Reflect reads the running environment.
     const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
-    if (!configuredUrl || !APP_ORIGIN.test(configuredUrl)) return false;
+    const runtimeUrl = Reflect.get(process.env, "NEXT_PUBLIC_APP_URL") as string | undefined;
+    if (!configuredUrl || !runtimeUrl || !APP_ORIGIN.test(configuredUrl) || !APP_ORIGIN.test(runtimeUrl)) return false;
     try {
         const url = new URL(configuredUrl);
+        if (url.origin !== new URL(runtimeUrl).origin) return false;
         const loopback = LOOPBACK_HOSTS.has(url.hostname.replace(/\.$/, ""));
         if (url.protocol !== "https:" && !loopback) return false;
         if (mode === "live" && loopback) return false;
@@ -42,7 +46,9 @@ export function isInterestConfigurationReady(): boolean {
     }
 
     const keyMode = mode === "live" ? "live" : "test";
-    return hasPublishableKey(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, keyMode)
+    const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    return publishableKey === Reflect.get(process.env, "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
+        && hasPublishableKey(publishableKey, keyMode)
         && hasKeyPrefix(process.env.CLERK_SECRET_KEY, `sk_${keyMode}_`);
 }
 
