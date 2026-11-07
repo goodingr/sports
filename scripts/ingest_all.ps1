@@ -2,14 +2,22 @@
 <#
 .SYNOPSIS
     Runs all data ingestion steps: Smart History + Live Odds + Live Scores.
+.PARAMETER ResearchProviderLeagues
+    Restrict live Odds API odds and scores to NBA and NCAAB.
 #>
 
 param(
     [switch]$SoccerOnly = $false,
     [switch]$SkipOdds = $false,
     [switch]$Paper = $false,
-    [string]$NbaQuoteReceipt = ""
+    [string]$NbaQuoteReceipt = "",
+    [switch]$ResearchProviderLeagues = $false
 )
+
+if ($ResearchProviderLeagues -and $SoccerOnly) {
+    Write-Error "ResearchProviderLeagues cannot be combined with SoccerOnly."
+    exit 64
+}
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -21,10 +29,14 @@ $soccerLeagues = @("EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
 $targetCoreLeagues = if ($SoccerOnly) { @() } else { $coreLeagues }
 $targetSoccerLeagues = $soccerLeagues
 $targetLeagues = $targetCoreLeagues + $targetSoccerLeagues
+$providerLeagues = if ($ResearchProviderLeagues) { @("NBA", "NCAAB") } else { $targetLeagues }
 $paperFailed = $false
-$capturePaperFirst = $Paper -and -not $SkipOdds -and ($targetLeagues -contains "NBA")
+$capturePaperFirst = $Paper -and -not $SkipOdds -and ($providerLeagues -contains "NBA")
 
 Write-Host "=== Starting Data Ingestion ==="
+if ($ResearchProviderLeagues -and -not $SkipOdds) {
+    Write-Host "Live Odds API odds and scores limited to NBA and NCAAB."
+}
 
 if ($capturePaperFirst) {
     try {
@@ -66,7 +78,7 @@ try {
 if (-not $SkipOdds) {
     Write-Host "Step 2: Fetching Live Odds..."
     $theOddsLeagues = @("NFL", "NBA", "CFB", "NCAAB", "NHL", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
-    foreach ($league in $targetLeagues) {
+    foreach ($league in $providerLeagues) {
         if ($theOddsLeagues -notcontains $league -or ($capturePaperFirst -and $league -eq "NBA")) { continue }
         try {
             Write-Host "Fetching odds for $league..."
@@ -83,7 +95,7 @@ if (-not $SkipOdds) {
 if (-not $SkipOdds) {
     Write-Host "Step 3: Fetching Live Scores..."
     try {
-        $commaLeagues = $targetLeagues -join ","
+        $commaLeagues = $providerLeagues -join ","
         & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env --resolve-stale --stale-lookback-days 14 2>&1 | ForEach-Object { "$_" }
         
     } catch {

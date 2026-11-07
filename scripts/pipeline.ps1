@@ -3,6 +3,8 @@
 .SYNOPSIS
     Master pipeline script. Orchestrates ingest, data hygiene, quality
     benchmarking, current prediction refresh, paper tracking, and paid-picks publishing.
+.PARAMETER ResearchProviderLeagues
+    Restrict live Odds API odds and scores to NBA and NCAAB.
 #>
 
 param(
@@ -12,8 +14,14 @@ param(
     [switch]$SkipPublish = $false,
     [switch]$SoccerOnly = $false,
     [switch]$SkipOdds = $false,
-    [switch]$SkipPaper = $false
+    [switch]$SkipPaper = $false,
+    [switch]$ResearchProviderLeagues = $false
 )
+
+if ($ResearchProviderLeagues -and $SoccerOnly) {
+    Write-Error "ResearchProviderLeagues cannot be combined with SoccerOnly."
+    exit 64
+}
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -77,7 +85,8 @@ if ($LASTEXITCODE -ne 0) {
 # 1. Ingest All Data
 Write-Host "=== Starting Data Ingestion ==="
 & "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds `
-    -Paper:($paperEnabled -and -not $SkipPrediction) -NbaQuoteReceipt $nbaQuoteReceipt
+    -Paper:($paperEnabled -and -not $SkipPrediction) -NbaQuoteReceipt $nbaQuoteReceipt `
+    -ResearchProviderLeagues:$ResearchProviderLeagues
 if ($LASTEXITCODE -eq 2) {
     Write-Warning "The immediate NBA paper capture failed. Data ingestion continued."
     $paperFailed = $true

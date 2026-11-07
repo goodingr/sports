@@ -13,6 +13,7 @@
 #   --soccer-only      only process soccer leagues
 #   --skip-odds        skip odds + scores fetches (use cached data)
 #   --skip-paper       skip the private paper ledger
+#   --research-provider-leagues  collect live Odds API odds and scores for NBA and NCAAB only
 #
 # Each step's stdout/stderr is appended to logs/pipeline_<ts>.log.
 #
@@ -35,6 +36,7 @@ SKIP_PUBLISH=0
 SOCCER_ONLY=0
 SKIP_ODDS=0
 SKIP_PAPER=0
+RESEARCH_PROVIDER_LEAGUES=0
 
 for arg in "$@"; do
 	case "$arg" in
@@ -45,9 +47,15 @@ for arg in "$@"; do
 		--soccer-only)   SOCCER_ONLY=1 ;;
 		--skip-odds)     SKIP_ODDS=1 ;;
 		--skip-paper)    SKIP_PAPER=1 ;;
+		--research-provider-leagues) RESEARCH_PROVIDER_LEAGUES=1 ;;
 		*) echo "unknown arg: $arg" >&2; exit 64 ;;
 	esac
 done
+
+if (( RESEARCH_PROVIDER_LEAGUES && SOCCER_ONLY )); then
+	echo "--research-provider-leagues cannot be combined with --soccer-only." >&2
+	exit 64
+fi
 
 mkdir -p logs
 TS=$(date -u +%Y%m%d_%H%M%S)
@@ -137,6 +145,12 @@ else
 	LEAGUES=("${CORE_LEAGUES[@]}" "${SOCCER_LEAGUES[@]}")
 fi
 
+if (( RESEARCH_PROVIDER_LEAGUES )); then
+	PROVIDER_LEAGUES=(NBA NCAAB)
+else
+	PROVIDER_LEAGUES=("${LEAGUES[@]}")
+fi
+
 if [[ -n "${PAID_RELEASE_LEAGUES:-}" ]]; then
 	csv_to_array "$PAID_RELEASE_LEAGUES" PAID_LEAGUES
 else
@@ -158,6 +172,9 @@ PAID_LEAGUES_CSV=$(IFS=,; printf '%s' "${PAID_LEAGUES[*]}")
 log "============================================="
 log "pipeline start (skip_benchmark=$SKIP_TRAINING skip_prediction=$SKIP_PREDICTION skip_publish=$SKIP_PUBLISH soccer_only=$SOCCER_ONLY skip_odds=$SKIP_ODDS paper_enabled=$PAPER_ENABLED)"
 log "leagues: ${LEAGUES[*]}"
+if (( RESEARCH_PROVIDER_LEAGUES && ! SKIP_ODDS )); then
+	log "live Odds API odds and scores limited to NBA and NCAAB"
+fi
 log "paid release leagues: ${PAID_LEAGUES[*]}"
 log "============================================="
 
@@ -175,7 +192,7 @@ fi
 # ----------------------------------------------------------------------------
 CAPTURE_PAPER_FIRST=0
 NBA_QUOTE_RECEIPT=""
-if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${LEAGUES[@]}" | grep -qx NBA; then
+if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${PROVIDER_LEAGUES[@]}" | grep -qx NBA; then
 	CAPTURE_PAPER_FIRST=1
 	receipt_args=()
 	if NBA_QUOTE_RECEIPT=$(mktemp -t sports-nba-receipt-XXXXXXXX); then
@@ -211,7 +228,7 @@ fi
 
 if (( ! SKIP_ODDS )); then
 	log "step 2: live odds"
-	for league in "${LEAGUES[@]}"; do
+	for league in "${PROVIDER_LEAGUES[@]}"; do
 		if (( CAPTURE_PAPER_FIRST )) && [[ "$league" == NBA ]]; then continue; fi
 		log "  fetching odds: $league"
 		bucket_run ingest "odds[$league]" -- \
@@ -220,7 +237,7 @@ if (( ! SKIP_ODDS )); then
 
 	log "step 3: live scores"
 	# Bash's IFS+expansion form: assignment is local to this command line.
-	CSV_LEAGUES=$(IFS=,; printf '%s' "${LEAGUES[*]}")
+	CSV_LEAGUES=$(IFS=,; printf '%s' "${PROVIDER_LEAGUES[*]}")
 	bucket_run ingest "ingest_scores" -- \
 		python -m src.data.ingest_scores --leagues "$CSV_LEAGUES"
 else
