@@ -547,6 +547,8 @@ def run_decision_time_benchmark(
                     timing_bucket,
                     market=market,
                 )
+                # Select the quote without the score, then remove refunded bets.
+                timing_df = timing_df.dropna(subset=[contract.target_column])
                 timing_bucket_row_counts[market][timing_bucket] = max(
                     timing_bucket_row_counts[market][timing_bucket],
                     int(len(timing_df)),

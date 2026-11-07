@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import base64
 import json
+import sqlite3
+from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
+from src.api import auth
 from src.api.auth import get_current_user
 from src.api.main import app
 from src.api.routes import bets
+from src.api.settings import APISettings
 
 LOCKED_FIELD_NAMES = {
     "predicted_prob",
@@ -151,7 +156,11 @@ def teardown_function() -> None:
 
 
 def test_unsigned_jwt_cannot_unlock_premium(api_client, monkeypatch):
-    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
 
     token = _unsigned_jwt(
         {
@@ -173,27 +182,31 @@ def test_unsigned_jwt_cannot_unlock_premium(api_client, monkeypatch):
 def test_upcoming_public_response_does_not_leak_locked_fields(api_client, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: None
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("approved-game", "totals", "over"): {
+            **_publishable_future_bet(), "game_id": "approved-game",
+        }},
+    )
 
     response = api_client.get("/api/bets/upcoming")
 
     assert response.status_code == 200
     body = response.json()
     assert body["is_premium"] is False
-    assert body["data"]
+    assert [bet["game_id"] for bet in body["data"]] == ["approved-game"]
     _assert_no_locked_fields(body["data"][0])
 
 
-def test_live_history_public_response_does_not_leak_locked_fields(api_client, monkeypatch):
+def test_history_public_response_excludes_unsettled_games(api_client, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: None
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
 
     response = api_client.get("/api/bets/history")
 
     assert response.status_code == 200
-    live = next(item for item in response.json()["data"] if item["game_id"] == "live-game")
-    assert live["is_live"] is True
-    assert live["is_locked"] is True
-    _assert_no_locked_fields(live)
+    assert [item["game_id"] for item in response.json()["data"]] == ["completed-game"]
 
 
 def test_completed_history_public_response_does_not_leak_prediction_fields(api_client, monkeypatch):
@@ -210,8 +223,12 @@ def test_completed_history_public_response_does_not_leak_prediction_fields(api_c
     _assert_no_locked_fields(completed)
 
 
-def test_premium_upcoming_returns_empty_when_no_approved_rule_passes(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+@pytest.mark.parametrize("premium", [True, False])
+def test_upcoming_returns_empty_when_no_approved_rule_passes(
+    api_client, monkeypatch, premium, scoped_premium_user
+):
+    scoped_premium_user["public_metadata"]["is_premium"] = premium
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
 
@@ -219,13 +236,13 @@ def test_premium_upcoming_returns_empty_when_no_approved_rule_passes(api_client,
 
     assert response.status_code == 200
     body = response.json()
-    assert body["is_premium"] is True
+    assert body["is_premium"] is premium
     assert body["count"] == 0
     assert body["data"] == []
 
 
-def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch, scoped_premium_user):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(
         bets,
@@ -233,7 +250,6 @@ def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch)
         lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
     )
     monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
-    monkeypatch.setattr(bets, "_build_sportsbook_map", lambda recommended: {})
 
     response = api_client.get("/api/bets/upcoming")
 
@@ -249,9 +265,20 @@ def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch)
     assert bet["recommended_bet"] == "Over 222.5"
 
 
-def test_premium_upcoming_drops_rows_not_in_gated_set(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
-    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+def test_premium_upcoming_uses_gated_release_without_raw_predictions(
+    api_client, monkeypatch, scoped_premium_user
+):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
+    monkeypatch.setattr(
+        bets, "get_totals_data", lambda **kwargs: pytest.fail("raw predictions must not enter the paid feed")
+    )
+    odds_game_ids = []
+
+    def load_odds(game_ids):
+        odds_game_ids.extend(game_ids)
+        return {}
+
+    monkeypatch.setattr(bets, "_build_batch_odds_map", load_odds)
     monkeypatch.setattr(
         bets,
         "_load_gated_publishable_bets",
@@ -270,14 +297,14 @@ def test_premium_upcoming_drops_rows_not_in_gated_set(api_client, monkeypatch):
     assert body["is_premium"] is True
     assert body["count"] == 1
     assert body["data"][0]["game_id"] == "some-other-game"
+    assert odds_game_ids == ["some-other-game"]
 
 
-def test_premium_history_live_rows_filtered_by_gate(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_history_excludes_unsettled_games(api_client, monkeypatch, scoped_premium_user):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
     monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
-    monkeypatch.setattr(bets, "_build_sportsbook_map", lambda recommended: {})
 
     response = api_client.get("/api/bets/history")
 
@@ -288,40 +315,169 @@ def test_premium_history_live_rows_filtered_by_gate(api_client, monkeypatch):
     assert "completed-game" in game_ids
 
 
-def test_loader_returns_empty_when_publishable_file_absent(monkeypatch, tmp_path):
-    missing_path = tmp_path / "missing.json"
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", missing_path)
-
-    assert bets._load_gated_publishable_bets() == {}
-
-
-def test_loader_returns_empty_when_gate_did_not_pass(monkeypatch, tmp_path):
-    path = tmp_path / "latest_publishable_bets.json"
-    path.write_text(
-        json.dumps({"publishable_profitable_list_exists": False, "bets": []}),
-        encoding="utf-8",
+@pytest.mark.parametrize(
+    ("public_changes", "entitlement_changes"),
+    [
+        ({"stripe_entitlement": None}, {}),
+        ({"stripe_entitlement": ["cus_current"]}, {}),
+        ({"stripe_customer_livemode": False}, {"livemode": False}),
+        ({"stripe_customer_account_id": "acct_old"}, {"account_id": "acct_old"}),
+        ({}, {"price_id": "price_old"}),
+        ({}, {"customer_id": "cus_not_canonical"}),
+        ({"stripe_customer_account_id": "acct_old"}, {}),
+        ({"stripe_customer_id": "malformed"}, {"customer_id": "malformed"}),
+        ({"is_premium": 1}, {}),
+        ({"subscription_current_period_end": None}, {}),
+        ({"subscription_current_period_end": True}, {}),
+        ({"subscription_current_period_end": "4102444800"}, {}),
+        ({"subscription_current_period_end": 4102444800.5}, {}),
+        ({"subscription_current_period_end": 1 << 53}, {}),
+        ({"stripe_customer_livemode": 1}, {}),
+        ({}, {"livemode": 1}),
+        ({"stripe_customer_livemode": "true"}, {"livemode": "true"}),
+    ],
+)
+def test_stale_stripe_entitlements_never_unlock_paid_routes(
+    api_client, monkeypatch, scoped_premium_user, public_changes, entitlement_changes
+):
+    metadata = scoped_premium_user["public_metadata"]
+    metadata["stripe_entitlement"].update(entitlement_changes)
+    metadata.update(public_changes)
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
     )
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
+
+    upcoming = api_client.get("/api/bets/upcoming")
+    assert upcoming.status_code == 200
+    body = upcoming.json()
+    assert body["is_premium"] is False
+    assert body["data"][0]["is_locked"] is True
+    _assert_no_locked_fields(body["data"][0])
+    assert api_client.get("/api/bets/game/future-game/odds").status_code == 403
+
+
+def test_scoped_access_expires_at_period_end_and_accepts_verified_renewal(
+    api_client, monkeypatch, scoped_premium_user
+):
+    metadata = scoped_premium_user["public_metadata"]
+    period_end = metadata["subscription_current_period_end"]
+    now = period_end - 0.001
+    monkeypatch.setattr(auth, "time", SimpleNamespace(time=lambda: now))
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+
+    assert api_client.get("/api/bets/upcoming").json()["is_premium"] is True
+    now = period_end
+    expired = api_client.get("/api/bets/upcoming").json()
+    assert expired["is_premium"] is False
+    assert expired["data"][0]["is_locked"] is True
+    _assert_no_locked_fields(expired["data"][0])
+    assert api_client.get("/api/bets/game/future-game/odds").status_code == 403
+
+    metadata["subscription_current_period_end"] = period_end + 3600
+    assert api_client.get("/api/bets/upcoming").json()["is_premium"] is True
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_matching_test_mode_is_only_honored_with_configured_scope(
+    api_client, monkeypatch, scoped_premium_user, configured
+):
+    metadata = scoped_premium_user["public_metadata"]
+    metadata["stripe_customer_livemode"] = False
+    metadata["stripe_entitlement"]["livemode"] = False
+    settings = (
+        APISettings(
+            stripe_account_id="acct_current", stripe_price_id="price_monthly", stripe_livemode=False
+        )
+        if configured else APISettings()
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    app.dependency_overrides[get_current_user] = lambda: {"publicMetadata": metadata}
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+
+    upcoming = api_client.get("/api/bets/upcoming")
+    assert upcoming.status_code == 200
+    assert upcoming.json()["is_premium"] is configured
+    assert api_client.get("/health").json() == {"status": "healthy"}
+
+
+def test_loader_returns_empty_without_a_committed_release(monkeypatch):
+    monkeypatch.setattr(bets, "load_active_release", lambda _: {})
 
     assert bets._load_gated_publishable_bets() == {}
 
 
-def test_loader_keys_bets_by_game_market_side(monkeypatch, tmp_path):
-    path = tmp_path / "latest_publishable_bets.json"
-    path.write_text(
-        json.dumps(
+def test_loader_returns_empty_when_gate_did_not_pass(monkeypatch):
+    monkeypatch.setattr(
+        bets, "load_active_release",
+        lambda _: {"publishable_profitable_list_exists": False, "bets": []},
+    )
+
+    assert bets._load_gated_publishable_bets() == {}
+
+
+def test_loader_keys_bets_by_game_market_side(monkeypatch):
+    monkeypatch.setattr(
+        bets, "load_active_release", lambda _:
             {
                 "publishable_profitable_list_exists": True,
+                "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+                "passing_approved_rule_ids": ["r1"],
                 "bets": [
-                    {"game_id": "G1", "market": "totals", "side": "OVER"},
-                    {"game_id": "G2", "market": "moneyline", "side": "home"},
+                    {
+                        "game_id": "G1", "market": "totals", "side": "OVER", "rule_id": "r1",
+                        "quality_summary": {"passes_launch_gate": True},
+                    },
+                    {
+                        "game_id": "G2", "market": "moneyline", "side": "home", "rule_id": "r1",
+                        "quality_summary": {"passes_launch_gate": True},
+                    },
                 ],
             }
-        ),
-        encoding="utf-8",
     )
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
 
     keyed = bets._load_gated_publishable_bets()
     assert ("G1", "totals", "over") in keyed
     assert ("G2", "moneyline", "home") in keyed
+
+
+@pytest.mark.parametrize(
+    ("enabled", "eligible", "expected"),
+    [(False, True, False), (True, True, True), (True, False, False), (True, None, False)],
+)
+def test_checkout_requires_enablement_and_delivery_evidence(
+    api_client, monkeypatch, tmp_path, enabled, eligible, expected
+):
+    db_path = tmp_path / "warehouse.db"
+    monkeypatch.setattr(
+        bets, "get_settings", lambda: APISettings(db_path=db_path, paid_enrollment_enabled=enabled)
+    )
+    checked = []
+
+    def delivery(path):
+        checked.append(path)
+        if eligible is None:
+            raise sqlite3.OperationalError("unavailable")
+        return eligible
+
+    monkeypatch.setattr(bets, "checkout_has_recent_delivery", delivery)
+
+    response = api_client.get("/api/bets/access")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"checkout_available": expected}
+    assert checked == ([db_path] if enabled else [])

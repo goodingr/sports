@@ -5,7 +5,7 @@
 # switching to standalone output is documented in docs/DEPLOYMENT.md as a
 # size optimization, not a requirement.
 
-ARG NODE_VERSION=20-bookworm-slim
+ARG NODE_VERSION=22-bookworm-slim
 
 FROM node:${NODE_VERSION} AS deps
 WORKDIR /app
@@ -26,12 +26,16 @@ ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/login
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/signup
+ARG COMMERCIAL_PILOT_ONLY=false
+ARG COMMERCIAL_PILOT_CONTACT_EMAIL
 
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
-    NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
+    COMMERCIAL_PILOT_ONLY=$COMMERCIAL_PILOT_ONLY \
+    COMMERCIAL_PILOT_CONTACT_EMAIL=$COMMERCIAL_PILOT_CONTACT_EMAIL
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -59,6 +63,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
 # Production-only install for the runtime stage.
 RUN npm ci --omit=dev --no-audit --no-fund \
  && npm cache clean --force \
+ && mkdir -m 0700 /app/checkout-state \
  && chown -R nextjs:nodejs /app
 
 USER nextjs

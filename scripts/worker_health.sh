@@ -19,6 +19,15 @@ set -uo pipefail
 
 HEARTBEAT_DIR=${HEARTBEAT_DIR:-/app/logs/heartbeat}
 TRACKED_JOBS=(predict train backup_local backup_remote)
+if [[ ${WORKER_PAPER_CLOSE_ENABLED:-0} == 1 ]]; then
+	TRACKED_JOBS+=(paper_close)
+fi
+if [[ ${WORKER_PAPER_ENTRY_ENABLED:-0} == 1 ]]; then
+	TRACKED_JOBS+=(paper_entry)
+fi
+if [[ ${WORKER_PAPER_EVENTS_ENABLED:-0} == 1 ]]; then
+	TRACKED_JOBS+=(paper_events)
+fi
 
 log() { printf '[health] %s\n' "$*" >&2; }
 

@@ -14,6 +14,17 @@
 	servers {
 		protocols h1 h2 h3
 	}
+	log {
+		# Upstream failures log the original request even when access logs filter it.
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "[?].*" ""
+				request>headers delete
+				resp_headers delete
+			}
+		}
+	}
 }
 
 # ----------------------------------------------------------------------------
@@ -41,7 +52,15 @@
 
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				# Checkout and sign-in can carry session IDs in URLs and headers.
+				request>uri regexp "[?].*" ""
+				request>headers delete
+				resp_headers delete
+			}
+		}
 	}
 }
 

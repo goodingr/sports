@@ -1,17 +1,19 @@
-'use client';
-
-import { Container } from '@/components/ui/Container';
-import { Check, AlertCircle } from 'lucide-react';
+import { currentUser } from '@clerk/nextjs/server';
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth, useUser } from '@clerk/nextjs';
+import { Check } from 'lucide-react';
+import { Container } from '@/components/ui/Container';
+import { configuredStripeScope, hasScopedPremium } from '@/lib/billing';
+import { isInterestConfigurationReady, isPilotOnly } from '@/lib/pilot';
+import { CheckoutButton } from './CheckoutButton';
 
-function hasPremiumAccess(metadata: Record<string, unknown> | null | undefined): boolean {
-    return metadata?.is_premium === true || metadata?.isPremium === true;
-}
+export const dynamic = 'force-dynamic';
 
-export default function Page() {
+export default async function Page() {
+    const scope = configuredStripeScope();
+    const user = scope ? await currentUser() : null;
+    const isPremium = hasScopedPremium(user?.publicMetadata ?? {}, scope);
+    const interestAvailable = !isPilotOnly() && process.env.COMMERCIAL_INTEREST_ENABLED === 'true'
+        && process.env.COMMERCIAL_INTEREST_ENROLLMENT_CLOSED !== 'true' && isInterestConfigurationReady();
     return (
         <Container className="py-12 sm:py-20 px-4">
             <div className="text-center mb-10 sm:mb-16">
@@ -19,8 +21,9 @@ export default function Page() {
                     Simple, Transparent Pricing
                 </h1>
                 <p className="text-base sm:text-xl text-muted-foreground">
-                    Unlock our full library of model-driven analytics and research tools.
+                    Access pregame picks that pass our model validation checks. Pick availability varies by slate.
                 </p>
+                <Link href="/record" className="mt-3 inline-block text-sm text-primary hover:underline">View the published pick record</Link>
             </div>
 
             <div className="max-w-md mx-auto bg-card border border-primary/20 rounded-2xl overflow-hidden shadow-2xl shadow-primary/10">
@@ -32,14 +35,12 @@ export default function Page() {
                     </div>
 
                     <ul className="space-y-3 sm:space-y-4 mb-8">
-                        <Feature text="Unlimited Access to All Picks" />
-                        <Feature text="Real-time Odds & Edge Analysis" />
-                        <Feature text="Detailed Performance Tracking" />
-                        <Feature text="Email Notifications" />
+                        <Feature text="Access to published pregame picks" />
+                        <Feature text="Sportsbook prices and model edge estimates" />
                         <Feature text="Cancel Anytime" />
                     </ul>
 
-                    <CheckoutButton />
+                    <CheckoutButton isPremium={isPremium} interestAvailable={interestAvailable} />
                 </div>
             </div>
 
@@ -59,75 +60,6 @@ export default function Page() {
                 </p>
             </div>
         </Container>
-    );
-}
-
-function CheckoutButton() {
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const router = useRouter();
-    const { isSignedIn, isLoaded } = useAuth();
-    const { user } = useUser();
-
-    const isPremium = hasPremiumAccess(user?.publicMetadata);
-
-    const handleCheckout = async () => {
-        setError(null);
-        if (!isLoaded) return;
-        if (!isSignedIn) {
-            router.push('/signup?redirect_url=/pricing');
-            return;
-        }
-
-        try {
-            setLoading(true);
-            const response = await fetch('/api/checkout', { method: 'POST' });
-
-            if (!response.ok) {
-                throw new Error(`Checkout failed (${response.status})`);
-            }
-
-            const data = (await response.json()) as { url?: string };
-            if (data.url) {
-                window.location.href = data.url;
-                return;
-            }
-            throw new Error('No checkout URL returned');
-        } catch (err) {
-            console.error('Checkout error:', err);
-            setError("We couldn't start checkout. Please try again in a moment.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (isLoaded && isPremium) {
-        return (
-            <div className="block w-full text-center bg-success/10 text-success border border-success/20 py-3 rounded-lg font-bold">
-                You&apos;re subscribed
-            </div>
-        );
-    }
-
-    return (
-        <>
-            <button
-                onClick={handleCheckout}
-                disabled={loading || !isLoaded}
-                aria-busy={loading}
-                className="block w-full bg-primary text-primary-foreground text-center py-3 rounded-lg font-bold hover:bg-amber-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-                {loading ? 'Loading...' : isSignedIn ? 'Subscribe Now' : 'Sign Up & Subscribe'}
-            </button>
-            {error && (
-                <p
-                    role="alert"
-                    className="mt-3 text-sm text-danger flex items-center gap-2 justify-center"
-                >
-                    <AlertCircle className="h-4 w-4" aria-hidden="true" /> {error}
-                </p>
-            )}
-        </>
     );
 }
 

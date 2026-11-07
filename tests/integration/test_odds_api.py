@@ -1,48 +1,40 @@
-"""Test what the Odds API returns without date filters"""
-import os
-import requests
-from dotenv import load_dotenv
+"""Exercise the historical Odds API contract without spending provider credits."""
 
-load_dotenv()
+from datetime import datetime, timezone
+from unittest.mock import Mock
 
-api_key = os.getenv("ODDS_API_KEY")
-url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+import pytest
 
-# Try without date filters
-params = {
-    "apiKey": api_key,
-    "regions": "us",
-    "markets": "h2h,totals",
-    "oddsFormat": "american",
-    "dateFormat": "iso",
-}
+from src.data.config import OddsAPISettings
+from src.data.ingest_odds import fetch_odds_history
 
-print("Requesting NBA odds WITHOUT date filters...")
-print(f"URL: {url}")
-print(f"Params: {params}\n")
 
-response = requests.get(url, params=params, timeout=10)
-response.raise_for_status()
+def test_historical_odds_use_the_providers_actual_snapshot_time(monkeypatch):
+    response = Mock(status_code=200, headers={})
+    response.json.return_value = {
+        "timestamp": "2026-01-18T11:55:00Z",
+        "data": [{"id": "fixture"}],
+    }
+    request = Mock(return_value=response)
+    monkeypatch.setattr("src.data.ingest_odds.requests.get", request)
+    settings = OddsAPISettings(api_key="test-key", sport="basketball_nba", market="totals")
 
-data = response.json()
-print(f"Total games returned: {len(data)}")
+    payload = fetch_odds_history(settings, datetime(2026, 1, 18, 12, tzinfo=timezone.utc))
 
-# Show game dates
-from datetime import datetime
-import pytz
-est = pytz.timezone('US/Eastern')
+    assert request.call_args.args[0].endswith("/v4/historical/sports/basketball_nba/odds")
+    assert request.call_args.kwargs["params"]["date"] == "2026-01-18T12:00:00Z"
+    assert payload["source"] == "the-odds-api-history"
+    assert payload["fetched_at"] == "2026-01-18T11:55:00+00:00"
+    assert payload["results"] == [{"id": "fixture"}]
+    assert "apiKey" not in payload["request"]["params"]
 
-dates = {}
-for game in data:
-    game_time = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00'))
-    game_time_est = game_time.astimezone(est)
-    date_key = game_time_est.strftime('%b %d')
-    if date_key not in dates:
-        dates[date_key] = []
-    dates[date_key].append(f"{game['away_team']} @ {game['home_team']}")
 
-print("\nGames by date:")
-for date in sorted(dates.keys()):
-    print(f"\n{date} ({len(dates[date])} games):")
-    for game in dates[date]:
-        print(f"  - {game}")
+@pytest.mark.parametrize("timestamp", [None, "2026-01-18T11:55:00", "2026-01-18T12:00:01Z"])
+def test_historical_odds_fail_on_ambiguous_or_future_snapshot_times(monkeypatch, timestamp):
+    response = Mock(status_code=200, headers={})
+    response.json.return_value = {"timestamp": timestamp, "data": []}
+    monkeypatch.setattr("src.data.ingest_odds.requests.get", Mock(return_value=response))
+    settings = OddsAPISettings(api_key="test-key", sport="basketball_nba")
+
+    with pytest.raises(RuntimeError, match="invalid as-of timestamp"):
+        fetch_odds_history(settings, datetime(2026, 1, 18, 12, tzinfo=timezone.utc))

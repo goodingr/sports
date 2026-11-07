@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import math
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -16,6 +19,8 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from src.db.core import DB_PATH, connect
+from src.models.prediction_quality import no_vig_pair
+from src.models.totals_calibration import calibration_residual_scale, split_totals_dates
 
 
 @dataclass
@@ -57,6 +62,8 @@ def _load_totals_from_db(league: str) -> pd.DataFrame:
         JOIN sports s ON s.sport_id = g.sport_id
         JOIN game_results gr ON gr.game_id = g.game_id
         WHERE s.league = ?
+          AND g.status = 'final'
+          AND julianday(g.start_time_utc) < julianday('now', '-6 hours')
           AND gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
           AND gr.total_close IS NOT NULL
@@ -65,17 +72,20 @@ def _load_totals_from_db(league: str) -> pd.DataFrame:
         rows = conn.execute(query, (league.upper(),)).fetchall()
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=[
-        "game_id",
-        "start_time_utc",
-        "home_score",
-        "away_score",
-        "home_moneyline_close",
-        "away_moneyline_close",
-        "spread_close",
-        "total_close",
-    ])
-    df["start_time_utc"] = pd.to_datetime(df["start_time_utc"], errors="coerce")
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "game_id",
+            "start_time_utc",
+            "home_score",
+            "away_score",
+            "home_moneyline_close",
+            "away_moneyline_close",
+            "spread_close",
+            "total_close",
+        ],
+    )
+    df["start_time_utc"] = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
     df = df.dropna(subset=["start_time_utc"])
     df["actual_total"] = df["home_score"] + df["away_score"]
     df = df.dropna(subset=["actual_total", "total_close"])
@@ -119,7 +129,7 @@ def _load_totals_from_forward_test(league: str) -> pd.DataFrame:
             "spread_line": "spread_close",
         }
     )
-    df["start_time_utc"] = pd.to_datetime(df["start_time_utc"], errors="coerce")
+    df["start_time_utc"] = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
     df = df.dropna(subset=["start_time_utc"])
     df["actual_total"] = df["home_score"] + df["away_score"]
 
@@ -190,9 +200,18 @@ def _load_totals_from_football_data(league: str) -> pd.DataFrame:
             df,
             ["AvgC<2.5", "Avg<2.5", "MaxC<2.5", "Max<2.5", "B365C<2.5", "B365<2.5"],
         )
-        home_ml_series = _select_decimal_column(df, ["AvgCH", "AvgH", "MaxCH", "MaxH", "B365CH", "B365H"])
-        away_ml_series = _select_decimal_column(df, ["AvgCA", "AvgA", "MaxCA", "MaxA", "B365CA", "B365A"])
-        if over_series is None or under_series is None or home_ml_series is None or away_ml_series is None:
+        home_ml_series = _select_decimal_column(
+            df, ["AvgCH", "AvgH", "MaxCH", "MaxH", "B365CH", "B365H"]
+        )
+        away_ml_series = _select_decimal_column(
+            df, ["AvgCA", "AvgA", "MaxCA", "MaxA", "B365CA", "B365A"]
+        )
+        if (
+            over_series is None
+            or under_series is None
+            or home_ml_series is None
+            or away_ml_series is None
+        ):
             continue
 
         start_times = pd.to_datetime(date_series, errors="coerce")
@@ -273,39 +292,54 @@ def _load_totals_dataframe(league: str) -> pd.DataFrame:
     return combined
 
 
-def train_totals_model(league: str, model_type: str = "gradient_boosting") -> TotalsTrainingArtifacts:
-    df = _load_totals_dataframe(league)
-    df = df.sort_values("start_time_utc")
+def train_totals_model(
+    league: str,
+    model_type: str = "gradient_boosting",
+    *,
+    input_path: Optional[Path] = None,
+    models_dir: Path = Path("models"),
+    metrics_dir: Path = Path("reports/backtests"),
+) -> TotalsTrainingArtifacts:
+    input_bytes = input_path.read_bytes() if input_path is not None else None
+    df = (
+        pd.read_parquet(BytesIO(input_bytes))
+        if input_bytes is not None
+        else _load_totals_dataframe(league)
+    )
+    if input_path is not None:
+        if "league" not in df:
+            raise ValueError("Totals research input must identify its league")
+        df = df[df["league"].astype(str).str.upper() == league.upper()].copy()
+    df = df.sort_values("start_time_utc").reset_index(drop=True)
     feature_cols = ["total_close", "spread_close", "home_moneyline_close", "away_moneyline_close"]
-    X = df[feature_cols].copy().astype(float)
-    for col in feature_cols[1:]:
-        X[col] = X[col].fillna(0.0)
-    y = df["actual_total"].astype(float)
-
-    split_idx = int(len(df) * 0.8)
-    if split_idx <= 0 or split_idx >= len(df):
-        split_idx = len(df) - 1
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+    df[feature_cols] = df[feature_cols].astype(float)
+    df[feature_cols[1:]] = df[feature_cols[1:]].fillna(0.0)
+    df["actual_total"] = pd.to_numeric(df["actual_total"], errors="raise")
+    if not np.isfinite(df[[*feature_cols, "actual_total"]].to_numpy()).all():
+        raise ValueError("Totals training needs finite features and final totals")
+    train, calibration, test = split_totals_dates(df)
+    for partition in (train, calibration, test):
+        partition["start_time_utc"] = pd.to_datetime(partition["start_time_utc"], utc=True)
+    X_train, y_train = train[feature_cols], train["actual_total"]
+    X_calibration, y_calibration = calibration[feature_cols], calibration["actual_total"]
+    X_test, y_test = test[feature_cols], test["actual_total"]
 
     if model_type == "random_forest":
         model = RandomForestRegressor(
-            n_estimators=200,
-            max_depth=10,
-            min_samples_leaf=4,
-            random_state=42,
-            n_jobs=-1
+            n_estimators=200, max_depth=10, min_samples_leaf=4, random_state=42, n_jobs=-1
         )
     else:
         # Default to gradient boosting
         model = GradientBoostingRegressor(random_state=42)
-        
+
     model.fit(X_train, y_train)
 
     preds = model.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_test, preds))
     mae = mean_absolute_error(y_test, preds)
-    residual_std = float(np.std(y_train - model.predict(X_train)))
+    calibration_predictions = model.predict(X_calibration)
+    residual_std = calibration_residual_scale(y_calibration.to_numpy(), calibration_predictions)
+    training_residual_std = float(np.std(y_train - model.predict(X_train)))
 
     total_lines = X_test["total_close"].to_numpy(copy=True)
     actual_diff = y_test.to_numpy(copy=True) - total_lines
@@ -324,14 +358,16 @@ def train_totals_model(league: str, model_type: str = "gradient_boosting") -> To
         "residual_std": residual_std,
         "feature_names": feature_cols,
         "model_type": model_type,
+        "uncertainty_source": "chronological_calibration_rmse",
+        "train_end": train["start_time_utc"].max().isoformat(),
+        "calibration_start": calibration["start_time_utc"].min().isoformat(),
+        "calibration_end": calibration["start_time_utc"].max().isoformat(),
     }
 
-    models_dir = Path("models")
-    models_dir.mkdir(exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
     model_path = models_dir / f"{league.lower()}_totals_{model_type}.pkl"
     joblib.dump(model_bundle, model_path)
 
-    metrics_dir = Path("reports") / "backtests"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = metrics_dir / f"{league.lower()}_totals_{model_type}_metrics.json"
     metrics = {
@@ -339,21 +375,77 @@ def train_totals_model(league: str, model_type: str = "gradient_boosting") -> To
         "model_type": model_type,
         "samples": len(df),
         "train_samples": len(X_train),
+        "calibration_samples": len(X_calibration),
         "test_samples": len(X_test),
         "rmse": float(rmse),
         "mae": float(mae),
         "residual_std": residual_std,
+        "uncertainty_source": "chronological_calibration_rmse",
+        "training_residual_std_diagnostic": training_residual_std,
+        "calibration_residual_mean": float(np.mean(y_calibration - calibration_predictions)),
+        "train_end": train["start_time_utc"].max().isoformat(),
+        "calibration_start": calibration["start_time_utc"].min().isoformat(),
+        "calibration_end": calibration["start_time_utc"].max().isoformat(),
+        "test_start": test["start_time_utc"].min().isoformat(),
+        "test_end": test["start_time_utc"].max().isoformat(),
         "over_under_accuracy": ou_accuracy,
         "over_under_samples": int(ou_considered),
         "over_under_pushes": int(push_mask.sum()),
     }
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    if input_bytes is not None:
+        metrics["input_path"] = str(input_path)
+        metrics["input_sha256"] = hashlib.sha256(input_bytes).hexdigest()
+    scored = test.copy()
+    scored["predicted_total"] = preds
+    for label, scale in (("calibrated", residual_std), ("training", training_residual_std)):
+        if scale <= 0 or not math.isfinite(scale):
+            metrics[f"test_{label}_brier"] = None
+            continue
+        z = (preds - total_lines) / scale
+        over_probability = np.array([0.5 * (1 + math.erf(value / math.sqrt(2))) for value in z])
+        scored[f"{label}_over_probability"] = over_probability
+        if ou_considered:
+            truth = (actual_diff[~push_mask] > 0).astype(float)
+            metrics[f"test_{label}_brier"] = float(
+                np.mean((over_probability[~push_mask] - truth) ** 2)
+            )
+        else:
+            metrics[f"test_{label}_brier"] = None
+    if {"over_moneyline", "under_moneyline"} <= set(scored):
+        market_probability = np.array(
+            [
+                no_vig_pair(over, under)[0]
+                for over, under in scored[["over_moneyline", "under_moneyline"]].itertuples(
+                    index=False, name=None
+                )
+            ]
+        )
+        comparable = np.isfinite(market_probability) & ~push_mask
+        scored["no_vig_market_over_probability"] = market_probability
+        metrics["test_market_comparison_samples"] = int(comparable.sum())
+        if comparable.any():
+            truth = (actual_diff[comparable] > 0).astype(float)
+            metrics["test_market_brier"] = float(
+                np.mean((market_probability[comparable] - truth) ** 2)
+            )
+            metrics["test_calibrated_brier_on_market_quotes"] = float(
+                np.mean((scored["calibrated_over_probability"].to_numpy()[comparable] - truth) ** 2)
+            )
+    validation_path = metrics_dir / f"{league.lower()}_totals_{model_type}_validation.parquet"
+    scored.to_parquet(validation_path, index=False)
+    metrics["validation_predictions_path"] = str(validation_path)
+    metrics_path.write_text(json.dumps(metrics, indent=2, allow_nan=False), encoding="utf-8")
 
     return TotalsTrainingArtifacts(model_path=model_path, metrics_path=metrics_path)
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train totals (over/under) regression models.")
+    parser.add_argument(
+        "--input", type=Path, help="Optional audited totals rows in Parquet with a league column"
+    )
+    parser.add_argument("--models-dir", type=Path, default=Path("models"))
+    parser.add_argument("--metrics-dir", type=Path, default=Path("reports/backtests"))
     parser.add_argument(
         "--league",
         required=True,
@@ -375,9 +467,14 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    logging_config = getattr(__import__("logging"), "basicConfig")
-    logging_config(level=getattr(__import__("logging"), args.log_level))
-    artifacts = train_totals_model(args.league, model_type=args.model_type)
+    logging.basicConfig(level=getattr(logging, args.log_level))
+    artifacts = train_totals_model(
+        args.league,
+        model_type=args.model_type,
+        input_path=args.input,
+        models_dir=args.models_dir,
+        metrics_dir=args.metrics_dir,
+    )
     print(f"Totals model saved to {artifacts.model_path}")
     print(f"Metrics written to {artifacts.metrics_path}")
 

@@ -585,6 +585,7 @@ def build_base_dataset(seasons: Iterable[int], league: str) -> pd.DataFrame:
             JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id
             JOIN games g ON g.game_id = o.game_id
             WHERE g.sport_id = ? AND o.market = 'h2h'
+              AND s.source IS NOT 'cfbd_lines'
             """,
             conn,
             params=(sport_id,),

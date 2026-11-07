@@ -7,6 +7,8 @@ from src.models.train_betting import (
     FeatureContract,
     FoldSafeFeaturePruner,
     _contract_for_market,
+    _rolling_origin_splits,
+    load_training_frame,
     rolling_origin_validate,
 )
 
@@ -146,3 +148,30 @@ def test_market_only_rolling_validation_reports_quality_metrics():
     assert summary["validation_rows"] == 4
     assert summary["brier_score"] == summary["market_brier_score"]
     assert summary["betting_rule"]["bets"] > 0
+
+
+def test_validation_keeps_sides_together_and_respects_quote_clock():
+    start = pd.Timestamp("2026-01-01", tz="UTC")
+    games = pd.DataFrame(
+        {
+            "game_id": ["old", "in_progress", "new", "new", "next", "next"],
+            "start_time_utc": start + pd.to_timedelta([0, 46, 53, 53, 79, 79], unit="h"),
+            "snapshot_time_utc": start + pd.to_timedelta([-1, 45, 48, 50, 72, 72], unit="h"),
+        }
+    )
+
+    splits = _rolling_origin_splits(games, folds=2, min_train_size=2)
+
+    assert [(train.tolist(), test.tolist()) for train, test in splits] == [
+        ([0], [2, 3]),
+        ([0, 1, 2, 3], [4, 5]),
+    ]
+
+
+def test_binary_trainer_excludes_three_way_soccer_moneyline(tmp_path):
+    frame, contract = load_training_frame(
+        "moneyline", db_path=tmp_path / "missing.db", leagues=["epl", "LALIGA"]
+    )
+
+    assert frame.empty
+    assert contract.target_column == "target_win"

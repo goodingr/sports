@@ -11,6 +11,8 @@ env*/
 .env
 .env.*
 !.env.example
+/config/research_provider_leagues.local
+/config/paid_release_leagues.local
 
 ## Packaging / build
 build/
@@ -69,6 +71,8 @@ data/**/*.db
 # Database files
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
 
 # Archives
 *.zip

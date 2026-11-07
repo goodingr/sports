@@ -578,7 +578,9 @@ def run_nba_totals_clv_sweep(
             )
             continue
         for timing_bucket in TIMING_BUCKETS:
-            timing_df = select_timing_training_frame(nba_df, timing_bucket)
+            timing_df = select_timing_training_frame(nba_df, timing_bucket).dropna(
+                subset=[contract.target_column]
+            )
             timing_bucket_row_counts[timing_bucket] = max(
                 timing_bucket_row_counts[timing_bucket],
                 int(len(timing_df)),

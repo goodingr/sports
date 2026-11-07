@@ -56,10 +56,14 @@ export default function MoneylinePage() {
                     Example: +130 = 100 / (130 + 100) = 43.5%</li>
             </ul>
 
-            <h2>Finding Value</h2>
+            <h2>Evaluating an estimated edge</h2>
 
             <p>
-                The key to successful betting is finding &ldquo;value&rdquo; - situations where your predicted probability of a team winning is higher than the implied probability from the odds. Our prediction system uses machine learning to identify these opportunities.
+                The odds give you the break-even win probability. If a model estimates a higher
+                win probability, that difference is an estimated edge. Testing the estimate
+                against results and comparable sportsbook prices helps assess it.
+                {' '}<Link href="/record">View the published pick record</Link> for selections
+                that passed publication checks.
             </p>
 
             <div className="mt-8 pt-8 border-t border-gray-700">

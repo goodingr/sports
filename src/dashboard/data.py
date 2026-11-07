@@ -258,6 +258,11 @@ def load_forward_test_data(
         base_query += " WHERE " + " AND ".join(where_clauses)
         
     with connect() as conn:
+        predictions_exist = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'predictions' AND type IN ('table', 'view')"
+        ).fetchone()
+        if predictions_exist is None:
+            return pd.DataFrame()
         df = pd.read_sql_query(base_query, conn, params=params)
         
     if df.empty:
@@ -506,7 +511,7 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
     
     # 2. Determine Winner (won)
     # Default to None (NaN)
-    bets["won"] = np.nan
+    bets["won"] = pd.Series(np.nan, index=bets.index, dtype=object)
     
     # Only calculate for games with a result
     has_result = bets["result"].notna()
@@ -652,7 +657,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
     totals["actual_total"] = totals["total_points"] # Keep this for internal use if needed, or just use total_points
     
     # Calculate Winner
-    totals["winner"] = np.nan
+    totals["winner"] = pd.Series(np.nan, index=totals.index, dtype=object)
     
     # We only grade as "Over/Under/Push" if the game is FINAL.
     # We use 'result' column (which is only set if status='final') as the flag.
@@ -671,7 +676,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
         totals.loc[mask_valid & mask_push, "winner"] = "push"
         
     # Calculate Won
-    totals["won"] = np.nan
+    totals["won"] = pd.Series(np.nan, index=totals.index, dtype=object)
     # Only grade Won/Lost for decisive results (Over/Under)
     # Pushes remain won=NaN (Void)
     mask_decided = totals["winner"].isin(["over", "under"])
@@ -1033,13 +1038,15 @@ def get_recent_predictions(
         return pd.DataFrame()
 
     bets = _expand_predictions(df)
+    if bets.empty:
+        return pd.DataFrame()
     
     # Filter out finished games (only show games where won is None/NaN)
     bets = bets[bets["won"].isna()]
 
     # 1. Filter for upcoming games
     # Use the _ensure_utc helper to safely compare times
-    now = datetime.now(timezone.utc)
+    now = pd.Timestamp.now(tz="UTC")
     
     # Create a mask for future games
     # We need to handle the case where commence_time might be a string or datetime
@@ -1093,7 +1100,7 @@ def get_recent_predictions(
     if "commence_time" in bets.columns:
         bets = bets.sort_values("commence_time", ascending=True, na_position='last')
         # Now convert to display timezone AFTER sorting
-        bets["commence_time"] = _convert_to_display_timezone(bets["commence_time"])
+        bets["commence_time"] = bets["commence_time"].dt.tz_convert(DISPLAY_TIMEZONE)
     else:
         bets = bets.sort_values("predicted_at", ascending=True, na_position='last')
 
@@ -2399,6 +2406,8 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
     
     placeholders = ",".join("?" for _ in game_ids)
     
+    # Compare totals by instant so offset-equivalent captures stay visible as ties.
+    fetched_key = "CASE WHEN o.market = 'totals' THEN julianday(s.fetched_at_utc) ELSE s.fetched_at_utc END"
     query = f"""
         WITH latest_snapshot AS (
             SELECT
@@ -2406,7 +2415,7 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
                 o.book_id,
                 o.market,
                 o.outcome,
-                MAX(s.fetched_at_utc) AS max_fetched
+                MAX({fetched_key}) AS max_fetched
             FROM odds o
             JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
             WHERE o.game_id IN ({placeholders})
@@ -2419,7 +2428,9 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
             o.line,
             o.price_american AS moneyline,
             b.name AS book,
-            s.fetched_at_utc
+            s.fetched_at_utc,
+            s.snapshot_id,
+            {{observed_start}} AS observed_start_utc
         FROM odds o
         JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
         JOIN books b ON o.book_id = b.book_id
@@ -2428,7 +2439,7 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
          AND ls.book_id = o.book_id
          AND ls.market = o.market
          AND ls.outcome = o.outcome
-         AND ls.max_fetched = s.fetched_at_utc
+         AND ls.max_fetched = {fetched_key}
         WHERE o.game_id IN ({placeholders})
           AND o.price_american IS NOT NULL
     """
@@ -2436,12 +2447,23 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
     params = game_ids + game_ids # twice because of WITH clause and main query
     
     with connect() as conn:
-        rows = conn.execute(query, params).fetchall()
+        # Warehouses created before provider kickoff capture can still serve raw odds.
+        has_provider_starts = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'odds_snapshot_game_starts'"
+        ).fetchone()
+        observed_start = """
+            (SELECT observed_start_utc FROM odds_snapshot_game_starts proof
+             WHERE proof.snapshot_id = o.snapshot_id AND proof.game_id = o.game_id)
+        """ if has_provider_starts else "NULL"
+        rows = conn.execute(query.format(observed_start=observed_start), params).fetchall()
         
     if not rows:
         return pd.DataFrame()
         
-    df = pd.DataFrame(rows, columns=["game_id", "market", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    df = pd.DataFrame(rows, columns=[
+        "game_id", "market", "outcome", "line", "moneyline", "book", "fetched_at_utc",
+        "snapshot_id", "observed_start_utc",
+    ])
     
     # Add book_url
     if "book" in df.columns:

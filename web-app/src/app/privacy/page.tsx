@@ -1,5 +1,10 @@
 import { Container } from "@/components/ui/Container";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { isPilotOnly } from "@/lib/pilot";
+import { publicContactEmail } from "@/lib/public-contact";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Sports Analytics",
@@ -9,6 +14,8 @@ export const metadata: Metadata = {
 const LAST_UPDATED = "April 26, 2026";
 
 export default function PrivacyPage() {
+    const pilotOnly = isPilotOnly();
+    const contactEmail = publicContactEmail();
     return (
         <Container className="py-16 max-w-3xl">
             <div className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
@@ -38,11 +45,23 @@ export default function PrivacyPage() {
                             email, and authentication identifiers provided through our identity
                             provider (Clerk).
                         </li>
-                        <li>
-                            <strong className="text-foreground">Billing information:</strong> processed
-                            by our payment provider (Stripe). We do not store full card numbers on our
-                            servers.
-                        </li>
+                        {pilotOnly ? (
+                            <li id="pilot-data">
+                                <strong className="text-foreground">Pilot research.</strong> During
+                                enrollment, we store the offer version, first signed-in view time, and
+                                link source with your Clerk account. We record price interest and
+                                any withdrawal separately from your permission for email follow-up.
+                                We use your verified email for pilot research contact only while
+                                that permission is active. You can withdraw either on the{" "}
+                                <Link href="/interest" className="text-primary hover:underline">interest page</Link>.
+                            </li>
+                        ) : (
+                            <li>
+                                <strong className="text-foreground">Billing information:</strong> processed
+                                by our payment provider (Stripe). We do not store full card numbers on our
+                                servers.
+                            </li>
+                        )}
                         <li>
                             <strong className="text-foreground">Usage data:</strong> pages viewed,
                             features used, device and browser metadata, IP address, and approximate
@@ -59,7 +78,9 @@ export default function PrivacyPage() {
                     <h2 className="text-2xl font-bold text-foreground mb-3">3. How We Use Information</h2>
                     <ul className="list-disc pl-6 space-y-2">
                         <li>To operate, maintain, and improve the Service.</li>
-                        <li>To process subscriptions, payments, and refunds.</li>
+                        {pilotOnly
+                            ? <li>To measure interest in the proposed subscription.</li>
+                            : <li>To process subscriptions, payments, and refunds.</li>}
                         <li>To authenticate users and prevent fraud or abuse.</li>
                         <li>To communicate with you about your account or service updates.</li>
                         <li>To comply with legal obligations.</li>
@@ -80,9 +101,11 @@ export default function PrivacyPage() {
                     <p>We share information only with:</p>
                     <ul className="list-disc pl-6 space-y-2 mt-2">
                         <li>
-                            Service providers acting on our behalf (e.g., authentication, payment
-                            processing, hosting, analytics, email delivery), under contractual
-                            confidentiality obligations.
+                            Service providers acting on our behalf under contractual confidentiality
+                            obligations, including{" "}
+                            {pilotOnly
+                                ? "authentication, hosting, and email delivery."
+                                : "authentication, payment processing, hosting, analytics, and email delivery."}
                         </li>
                         <li>
                             Authorities or other parties when required by law, subpoena, or to protect
@@ -110,11 +133,14 @@ export default function PrivacyPage() {
                     <p>
                         Depending on your jurisdiction (e.g., GDPR, CCPA), you may have rights to
                         access, correct, delete, or port your personal information, and to object to
-                        or restrict certain processing. To exercise these rights, contact{" "}
-                        <a href="mailto:privacy@sportsanalytics.example" className="text-primary hover:underline">
-                            privacy@sportsanalytics.example
-                        </a>
-                        .
+                        or restrict certain processing.
+                        {contactEmail && (
+                            <> To exercise these rights, contact{" "}
+                                <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                                    {contactEmail}
+                                </a>.
+                            </>
+                        )}
                     </p>
                 </section>
 
@@ -154,13 +180,14 @@ export default function PrivacyPage() {
 
                 <section>
                     <h2 className="text-2xl font-bold text-foreground mb-3">12. Contact</h2>
-                    <p>
-                        Questions about this Privacy Policy can be sent to{" "}
-                        <a href="mailto:privacy@sportsanalytics.example" className="text-primary hover:underline">
-                            privacy@sportsanalytics.example
-                        </a>
-                        .
-                    </p>
+                    {contactEmail ? (
+                        <p>
+                            Questions about this Privacy Policy can be sent to{" "}
+                            <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                                {contactEmail}
+                            </a>.
+                        </p>
+                    ) : <p>Privacy email is currently unavailable.</p>}
                 </section>
             </div>
         </Container>

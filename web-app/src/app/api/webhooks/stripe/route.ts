@@ -1,24 +1,24 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import {
-    applySnapshot,
-    getStripe,
-    getStripeWebhookSecret,
-    resolveUserId,
-    revokedSnapshot,
-    snapshotFromSubscription,
-} from "@/lib/billing";
+import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
+import { configuredStripeScope, getStripe, getStripeWebhookSecret } from "@/lib/billing";
+import { reconcileStripeSubscription, resourceId } from "@/lib/stripe-entitlements";
 
 const HANDLED: ReadonlySet<Stripe.Event["type"]> = new Set([
     "checkout.session.completed",
     "customer.subscription.created",
     "customer.subscription.updated",
     "customer.subscription.deleted",
+    "customer.subscription.paused",
+    "customer.subscription.resumed",
     "invoice.payment_failed",
+    "invoice.paid",
 ]);
 
 export async function POST(req: Request) {
+    if (isPilotOnly()) return pilotBillingUnavailable();
+
     let stripe;
     let webhookSecret: string;
     try {
@@ -48,6 +48,11 @@ export async function POST(req: Request) {
     }
 
     try {
+        const scope = configuredStripeScope();
+        if (!scope) throw new Error("Stripe scope is not configured");
+        if (event.livemode !== scope.livemode || (event.account && event.account !== scope.account)) {
+            return new NextResponse(null, { status: 200 });
+        }
         await handleEvent(stripe, event);
     } catch (error) {
         console.error("[WEBHOOK_HANDLER_ERROR]", event.type, event.id, error);
@@ -68,72 +73,32 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
                     ? session.subscription
                     : session.subscription.id;
             const sub = await stripe.subscriptions.retrieve(subId);
-            await syncFromSubscription(sub, event.id, session.metadata?.userId ?? null);
+            if (resourceId(session.customer) !== resourceId(sub.customer)) return;
+            await reconcileStripeSubscription(stripe, sub, event.id, session.metadata);
             return;
         }
         case "customer.subscription.created":
-        case "customer.subscription.updated": {
+        case "customer.subscription.updated":
+        case "customer.subscription.deleted":
+        case "customer.subscription.paused":
+        case "customer.subscription.resumed": {
             const sub = event.data.object as Stripe.Subscription;
-            await syncFromSubscription(sub, event.id, null);
+            await reconcileStripeSubscription(stripe, sub, event.id, null);
             return;
         }
-        case "customer.subscription.deleted": {
-            const sub = event.data.object as Stripe.Subscription;
-            await syncDeleted(sub, event.id);
-            return;
-        }
-        case "invoice.payment_failed": {
+        case "invoice.payment_failed":
+        case "invoice.paid": {
             const invoice = event.data.object as Stripe.Invoice;
-            await syncFromInvoiceFailure(stripe, invoice, event.id);
+            const legacy = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription };
+            const subRef = invoice.parent?.type === "subscription_details"
+                ? invoice.parent.subscription_details?.subscription
+                : legacy.subscription;
+            const subId = typeof subRef === "string" ? subRef : subRef?.id;
+            if (!subId) return;
+            const sub = await stripe.subscriptions.retrieve(subId);
+            if (invoice.customer && resourceId(invoice.customer) !== resourceId(sub.customer)) return;
+            await reconcileStripeSubscription(stripe, sub, event.id, null);
             return;
         }
     }
-}
-
-async function syncFromSubscription(
-    sub: Stripe.Subscription,
-    eventId: string,
-    userIdHint: string | null,
-): Promise<void> {
-    const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
-    const userId = userIdHint ?? (await resolveUserId(sub, customerId));
-    if (!userId) {
-        console.warn("[WEBHOOK] no userId for subscription", sub.id);
-        return;
-    }
-    await applySnapshot(userId, snapshotFromSubscription(sub), eventId);
-}
-
-async function syncDeleted(sub: Stripe.Subscription, eventId: string): Promise<void> {
-    const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
-    const userId = await resolveUserId(sub, customerId);
-    if (!userId) {
-        console.warn("[WEBHOOK] no userId for deleted subscription", sub.id);
-        return;
-    }
-    await applySnapshot(userId, revokedSnapshot(customerId, "canceled"), eventId);
-}
-
-async function syncFromInvoiceFailure(
-    stripe: Stripe,
-    invoice: Stripe.Invoice,
-    eventId: string,
-): Promise<void> {
-    const subRef = (invoice as unknown as { subscription?: string | Stripe.Subscription })
-        .subscription;
-    const subId = typeof subRef === "string" ? subRef : subRef?.id;
-    if (!subId) return;
-    const sub = await stripe.subscriptions.retrieve(subId);
-    const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
-    const userId = await resolveUserId(sub, customerId);
-    if (!userId) {
-        console.warn("[WEBHOOK] no userId for failed invoice", invoice.id);
-        return;
-    }
-    // Re-fetch state from Stripe — could be past_due, unpaid, or already active
-    // again if a retry succeeded by the time we processed this event.
-    await applySnapshot(userId, snapshotFromSubscription(sub), eventId);
 }

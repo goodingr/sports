@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, ValidationInfo, field_validator
 
 from src.data.config import PROJECT_ROOT, _load_dotenv_if_available
-
 
 DEFAULT_RELEASE_LEAGUES = (
     "NBA",
@@ -63,6 +63,11 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def _stripe_livemode() -> bool | None:
+    match = re.fullmatch(r"(?:sk|rk)_(test|live)_[A-Za-z0-9_]+", os.getenv("STRIPE_SECRET_KEY", ""))
+    return match[1] == "live" if match else None
+
+
 class APISettings(BaseModel):
     cors_origins: tuple[str, ...] = (
         "http://localhost:3000",
@@ -74,6 +79,11 @@ class APISettings(BaseModel):
     predictions_freshness_minutes: int = Field(default=24 * 60, ge=0)
     min_disk_free_mb: int = Field(default=512, ge=0)
     models_dir: Path = PROJECT_ROOT / "models"
+    paid_enrollment_enabled: bool = False
+
+    stripe_account_id: str | None = None
+    stripe_price_id: str | None = None
+    stripe_livemode: StrictBool | None = None
 
     clerk_secret_key: str | None = None
     clerk_api_url: str = "https://api.clerk.com"
@@ -97,6 +107,12 @@ class APISettings(BaseModel):
     @classmethod
     def _normalize_leagues(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(league.upper() for league in value)
+
+    @field_validator("stripe_account_id", "stripe_price_id")
+    @classmethod
+    def _valid_stripe_scope_id(cls, value: str | None, info: ValidationInfo) -> str | None:
+        prefix = "acct" if info.field_name == "stripe_account_id" else "price"
+        return value if value and re.fullmatch(rf"{prefix}_[A-Za-z0-9_]+", value) else None
 
 
 @lru_cache(maxsize=1)
@@ -128,6 +144,10 @@ def get_settings() -> APISettings:
         predictions_freshness_minutes=_int_env("PREDICTIONS_FRESHNESS_MINUTES", 24 * 60),
         min_disk_free_mb=_int_env("MIN_DISK_FREE_MB", 512),
         models_dir=models_dir,
+        paid_enrollment_enabled=os.getenv("PAID_ENROLLMENT_ENABLED", "").strip().lower() == "true",
+        stripe_account_id=os.getenv("STRIPE_ACCOUNT_ID"),
+        stripe_price_id=os.getenv("STRIPE_PRICE_ID"),
+        stripe_livemode=_stripe_livemode(),
         clerk_secret_key=os.getenv("CLERK_SECRET_KEY"),
         clerk_api_url=os.getenv("CLERK_API_URL", "https://api.clerk.com"),
         clerk_frontend_api_url=frontend_api_url,

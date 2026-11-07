@@ -20,6 +20,7 @@ TERMINAL_NO_SCORE_STATUSES = {
     "postponed",
     "closed_missing_score",
     "no_contest",
+    "voided",
 }
 
 
@@ -159,6 +160,7 @@ def check_duplicate_games(conn: sqlite3.Connection, leagues: Optional[Iterable[s
             FROM games g
             JOIN sports s ON s.sport_id = g.sport_id
             WHERE g.start_time_utc IS NOT NULL
+              AND LOWER(COALESCE(g.status, 'scheduled')) != 'voided'
               {league_filter}
             GROUP BY g.sport_id, game_date, g.home_team_id, g.away_team_id
             HAVING COUNT(*) > 1
@@ -167,6 +169,28 @@ def check_duplicate_games(conn: sqlite3.Connection, leagues: Optional[Iterable[s
         params,
     ).fetchone()[0]
     return CheckResult("duplicate_games", count == 0, count, "same league/date/home/away appears more than once")
+
+
+def check_future_results(conn: sqlite3.Connection, leagues: Optional[Iterable[str]]) -> CheckResult:
+    params: List[object] = []
+    league_filter = _league_clause("s", leagues, params)
+    count = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM games g
+        JOIN sports s ON s.sport_id = g.sport_id
+        LEFT JOIN game_results gr ON gr.game_id = g.game_id
+        WHERE julianday(g.start_time_utc) > julianday('now')
+          AND (
+              g.status = 'final'
+              OR gr.home_score IS NOT NULL
+              OR gr.away_score IS NOT NULL
+          )
+          {league_filter}
+        """,
+        params,
+    ).fetchone()[0]
+    return CheckResult("future_results", count == 0, count, "future games with recorded results")
 
 
 def _per_league_breakdown(
@@ -307,6 +331,7 @@ def check_future_games_without_odds(
 ) -> CheckResult:
     params: List[object] = [f"+{window_days} days"]
     league_filter = _league_clause("s", leagues, params)
+    active_filter = _terminal_status_sql()
     count = conn.execute(
         f"""
         SELECT COUNT(*)
@@ -316,6 +341,7 @@ def check_future_games_without_odds(
           AND julianday(g.start_time_utc) >= julianday('now')
           AND julianday(g.start_time_utc) <= julianday('now', ?)
           AND COALESCE(g.status, 'scheduled') != 'final'
+          AND {active_filter}
           AND NOT EXISTS (
               SELECT 1
               FROM odds o
@@ -389,6 +415,7 @@ def finalize_scored_games(
                 WHERE g.start_time_utc IS NOT NULL
                   AND julianday(g.start_time_utc) < julianday('now', ?)
                   AND COALESCE(g.status, 'scheduled') != 'final'
+                  AND {_terminal_status_sql("g")}
                   AND gr.home_score IS NOT NULL
                   AND gr.away_score IS NOT NULL
                   {league_filter}
@@ -451,6 +478,7 @@ def run_checks(
             check_orphan_results(conn, leagues),
             check_orphan_predictions(conn, leagues),
             check_duplicate_games(conn, leagues),
+            check_future_results(conn, leagues),
             check_stale_games(conn, leagues, stale_hours),
             check_missing_scores(conn, leagues, stale_hours),
             check_odds_freshness(conn, leagues, odds_max_age_hours),

@@ -243,6 +243,24 @@ def test_finalize_scored_games_marks_stale_scored_rows_final(db_path: Path) -> N
     assert status == "final"
 
 
+@pytest.mark.parametrize("status", ["voided", "canceled", "postponed", "no_contest"])
+def test_finalize_scored_games_preserves_terminal_status(db_path: Path, status: str) -> None:
+    with _connect(db_path) as conn:
+        _insert_game(
+            conn,
+            game_id="nonstandard_result",
+            sport_id=3,
+            start_time=datetime.now(timezone.utc) - timedelta(days=1),
+            status=status,
+        )
+        conn.execute(
+            "INSERT INTO game_results (game_id, home_score, away_score) VALUES ('nonstandard_result', 0, 0)"
+        )
+    assert quality.finalize_scored_games(db_path, leagues=["EPL"]) == 0
+    with _connect(db_path) as conn:
+        assert conn.execute("SELECT status FROM games WHERE game_id = 'nonstandard_result'").fetchone()[0] == status
+
+
 def test_close_unresolved_stale_games_excludes_rows_from_readiness(db_path: Path) -> None:
     now = datetime.now(timezone.utc)
     with _connect(db_path) as conn:
@@ -378,18 +396,50 @@ def test_prune_orphan_results_scoped_only_targets_release_leagues(db_path: Path)
 # ---------------------------------------------------------------------------
 
 
-def test_run_checks_returns_seven_named_results(db_path: Path) -> None:
+def test_run_checks_returns_named_results(db_path: Path) -> None:
     results = quality.run_checks(db_path, leagues=["NBA"])
     names = [r.name for r in results]
     assert names == [
         "orphan_results",
         "orphan_predictions",
         "duplicate_games",
+        "future_results",
         "stale_games",
         "missing_scores",
         "odds_freshness",
         "future_games_without_odds",
     ]
+
+
+def test_future_results_checks_status_and_scores(db_path: Path) -> None:
+    future_start = _iso(datetime.now(timezone.utc) + timedelta(days=1))
+    with _connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO games (game_id, sport_id, start_time_utc, status) VALUES (?, 3, ?, ?)",
+            [("false_final", future_start, "final"), ("placeholder_score", future_start, "scheduled")],
+        )
+        conn.execute("INSERT INTO game_results (game_id, home_score, away_score) VALUES ('placeholder_score', 0, 0)")
+
+        assert quality.check_future_results(conn, ["EPL"]).count == 2
+        assert quality.check_future_results(conn, ["NBA"]).passed
+
+
+def test_voided_fixture_does_not_block_duplicate_or_future_odds_checks(db_path: Path) -> None:
+    future_start = _iso(datetime.now(timezone.utc) + timedelta(days=1))
+    with _connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO games (game_id, sport_id, start_time_utc, home_team_id, away_team_id, status) "
+            "VALUES (?, 3, ?, 30, 31, ?)",
+            [("actual", future_start, "scheduled"), ("voided_copy", future_start, "voided")],
+        )
+        conn.execute("INSERT INTO odds (game_id, market, price_american) VALUES ('actual', 'h2h', -110)")
+
+        assert quality.check_duplicate_games(conn, ["EPL"]).passed
+        assert quality.check_future_games_without_odds(conn, ["EPL"], 14).passed
+
+        conn.execute("UPDATE games SET status = 'scheduled' WHERE game_id = 'voided_copy'")
+        assert quality.check_duplicate_games(conn, ["EPL"]).count == 1
+        assert quality.check_future_games_without_odds(conn, ["EPL"], 14).count == 1
 
 
 def test_format_summary_marks_pass_or_fail(db_path: Path) -> None:

@@ -9,11 +9,34 @@ on:
 env:
   RUFF_SCOPE: >-
     src/data/ingest_sources.py
+    src/data/ingest_nba_events.py
+    src/data/audit_nba_schedule.py
+    src/dashboard/schedule_audit.py
     src/features/betting_model_input.py
     src/models/betting_benchmark.py
     src/models/prediction_quality.py
     src/models/train_betting.py
     src/predict/publishable_bets.py
+    src/predict/paper_approval.py
+    src/predict/paper_close_poll.py
+    src/predict/paper_coverage.py
+    src/predict/paper_entry_fallback.py
+    src/predict/paper_entry_poll.py
+    src/predict/paper_ledger.py
+    src/predict/paper_report.py
+    src/predict/paper_schedule.py
+    src/predict/paper_settlement.py
+    src/predict/paper_settlement_history.py
+    src/predict/published_ledger.py
+    src/models/totals_calibration.py
+    src/data/replay_local_odds.py
+    src/api/settings.py
+    scripts/backup_data.py
+    scripts/backup_archive.py
+    scripts/backup_evidence.py
+    scripts/commercial_cash_report.py
+    scripts/commercial_renewal_report.py
+    scripts/paper_capture_health.py
     tests/test_betting_benchmark.py
     tests/test_betting_model_input.py
     tests/test_prediction_quality.py
@@ -22,12 +45,35 @@ env:
     tests/api/test_readiness.py
   MYPY_SCOPE: >-
     src/data/ingest_sources.py
+    src/data/ingest_nba_events.py
+    src/data/audit_nba_schedule.py
+    src/dashboard/schedule_audit.py
     src/data/sources/espn_odds.py
     src/data/sources/nba_injuries_espn.py
     src/features/betting_model_input.py
     src/models/feature_loader.py
     src/models/prediction_quality.py
     src/predict/publishable_bets.py
+    src/predict/paper_approval.py
+    src/predict/paper_close_poll.py
+    src/predict/paper_coverage.py
+    src/predict/paper_entry_fallback.py
+    src/predict/paper_entry_poll.py
+    src/predict/paper_ledger.py
+    src/predict/paper_report.py
+    src/predict/paper_schedule.py
+    src/predict/paper_settlement.py
+    src/predict/paper_settlement_history.py
+    src/predict/published_ledger.py
+    src/models/totals_calibration.py
+    src/data/replay_local_odds.py
+    src/api/settings.py
+    scripts/backup_data.py
+    scripts/backup_archive.py
+    scripts/backup_evidence.py
+    scripts/commercial_cash_report.py
+    scripts/commercial_renewal_report.py
+    scripts/paper_capture_health.py
 
 jobs:
   python:
@@ -96,9 +142,42 @@ jobs:
       - name: Readiness (/ready) smoke
         run: poetry run pytest tests/api/test_readiness.py -q -rs
 
+  worker-image:
+    name: Backend image and paper worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start the worker with paper jobs enabled
+        run: |
+          docker build --tag sports-worker-ci .
+          docker run --detach --name sports-worker-ci --network none --user 0:0 \
+            --env 'WORKER_PREDICT_CRON=0 0 31 2 *' --env 'WORKER_TRAIN_CRON=0 0 31 2 *' \
+            --env 'WORKER_BENCHMARK_CRON=0 0 31 2 *' --env 'WORKER_BACKUP_CRON=0 0 31 2 *' \
+            --env 'WORKER_REMOTE_BACKUP_CRON=0 0 31 2 *' \
+            --env WORKER_PAPER_CLOSE_ENABLED=1 --env WORKER_PAPER_ENTRY_ENABLED=1 \
+            --env WORKER_PAPER_EVENTS_ENABLED=1 --entrypoint /usr/bin/tini \
+            sports-worker-ci -- /app/scripts/worker_entrypoint.sh
+          trap 'docker logs sports-worker-ci; docker rm -f sports-worker-ci >/dev/null' EXIT
+
+          for attempt in {1..20}; do
+            if docker exec sports-worker-ci /app/scripts/worker_health.sh; then break; fi
+            sleep 1
+          done
+          docker exec sports-worker-ci /app/scripts/worker_health.sh
+
+          for job in paper_close paper_entry paper_events; do
+            docker exec sports-worker-ci grep -F "/app/scripts/run_job.sh $job" /etc/cron.d/sports
+            docker exec --user app --workdir /tmp sports-worker-ci /app/scripts/run_job.sh "$job"
+            docker exec sports-worker-ci test -f "/app/logs/heartbeat/$job.ok"
+          done
+
   web:
     name: Web (lint, typecheck, unit, build, e2e)
-    runs-on: ubuntu-latest
+    # Playwright 1.59 supports Ubuntu 24.04; ubuntu-latest has moved to 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web-app
@@ -117,6 +196,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=moderate
+
       - name: Lint
         run: npm run lint
 
@@ -127,13 +209,111 @@ jobs:
         run: npm test
 
       - name: Build
+        env:
+          # Public placeholder for prerendering; this reserved domain has no Clerk instance.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
         run: npm run build
 
-      # Playwright e2e is gated owner: Agent 4. Until that suite is green,
-      # don't fail the whole pipeline on it -- but still surface failures.
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: E2E tests
         run: npm run test:e2e
-        continue-on-error: true
+
+      - name: Interest pilot browser tests
+        env:
+          PLAYWRIGHT_PILOT: '1'
+        run: npm run test:e2e
+
+      - name: Interest pilot production consent smoke
+        timeout-minutes: 5
+        run: npm run test:pilot:production
+
+      - name: Validate interest pilot Compose configuration
+        working-directory: .
+        env:
+          PILOT_DOMAIN: pilot.example.invalid
+          COMMERCIAL_PILOT_MODE: preview
+          PILOT_CONTACT_EMAIL: pilot-contact@example.invalid
+          ACME_EMAIL: operator@example.invalid
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
+          CLERK_SECRET_KEY: sk_test_ci_config_placeholder
+        run: docker compose -f docker-compose.pilot.yml config --quiet
+
+      - name: Validate full-stack Compose configuration
+        working-directory: .
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Verify checkout return is forwarded without logging its session ID
+        working-directory: .
+        run: |
+          config=$(mktemp)
+          trap 'rm -f "$config"' EXIT
+          cat Caddyfile > "$config"
+          cat >> "$config" <<'CADDY'
+
+          :3000 {
+            @fail query fail=true
+            abort @fail
+            header Location "/login?redirect_url=%2Faccount%3Fsession_id%3Dcs_test_log_probe"
+            respond "{http.request.uri}"
+          }
+          CADDY
+          proxy=$(docker run -d --rm --add-host web:127.0.0.1 \
+            -e APP_DOMAIN=http://localhost:8080 -e API_DOMAIN=http://localhost:8081 \
+            -e ACME_EMAIL=operator@example.invalid \
+            -v "$config:/etc/caddy/Caddyfile:ro" caddy:2.8-alpine)
+          trap 'docker stop "$proxy" >/dev/null || true; rm -f "$config"' EXIT
+
+          path='/account?success=true&session_id=cs_test_log_probe'
+          for attempt in {1..20}; do
+            if response=$(docker exec "$proxy" wget -T 2 -qO- \
+              --header="Referer: https://app.example.invalid$path" \
+              --header="Next-Url: $path" "http://localhost:8080$path" 2>/dev/null); then
+              break
+            fi
+            sleep 0.5
+          done
+          test "${response:-}" = "$path"
+          if docker exec "$proxy" wget -T 2 -qO- "http://localhost:8080$path&fail=true" 2>/dev/null; then
+            echo 'Expected the upstream to fail on the second checkout return.' >&2
+            exit 1
+          fi
+          logs=$(docker logs "$proxy" 2>&1)
+          if [[ "$logs" == *cs_test_log_probe* ]]; then
+            echo 'Checkout session ID appeared in the Caddy logs.' >&2
+            exit 1
+          fi
+          printf '%s\n' "$logs" | python3 -c '
+          import json, sys
+          entries = [json.loads(line) for line in sys.stdin]
+          account_logs = {(entry["logger"].split(".")[2], entry["status"]) for entry in entries
+                          if entry.get("request", {}).get("uri") == "/account"}
+          assert {("access", 200), ("access", 502), ("error", 502)} <= account_logs, account_logs
+          '
+
+      - name: Check private checkout storage across web containers
+        working-directory: .
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
+        run: |
+          docker compose build web
+          docker compose run --rm --no-deps -T web node --input-type=module -e '
+          import {closeSync, openSync} from "node:fs";
+          import {DatabaseSync} from "node:sqlite";
+          const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+          closeSync(openSync(path, "wx", 0o600));
+          const db = new DatabaseSync(path);
+          db.exec("PRAGMA user_version = 1");
+          db.close();'
+          docker compose run --rm --no-deps -T web node --input-type=module -e '
+          import {strictEqual} from "node:assert";
+          import {statSync} from "node:fs";
+          import {DatabaseSync} from "node:sqlite";
+          const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+          strictEqual(statSync(path).mode & 0o077, 0);
+          const db = new DatabaseSync(path, {readOnly: true});
+          strictEqual(db.prepare("PRAGMA user_version").get().user_version, 1);
+          db.close();'

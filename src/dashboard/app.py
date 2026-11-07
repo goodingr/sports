@@ -4,16 +4,28 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import date, timedelta
+import sqlite3
+from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from typing import Optional, Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd
+import yaml
 from dash import Dash, Input, Output, State, dcc, html, ctx, no_update
 from dash.exceptions import PreventUpdate
 
+from src.data.audit_nba_schedule import AUDIT_REPORTS_DIR
+from src.data.config import PROJECT_ROOT
+from src.db.core import resolve_db_path
+from src.predict.paper_ledger import DEFAULT_RULES, load_trial
+from src.predict.paper_report import build_paper_report
+
 from . import components
+from .capture_health import daily_capture_card
+from .paper_quota import discovery_quota_card
+from .schedule_audit import schedule_coverage_cards
 from .data import (
     DEFAULT_EDGE_THRESHOLD,
     DEFAULT_STAKE,
@@ -256,6 +268,7 @@ def _navbar(pathname: Optional[str]) -> dbc.Nav:
             dbc.NavLink("Moneyline", href="/", active=pathname == "/" or pathname == ""),
             dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
             dbc.NavLink("Over/Under", href="/overunder", active=pathname == "/overunder"),
+            dbc.NavLink("Paper Trials", href="/paper", active=pathname == "/paper"),
             dbc.NavLink("Raw Data", href="/data", active=pathname == "/data"),
         ],
         pills=True,
@@ -824,6 +837,27 @@ app.layout = html.Div(
 )
 
 
+def _paper_layout(pathname: str) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            html.H2("Prospective paper trials"),
+            html.P("Tracks pregame decisions and settlements in the internal research ledger."),
+            dbc.Button("Refresh trial evidence", id="refresh-paper", className="mb-3"),
+            dcc.Loading(html.Div(id="paper-trials")),
+            html.H3("Daily NBA capture", className="mt-4"),
+            html.P("Checks the most recent daily run after its grace period."),
+            dcc.Loading(html.Div(id="paper-daily-capture")),
+            html.H3("NBA collection quota", className="mt-4"),
+            dcc.Loading(html.Div(id="paper-discovery-quota")),
+            html.H3("Official NBA schedule coverage", className="mt-4"),
+            html.P("Saved audits compare the official slate with retained odds-provider evidence."),
+            dcc.Loading(html.Div(id="paper-schedule-coverage")),
+        ],
+        fluid=True,
+    )
+
+
 @app.callback(Output("page-content", "children"), Input("url", "pathname"))
 def render_page(pathname: Optional[str]):
     if pathname == "/predictions":
@@ -832,7 +866,187 @@ def render_page(pathname: Optional[str]):
         return _overunder_layout(pathname)
     if pathname == "/data":
         return _data_layout(pathname)
+    if pathname == "/paper":
+        return _paper_layout(pathname)
     return _dashboard_layout(pathname)
+
+
+@app.callback(Output("paper-trials", "children"), Input("refresh-paper", "n_clicks"))
+def show_paper_trials(_n_clicks: Optional[int]):
+    db_uri = f"{resolve_db_path().resolve().as_uri()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(db_uri, uri=True, timeout=2)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'paper_trials'"
+            ).fetchone():
+                return components.empty_state("No paper trial is registered yet.")
+            report = build_paper_report(conn, datetime.now(timezone.utc))
+    except (sqlite3.Error, ValueError, KeyError):
+        return dbc.Alert("Paper trial evidence is temporarily unavailable.", color="warning")
+    trials = report["trials"]
+    if not trials:
+        return components.empty_state("No paper trial is registered yet.")
+
+    configured_trial = None
+    try:
+        config = load_trial(PROJECT_ROOT / DEFAULT_RULES)
+        specification = config.specification
+        configured_trial = next(
+            (
+                trial for trial in trials
+                if trial["trial_id"] == config.trial_id
+                and json.dumps(trial["specification"], sort_keys=True) == specification
+            ),
+            None,
+        )
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        pass
+
+    def percent(value: Optional[float]) -> str:
+        return f"{value:.1%}" if value is not None else "—"
+
+    cards = []
+    if configured_trial is None:
+        cards.append(dbc.Alert("No configured capture trial matches the ledger.", color="warning"))
+    for trial in sorted(trials, key=lambda trial: trial is not configured_trial):
+        spec = trial["specification"]
+        metrics = trial["metrics"]
+        interval = metrics["bootstrap_roi_interval"]
+        roi_range = (
+            f"95% interval {percent(interval['low'])} to {percent(interval['high'])}"
+            if interval else "95% interval pending"
+        )
+        review = pd.Timestamp(trial["final_review_at"]).tz_convert(DISPLAY_TIMEZONE)
+        brier_model = metrics["model_brier"]
+        brier_market = metrics["market_brier"]
+        brier = (
+            f"{brier_model:.3f} vs {brier_market:.3f}"
+            if brier_model is not None and brier_market is not None else "—"
+        )
+        coverage = trial.get("capture_coverage", {})
+        coverage_details = [html.Div("No capture history is available.")]
+        if coverage.get("available"):
+            if coverage["last_run_at"] is None:
+                coverage_details = [html.Div("No capture attempts have been recorded.")]
+            else:
+                last_attempt = pd.Timestamp(coverage["last_run_at"]).tz_convert(DISPLAY_TIMEZONE)
+                status = coverage["last_run_status"].replace("_", " ")
+                coverage_details = [
+                    html.Div(
+                        f"Last capture attempt {last_attempt.strftime('%b %d, %Y %I:%M %p %Z')} "
+                        f"· {status} · Capture attempts {coverage['runs']}"
+                    )
+                ]
+                if coverage["observed_fixtures"]:
+                    coverage_details.append(
+                        html.Div(
+                            f"Fully evaluated {coverage['fully_evaluated_fixtures']} / "
+                            f"{coverage['observed_fixtures']} observed fixtures · "
+                            f"{coverage['below_edge_fixtures']} below the edge threshold"
+                        )
+                    )
+                else:
+                    coverage_details.append(
+                        html.Div("No fixtures were observed inside the capture window.")
+                    )
+                if coverage["attempts_by_outcome"]:
+                    coverage_details.append(
+                        html.Div(
+                            "Fixture attempts · " + " · ".join(
+                                f"{outcome.replace('_', ' ').capitalize()} {count}"
+                                for outcome, count in sorted(coverage["attempts_by_outcome"].items())
+                            )
+                        )
+                    )
+            known = coverage.get("known_windows", {})
+            if known.get("available"):
+                coverage_details.append(
+                    html.Div(
+                        f"Known fixtures {known['known_fixtures']} · "
+                        f"Passed capture windows {known['passed_window_fixtures']} · "
+                        f"Unobserved windows {known['missed_known_window_fixtures']} · "
+                        f"Ambiguous schedules {known['ambiguous_schedule_fixtures']}"
+                    )
+                )
+        if trial.get("late_grade_changes", 0):
+            coverage_details.append(
+                dbc.Alert(
+                    f"{trial['late_grade_changes']} grades changed after the final review. "
+                    "Subscriber approval is blocked.",
+                    color="warning",
+                    className="mt-2 mb-0",
+                )
+            )
+        cards.append(
+            dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.H4(f"{spec['league']} {spec['market']} at {spec['book'].title()}"),
+                        html.Div(
+                            "Configured capture trial" if trial is configured_trial else "Retained registration",
+                            className="fw-semibold",
+                        ),
+                        html.P(
+                            f"{trial['review_status'].title()} · "
+                            f"Final review {review.strftime('%b %d, %Y %Z')}"
+                        ),
+                        dbc.Row(
+                            [
+                                dbc.Col(metric_card(
+                                    "Graded decisions",
+                                    f"{metrics['graded_decisions']} / {spec['min_decisions']}",
+                                    subtitle=f"{metrics['pending']} awaiting settlement",
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Paper ROI", percent(metrics["roi"]), subtitle=roi_range,
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Brier score", brier, subtitle="Model vs no-vig book",
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Closing-line coverage",
+                                    percent(metrics["clv_coverage"]),
+                                    subtitle=(
+                                        f"{metrics['clv_count']} same-book closes, "
+                                        f"{percent(metrics['clv_win_rate'])} improved"
+                                    ),
+                                ), md=3),
+                            ],
+                            className="g-3",
+                        ),
+                        html.Div(coverage_details, className="small text-muted mt-3"),
+                        html.Small(
+                            f"Trial {trial['trial_id']}"
+                            + (f" · Review verdict {trial['review_verdict']}" if trial["review_verdict"] else ""),
+                            className="d-block mt-3",
+                        ),
+                    ]
+                ),
+                className="mb-3",
+            )
+        )
+    return cards
+
+
+@app.callback(Output("paper-daily-capture", "children"), Input("refresh-paper", "n_clicks"))
+def show_daily_capture(_n_clicks: Optional[int]):
+    return daily_capture_card(
+        resolve_db_path(), PROJECT_ROOT / DEFAULT_RULES, datetime.now(timezone.utc)
+    )
+
+
+@app.callback(Output("paper-discovery-quota", "children"), Input("refresh-paper", "n_clicks"))
+def show_discovery_quota(_n_clicks: Optional[int]):
+    return discovery_quota_card(resolve_db_path(), datetime.now(timezone.utc))
+
+
+@app.callback(Output("paper-schedule-coverage", "children"), Input("refresh-paper", "n_clicks"))
+def show_schedule_coverage(_n_clicks: Optional[int]):
+    return schedule_coverage_cards(
+        AUDIT_REPORTS_DIR, datetime.now(timezone.utc), data_dir=resolve_db_path().resolve().parent
+    )
 
 
 @app.callback(

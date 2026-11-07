@@ -8,6 +8,17 @@
 
 set -euo pipefail
 
+for recovery in "${MODELS_DIR:-/app/models}"/.restore-*; do
+	if [[ -e "$recovery" ]]; then
+		echo "[worker] interrupted restore requires recovery before jobs can start" >&2
+		exit 1
+	fi
+done
+
+if [[ -n ${WORKER_LIVE_ODDS_JOBS:-} ]]; then
+	/app/scripts/run_job.sh --validate-live-odds-jobs
+fi
+
 LOG_DIR=${LOG_DIR:-/app/logs}
 HEARTBEAT_DIR=${HEARTBEAT_DIR:-/app/logs/heartbeat}
 mkdir -p "$LOG_DIR" "$HEARTBEAT_DIR"
@@ -33,7 +44,7 @@ ENV_FILE=/app/scripts/.worker_env
 WORKER_ENV_KEEP=(
 	PYTHONPATH PATH TZ LOG_LEVEL
 	SPORTS_DB_PATH DATABASE_PATH DB_PATH MODELS_DIR MODEL_DIR
-	BACKUP_DIR REMOTE_BACKUP_RETENTION_DAYS
+	BACKUP_DIR BACKUP_RETENTION_DAYS REMOTE_BACKUP_RETENTION_DAYS
 	RELEASE_LEAGUES PAID_RELEASE_LEAGUES SCORE_BACKFILL_LOOKBACK_DAYS
 	ODDS_FRESHNESS_MINUTES PREDICTIONS_FRESHNESS_MINUTES MIN_DISK_FREE_MB
 	HEARTBEAT_DIR LOG_DIR
@@ -88,6 +99,15 @@ ${WORKER_BENCHMARK_CRON:-30 10 * * *}    app /app/scripts/run_job.sh benchmark  
 ${WORKER_BACKUP_CRON:-0 18 * * *}        app /app/scripts/run_job.sh backup_local  >> $LOG_DIR/cron.log 2>&1
 ${WORKER_REMOTE_BACKUP_CRON:-30 18 * * *} app /app/scripts/run_job.sh backup_remote >> $LOG_DIR/cron.log 2>&1
 EOF
+if [[ ${WORKER_PAPER_CLOSE_ENABLED:-0} == 1 ]]; then
+	printf '*/15 * * * * app /app/scripts/run_job.sh paper_close >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
+if [[ ${WORKER_PAPER_ENTRY_ENABLED:-0} == 1 ]]; then
+	printf '5,20,35,50 * * * * app /app/scripts/run_job.sh paper_entry >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
+if [[ ${WORKER_PAPER_EVENTS_ENABLED:-0} == 1 ]]; then
+	printf '10,25,40,55 * * * * app /app/scripts/run_job.sh paper_events >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
 chmod 0644 "$CRON_FILE"
 
 echo "[worker] crontab installed:"

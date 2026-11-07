@@ -126,19 +126,19 @@ See also [docs/BACKUP_RESTORE.md](BACKUP_RESTORE.md) for the full backup model.
 ```bash
 docker compose stop worker            # freeze writers
 docker compose stop api               # freeze readers
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
 docker compose up -d api worker
 ```
 
 **Specific date:**
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh \
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker \
   --date 2026-04-23 --force
 ```
 
 **Dry run** (lists what would be restored, no writes):
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --dry-run
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --dry-run
 ```
 
 **Drill** (restore to a temp dir, sanity-check, throw away):
@@ -196,14 +196,108 @@ docker compose exec -u app worker python -m src.models.train \
   --league NFL --model-type ensemble
 ```
 
+### NBA paper capture on Windows
+
+After the normal 6:04 p.m. Eastern pipeline and its 30-minute grace period,
+open **Daily NBA capture** on the internal **Paper Trials** page. The card shows
+the daily receipt, its matching trial evaluation, and any later attempt
+separately. You can also check the same evidence from the repository root.
+
+```powershell
+poetry run python -m scripts.paper_capture_health
+```
+
+The check reads the local archive and ledger. It treats a completed evaluation
+with all quotes below the threshold as healthy when the run matches the exact
+daily odds receipt. On a restored warehouse, it can verify the daily receipt
+inside `source_evidence.zip` beside the database. If a later attempt used other
+evidence or failed, the JSON reports its time and status separately from the
+verified daily capture. The
+check also examines the schedules retained by the trial through the receipt
+time. A known in-window fixture missing from the receipt or with unresolved
+identity makes the check incomplete and appears in the JSON by internal ID.
+Exit `2` indicates an empty slate without known eligible fixtures to verify.
+Exit `1` indicates missing, invalid, or incomplete evidence.
+The entry and closing collectors can both succeed on the same day without
+collecting anything, so their exit codes cannot confirm the daily capture.
+Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
+
+For an early entry attempt, inspect `logs/paper_entry_YYYYMMDD.log` using the
+UTC date. The attachment trace identifies the retained response and counts
+targeted quote rejections. The inference trace distinguishes quotes that lost
+their lead window, missing model rows, and rows from a different snapshot.
+Compare those traces with the ledger's fixture observations. A verified
+`below_edge_threshold` is a completed evaluation with zero decisions.
+
+The Paper Trials dashboard also shows the balance from the latest
+checksum-verified NBA discovery receipt. The observation covers one provider
+key and is marked stale after 80 minutes. A closing request needs at least 201
+credits and an early entry request needs 202 to preserve the 200-credit
+reserve. Collectors check current balances before spending.
+
+To prioritize the registered NBA and college basketball research lanes on
+the collection host, run the daily pipeline with the focused provider switch.
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/pipeline.ps1 -ResearchProviderLeagues
+```
+
+```bash
+bash scripts/pipeline.sh --research-provider-leagues
+```
+
+The switch limits live Odds API odds and score requests to NBA and NCAAB.
+It preserves the immediate NBA capture, ordinary history and predictions,
+and paid-release quality checks. A stale league in the paid-release scope
+can still fail those checks and trigger revocation.
+
+For a scheduled host that already runs these scripts, create the local file
+`config/research_provider_leagues.local` to select the same scope. Its presence
+enables the setting for regular runs in that workspace. Remove the file to
+restore broad collection. Explicit soccer-only runs use their own scope.
+
+The paid-release scope is independent. Set `PAID_RELEASE_LEAGUES` in the
+pipeline environment, or create `config/paid_release_leagues.local` with one
+comma-separated line of uppercase league codes. For an NBA-only release scope,
+write `NBA` on that line. The environment takes precedence. The workspace file
+applies to regular runs and stays out of the worker image. An invalid file
+falls back to the standard scope and logs a warning.
+
+This scope applies to release hygiene, the data-quality gate and publication.
+The registered trial, approval rules, and quote eligibility checks still
+apply. A full-stack deployment sets `RELEASE_LEAGUES` independently for API
+readiness. Use the same intended public leagues when configuring the two
+services.
+
+The daily Windows and Linux pipelines log `NBA quote timing` after the paid
+gate or its skip. The report measures paper attempts and recorded decisions
+linked to the fresh receipt, and gives the receipt age at the paid command
+start and finish. It reports a committed release only when the ledger identifies
+one release in that command window. A gate starting after 600 seconds cannot
+issue picks using that receipt under the current NBA freshness rule.
+
+On the current Windows host, `DailyPipelineRun` requires the PC to be awake and
+the task owner to be signed in at its scheduled time. A missed launch can appear
+as Task Scheduler Operational event `153` even when the missed-run counter is
+zero. Check the event log when the odds receipt is absent after the grace period.
+
 ### Stale games / scores
 ```bash
 # List games that should have a final score but don't.
 docker compose exec -u app worker python scripts/list_stale_games.py
 
-# Backfill from ESPN.
-docker compose exec -u app worker python scripts/backfill_scores_espn.py
+# Fill missing finals from ESPN.
+docker compose exec -u app worker python -m src.data.score_backfill --resolve-stale --leagues NBA,NHL
 ```
+
+Recurring backfill fills incomplete score pairs and preserves any complete
+result saved before or during the fetch. The explicit date-range backfill
+can revise a complete score when reconciling verified corrections.
+
+NBA scores from The Odds API carry a provider update clock. A newer verified
+state can correct or reopen a result that the provider originally wrote.
+For older scores and results from another source, reconcile discrepancies
+against the official final before making a correction.
 
 ### Disk pressure
 `/ready` reports `disk_free_mb`. When it's red:

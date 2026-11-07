@@ -2,14 +2,180 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
 import yaml
 
 import src.predict.publishable_bets as publisher
+from src.db.core import store_odds_snapshot_game_starts
+from src.models.prediction_quality import QualityGate
+from src.predict.paper_approval import (
+    paper_reviews,
+    paper_rule_result,
+    promote_paper_trial,
+    rule_for_trial,
+)
+from src.predict.paper_ledger import SCHEMA_PATH as PAPER_SCHEMA_PATH
+from src.predict.paper_settlement import settle_open_trials
 from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_rule
 from src.predict.publishable_bets import main as publish_main
+from src.predict.published_ledger import checkout_has_recent_delivery
+
+_NBA_TEAMS = ("Boston Celtics", "New York Knicks")
+_CURRENT_EVENT = "c" * 32
+
+
+def _raw_nba_event(event_id, start, line, totals_price, *, moneyline=None):
+    home, away = _NBA_TEAMS
+    markets = [{
+        "key": "totals",
+        "outcomes": [
+            {"name": side, "point": line, "price": totals_price} for side in ("Over", "Under")
+        ],
+    }]
+    if moneyline is not None:
+        markets.append({
+            "key": "h2h",
+            "outcomes": [{"name": team, "price": moneyline} for team in _NBA_TEAMS],
+        })
+    return {
+        "id": event_id, "sport_key": "basketball_nba", "commence_time": start,
+        "home_team": home, "away_team": away,
+        "bookmakers": [{"key": "draftkings", "markets": markets}],
+    }
+
+
+def _raw_nba_path(db_path, name):
+    return db_path.parent / "data" / "raw" / "odds" / "basketball_nba" / f"{name}.json"
+
+
+def _write_nba_receipt(path, fetched, events):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "fetched_at": fetched, "source": "the-odds-api",
+        "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+        "results": events,
+    }), encoding="utf-8")
+
+
+def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
+    specification = {
+        "trial_id": trial_id, "league": "NBA", "market": "totals", "model_type": "ensemble",
+        "model_sha256": "a" * 64, "book": "draftkings", "odds_source": "the-odds-api",
+        "min_edge": 0.05, "max_quote_age_minutes": 10, "min_minutes_before_start": 15,
+        "max_hours_before_start": 72, "min_decisions": 150, "min_roi": 0.05,
+        "min_clv_coverage": 0.8, "review_at": "2026-01-20T00:00:00+00:00",
+    }
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sports (
+                sport_id INTEGER PRIMARY KEY, name TEXT, league TEXT, default_market TEXT
+            );
+            CREATE TABLE IF NOT EXISTS teams (
+                team_id INTEGER PRIMARY KEY, sport_id INTEGER, code TEXT, name TEXT
+            );
+            CREATE TABLE IF NOT EXISTS books (book_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE IF NOT EXISTS games (
+                game_id TEXT PRIMARY KEY, sport_id INTEGER, start_time_utc TEXT,
+                home_team_id INTEGER, away_team_id INTEGER, status TEXT, odds_api_id TEXT
+            );
+            CREATE TABLE IF NOT EXISTS game_results (
+                game_id TEXT PRIMARY KEY, home_score INTEGER, away_score INTEGER,
+                home_moneyline_close REAL, away_moneyline_close REAL, total_close REAL
+            );
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT, raw_path TEXT
+            );
+            CREATE TABLE IF NOT EXISTS odds (
+                snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
+                outcome TEXT, price_american REAL, line REAL
+            );
+            INSERT OR IGNORE INTO sports (sport_id, name, league, default_market)
+            VALUES (1, 'Basketball', 'NBA', 'totals');
+            INSERT OR IGNORE INTO teams (team_id, sport_id, code, name)
+            VALUES (1, 1, 'BOS', 'Boston Celtics'), (2, 1, 'NYK', 'New York Knicks');
+            INSERT OR IGNORE INTO books (book_id, name) VALUES (1, 'DraftKings');
+        """)
+        conn.executescript(PAPER_SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute(
+            """
+            INSERT INTO paper_trials (trial_id, registered_at, specification)
+            VALUES (?, '2026-01-01T00:00:00+00:00', ?)
+            """,
+            (trial_id, json.dumps(specification)),
+        )
+        receipts = {}
+        for index in range(150):
+            game_id = f"forward{index}"
+            captured = datetime(2026, 1, 2, 18, tzinfo=timezone.utc) + timedelta(days=index % 10)
+            start = captured + timedelta(hours=1)
+            entry = f"{game_id}_entry"
+            close = f"{game_id}_close"
+            fetched_at = captured - timedelta(minutes=1)
+            close_at = (start - timedelta(minutes=30)).isoformat()
+            event_id = f"{index:032x}"
+            archive = _raw_nba_path(db_path, f"forward_close_{index % 10}")
+            receipts.setdefault((archive, close_at), []).append(
+                _raw_nba_event(event_id, start.isoformat(), 201.0, -110)
+            )
+            conn.execute(
+                """
+                INSERT INTO games (
+                    game_id, sport_id, start_time_utc, home_team_id, away_team_id, status, odds_api_id
+                ) VALUES (?, 1, ?, 1, 2, 'final', ?)
+                """,
+                (game_id, start.isoformat(), event_id),
+            )
+            conn.execute(
+                "INSERT INTO game_results (game_id, home_score, away_score) VALUES (?, ?, ?)",
+                (game_id, 120 if index < 140 else 90, 100 if index < 140 else 95),
+            )
+            conn.execute(
+                """
+                INSERT INTO paper_decisions (
+                    trial_id, game_id, home_team_id, away_team_id, start_time_utc,
+                    captured_at, predicted_at, odds_source, snapshot_id, odds_fetched_at,
+                    book_id, book, side, line, price, opposite_price,
+                    model_probability, market_probability, edge
+                ) VALUES (?, ?, 1, 2, ?, ?, ?, 'the-odds-api', ?, ?,
+                          1, 'draftkings', 'over', 200.5, 100, 100, 0.8, 0.5, 0.3)
+                """,
+                (
+                    trial_id, game_id, start.isoformat(), captured.isoformat(),
+                    captured.isoformat(), entry, fetched_at.isoformat(),
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path)
+                VALUES (?, ?, 1, 'the-odds-api', ?)
+                """,
+                [
+                    (entry, fetched_at.isoformat(), None),
+                    (close, close_at, str(archive)),
+                ],
+            )
+            store_odds_snapshot_game_starts(conn, close, {game_id: start.isoformat()})
+            conn.executemany(
+                """
+                INSERT INTO odds (
+                    snapshot_id, game_id, book_id, market, outcome, price_american, line
+                ) VALUES (?, ?, 1, 'totals', ?, ?, ?)
+                """,
+                [
+                    (snapshot, game_id, side, price, line)
+                    for snapshot, price, line in [(entry, 100, 200.5), (close, -110, 201.0)]
+                    for side in ("Over", "Under")
+                ],
+            )
+        for (archive, fetched), events in receipts.items():
+            _write_nba_receipt(archive, fetched, events)
+        assert settle_open_trials(conn, datetime(2026, 1, 12, tzinfo=timezone.utc)) == 150
+        conn.commit()
 
 
 def _create_publish_db(path, *, include_history: bool) -> None:
@@ -34,7 +200,8 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                 start_time_utc TEXT NOT NULL,
                 home_team_id INTEGER NOT NULL,
                 away_team_id INTEGER NOT NULL,
-                status TEXT
+                status TEXT,
+                odds_api_id TEXT
             );
             CREATE TABLE game_results (
                 game_id TEXT PRIMARY KEY,
@@ -69,8 +236,8 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                 predicted_total_points REAL
             );
             INSERT INTO sports VALUES (1, 'Basketball', 'NBA', 'totals');
-            INSERT INTO teams VALUES (1, 1, 'HOME', 'Home Team');
-            INSERT INTO teams VALUES (2, 1, 'AWAY', 'Away Team');
+            INSERT INTO teams VALUES (1, 1, 'BOS', 'Boston Celtics');
+            INSERT INTO teams VALUES (2, 1, 'NYK', 'New York Knicks');
             """
         )
         prediction_id = 1
@@ -83,7 +250,7 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             ]
             for game_id, start_time, home_score, away_score in history:
                 conn.execute(
-                    "INSERT INTO games VALUES (?, 1, ?, 1, 2, 'final')",
+                    "INSERT INTO games VALUES (?, 1, ?, 1, 2, 'final', NULL)",
                     (game_id, start_time),
                 )
                 conn.execute(
@@ -108,9 +275,10 @@ def _create_publish_db(path, *, include_history: bool) -> None:
         conn.execute(
             """
             INSERT INTO games VALUES (
-                'CUR1', 1, '2026-02-02T20:00:00+00:00', 1, 2, 'scheduled'
+                'CUR1', 1, '2026-02-02T20:00:00+00:00', 1, 2, 'scheduled', ?
             )
-            """
+            """,
+            (_CURRENT_EVENT,),
         )
         conn.execute(
             """
@@ -125,6 +293,47 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             """,
             (prediction_id,),
         )
+        conn.executescript(
+            """
+            ALTER TABLE predictions ADD COLUMN selected_totals_snapshot_id TEXT;
+            ALTER TABLE predictions ADD COLUMN selected_totals_book_id INTEGER;
+            ALTER TABLE predictions ADD COLUMN selected_h2h_snapshot_id TEXT;
+            ALTER TABLE predictions ADD COLUMN selected_h2h_book_id INTEGER;
+            ALTER TABLE predictions ADD COLUMN totals_model_sha256 TEXT;
+            UPDATE predictions SET totals_model_sha256 =
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+            CREATE TABLE books (book_id INTEGER PRIMARY KEY, name TEXT);
+            INSERT INTO books VALUES (1, 'DraftKings');
+            CREATE TABLE odds_snapshots (
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT, raw_path TEXT
+            );
+            INSERT INTO odds_snapshots VALUES ('current', '2026-02-01T11:55:00+00:00', 1, 'the-odds-api', NULL);
+            CREATE TABLE odds (
+                snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
+                outcome TEXT, price_american REAL, line REAL
+            );
+            INSERT INTO odds VALUES ('current','CUR1',1,'totals','Over',100,210.5);
+            INSERT INTO odds VALUES ('current','CUR1',1,'totals','Under',100,210.5);
+            INSERT INTO odds VALUES ('current','CUR1',1,'h2h','home',-110,NULL);
+            INSERT INTO odds VALUES ('current','CUR1',1,'h2h','away',-110,NULL);
+            UPDATE predictions SET selected_totals_snapshot_id = 'current',
+                selected_totals_book_id = 1, selected_h2h_snapshot_id = 'current',
+                selected_h2h_book_id = 1, home_moneyline = -110, away_moneyline = -110,
+                predicted_at = '2026-02-01T11:56:00+00:00'
+            WHERE game_id = 'CUR1';
+            """
+        )
+        current_raw = _raw_nba_path(path, "current")
+        _write_nba_receipt(
+            current_raw, "2026-02-01T11:55:00+00:00",
+            [_raw_nba_event(_CURRENT_EVENT, "2026-02-02T20:00:00+00:00", 210.5, 100, moneyline=-110)],
+        )
+        conn.execute("UPDATE odds_snapshots SET raw_path = ? WHERE snapshot_id = 'current'", (str(current_raw),))
+        store_odds_snapshot_game_starts(
+            conn, "current", {"CUR1": "2026-02-02T20:00:00+00:00"}
+        )
+    if include_history:
+        _seed_paper_evidence(path)
 
 
 def _write_rules(path) -> None:
@@ -143,7 +352,16 @@ approved_rules:
     market: totals
     league: NBA
     model_type: ensemble
-    side: over
+    model_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    paper_trial_id: nba_totals_fixture
+    validation: prospective_paper
+    book: draftkings
+    odds_source: the-odds-api
+    max_quote_age_minutes: 10
+    min_minutes_before_start: 15
+    max_hours_before_start: 72
+    same_snapshot_moneyline_inputs: true
+    side: both
     min_edge: 0.05
 candidate_rules: []
 """,
@@ -168,6 +386,7 @@ candidate_rules:
     market: totals
     league: NBA
     model_type: ensemble
+    model_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     side: over
     min_edge: 0.05
 """,
@@ -289,79 +508,150 @@ def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
     assert bet["league"] == "NBA"
     assert bet["side"] == "over"
     assert bet["odds"] == 100.0
-    assert bet["edge"] == 0.22
+    assert bet["edge"] == pytest.approx(0.22)
     assert bet["model_probability"] == 0.72
     assert bet["market_probability"] == 0.5
     assert bet["quality_summary"]["passes_launch_gate"] is True
     assert bet["quality_summary"]["roi"] > 0.5
+    assert checkout_has_recent_delivery(db_path, now=datetime(2026, 2, 1, 12, 20, tzinfo=timezone.utc))
 
 
-def test_publish_guardrail_blocks_legacy_rows_for_benchmarked_rule(
-    tmp_path,
-    monkeypatch,
-):
+@pytest.mark.parametrize(
+    ("change", "failure"),
+    [
+        ("score", "paper_trial_has_unreconciled_grades"),
+        ("rule", "approval_rule_changed_before_publication"),
+    ],
+)
+def test_approval_change_before_commit_blocks_issuance(tmp_path, monkeypatch, change, failure):
+    db_path = tmp_path / "publish.db"
     rules_path = tmp_path / "rules.yml"
     output_path = tmp_path / "latest_publishable_bets.json"
     quality_path = tmp_path / "quality.json"
-    _write_metadata_approved_rules(rules_path)
-    output_path.write_text("stale paid list", encoding="utf-8")
+    _create_publish_db(db_path, include_history=True)
+    _write_rules(rules_path)
+    publish_release = publisher.publish_release
 
-    monkeypatch.setattr(
-        publisher,
-        "build_quality_report",
-        lambda **kwargs: {
-            "rule_results": [
-                {
-                    "rule_id": "nba_totals_metadata_rule",
-                    "passes_launch_gate": True,
-                    "odds_timing_filter": {"max_hours_before_start": None},
-                }
-            ],
-            "evaluation_sources": [],
-        },
-    )
-    monkeypatch.setattr(
-        publisher,
-        "load_current_prediction_output",
-        lambda **kwargs: pd.DataFrame(
-            [
-                {
-                    "prediction_id": 1,
-                    "game_id": "CUR1",
-                    "model_type": "logistic",
-                    "predicted_at": "2026-02-01T10:00:00+00:00",
-                    "start_time_utc": "2026-02-02T20:00:00+00:00",
-                    "league": "NBA",
-                    "home_team": "Home",
-                    "away_team": "Away",
-                    "game_status": "scheduled",
-                    "total_line": 210.5,
-                    "over_prob": 0.72,
-                    "under_prob": 0.28,
-                    "over_moneyline": 100,
-                    "under_moneyline": 100,
-                    "over_edge": 0.22,
-                    "under_edge": -0.22,
-                    "over_implied_prob": 0.5,
-                    "under_implied_prob": 0.5,
-                }
-            ]
-        ),
-    )
+    def change_before_commit(payload, path, **kwargs):
+        assert payload["passing_approved_rule_ids"] == ["nba_totals_fixture"]
+        assert len(payload["bets"]) == 1
+        if change == "score":
+            with sqlite3.connect(path) as conn:
+                conn.execute(
+                    "UPDATE game_results SET home_score = 98, away_score = 97 WHERE game_id = 'forward0'"
+                )
+        else:
+            rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+        return publish_release(payload, path, **kwargs)
 
+    monkeypatch.setattr(publisher, "publish_release", change_before_commit)
     result = publisher.publishable_bets(
-        db_path=tmp_path / "unused.db",
-        rules_path=rules_path,
-        output_path=output_path,
-        quality_output_path=quality_path,
-        leagues=["NBA"],
+        db_path=db_path, rules_path=rules_path, output_path=output_path,
+        quality_output_path=quality_path, leagues=["NBA"],
         now="2026-02-01T12:00:00+00:00",
     )
-
-    assert result["publishable_profitable_list_exists"] is False
-    assert result["reason"] == "passing_rules_require_benchmarked_live_metadata"
-    assert result["skipped_passing_rule_ids"] == ["nba_totals_metadata_rule"]
+    assert result["bets"] == []
+    assert result["reason"] == "approval_changed_before_publication"
+    assert result["passing_approved_rule_ids"] == []
     assert not output_path.exists()
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    assert quality["passing_approved_rule_ids"] == []
+    assert failure in quality["rule_results"][0]["launch_gate_failures"]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == 0
+
+
+def test_revocation_committed_before_export_prevents_stale_artifacts(tmp_path, monkeypatch):
+    db_path = tmp_path / "publish.db"
+    rules_path = tmp_path / "rules.yml"
+    output_path = tmp_path / "latest_publishable_bets.json"
+    quality_path = tmp_path / "quality.json"
+    _create_publish_db(db_path, include_history=True)
+    _write_rules(rules_path)
+    quality_path.write_text("newer diagnostic", encoding="utf-8")
+    publish_release = publisher.publish_release
+
+    def publish_then_revoke(payload, path, *, commit_at, approval_check):
+        first = publish_release(payload, path, commit_at=commit_at, approval_check=approval_check)
+        assert first["bet_count"] == 1
+        revocation_time = commit_at + timedelta(seconds=1)
+        publish_release(
+            {
+                "generated_at": revocation_time.isoformat(), "bets": [],
+                "passing_approved_rule_ids": [], "reason": "data_quality_failed",
+            },
+            path,
+            commit_at=revocation_time,
+        )
+        return first
+
+    monkeypatch.setattr(publisher, "publish_release", publish_then_revoke)
+    result = publisher.publishable_bets(
+        db_path=db_path, rules_path=rules_path, output_path=output_path,
+        quality_output_path=quality_path, leagues=["NBA"],
+        now="2026-02-01T12:00:00+00:00",
+    )
+    assert result["superseded"] is True
+    assert result["reason"] == "data_quality_failed"
+    assert result["bets"] == []
+    assert not output_path.exists()
+    assert quality_path.read_text(encoding="utf-8") == "newer diagnostic"
+
+
+def test_legacy_historical_approval_is_insufficient_to_publish(tmp_path, monkeypatch):
+    rules_path = tmp_path / "rules.yml"
+    output_path = tmp_path / "latest_publishable_bets.json"
+    _write_metadata_approved_rules(rules_path)
+    db_path = tmp_path / "publish.db"
+    _create_publish_db(db_path, include_history=False)
+    output_path.write_text("stale list", encoding="utf-8")
+    monkeypatch.setattr(
+        publisher, "load_current_prediction_output",
+        lambda **_: pytest.fail("Unverified approval reached current inference"),
+    )
+    result = publisher.publishable_bets(
+        db_path=db_path, rules_path=rules_path, output_path=output_path,
+        quality_output_path=tmp_path / "quality.json", leagues=["NBA"],
+        now="2026-02-01T12:00:00+00:00",
+    )
+    assert result["reason"] == "no_passing_approved_rule"
+    assert not output_path.exists()
+
+
+def test_live_matching_requires_contract_and_rule_id_on_each_pick():
+    frame = pd.DataFrame(
+        [
+            {"game_id": "wrong-rule", "rule_id": "another", "feature_contract": "canonical"},
+            {"game_id": "wrong-contract", "rule_id": "current", "feature_contract": "legacy"},
+            {"game_id": "matched", "rule_id": "current", "feature_contract": "canonical"},
+        ]
+    )
+    frame["model_sha256"] = "a" * 64
+
+    matching, mismatches, missing_id = publisher._matching_live_rows(
+        frame, {"id": "current", "feature_contract": "canonical", "model_sha256": "a" * 64}
+    )
+
+    assert matching["game_id"].tolist() == ["matched"]
+    assert not mismatches
+    assert not missing_id
+
+
+def test_locked_rule_evidence_excludes_prelock_predictions():
+    bets = pd.DataFrame({
+        "game_id": ["before", "after"],
+        "predicted_at": ["2026-03-01T00:00:00Z", "2026-03-03T00:00:00Z"],
+    })
+    rule = {"id": "locked", "locked_at": "2026-03-02T00:00:00Z"}
+
+    assert publisher.filter_bets_for_rule(bets, rule)["game_id"].tolist() == ["after"]
+
+
+def test_retrospective_candidate_cannot_be_promoted_without_a_forward_lock(tmp_path):
+    rules = tmp_path / "rules.yml"
+    _write_candidate_rules(rules)
+    with pytest.raises(RuntimeError, match="Lock the candidate"):
+        promote_candidate_rule(rule_id="nba_totals_candidate", rules_path=rules)
 
 
 def test_promote_candidate_rule_requires_passing_gate(tmp_path):
@@ -371,6 +661,12 @@ def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     _create_publish_db(failing_db, include_history=False)
     _create_publish_db(passing_db, include_history=True)
     _write_candidate_rules(rules_path)
+    config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    config["locked_candidate_rules"] = [
+        {**config["candidate_rules"][0], "status": "locked_candidate", "locked_at": "2026-01-01T00:00:00Z"}
+    ]
+    config["candidate_rules"] = []
+    rules_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     with pytest.raises(RuntimeError):
         promote_candidate_rule(
@@ -381,20 +677,14 @@ def test_promote_candidate_rule_requires_passing_gate(tmp_path):
         )
     failed_config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
     assert failed_config["approved_rules"] == []
-    assert failed_config["candidate_rules"][0]["id"] == "nba_totals_candidate"
+    assert failed_config["locked_candidate_rules"][0]["id"] == "nba_totals_candidate"
 
-    result = promote_candidate_rule(
-        rule_id="nba_totals_candidate",
-        rules_path=rules_path,
-        db_path=passing_db,
-        leagues=["NBA"],
-    )
-
-    promoted_config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
-    assert result["promoted"] is True
-    assert promoted_config["approved_rules"][0]["id"] == "nba_totals_candidate"
-    assert promoted_config["approved_rules"][0]["status"] == "approved"
-    assert promoted_config["candidate_rules"] == []
+    with pytest.raises(RuntimeError, match="completed prospective paper trial"):
+        promote_candidate_rule(
+            rule_id="nba_totals_candidate", rules_path=rules_path,
+            db_path=passing_db, leagues=["NBA"],
+        )
+    assert yaml.safe_load(rules_path.read_text(encoding="utf-8"))["approved_rules"] == []
 
 
 def test_lock_candidate_rule_uses_decision_time_recommendation_without_approval(tmp_path):
@@ -440,3 +730,195 @@ def test_lock_candidate_rule_uses_decision_time_recommendation_without_approval(
     assert locked_config["locked_candidate_rules"][0]["approval_requires"] == (
         "strict_locked_out_of_sample_results"
     )
+
+
+def test_paper_promotion_waits_for_the_frozen_review_and_keeps_the_execution_contract(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="not eligible"):
+        promote_paper_trial(
+            "nba_totals_fixture", db_path, rules_path, QualityGate(),
+            observed_at=datetime(2026, 1, 22, tzinfo=timezone.utc),
+        )
+    assert yaml.safe_load(rules_path.read_text(encoding="utf-8"))["approved_rules"] == []
+
+    result = promote_paper_trial(
+        "nba_totals_fixture", db_path, rules_path, QualityGate(),
+        observed_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    approved = yaml.safe_load(rules_path.read_text(encoding="utf-8"))["approved_rules"][0]
+    assert result["promoted"] is True
+    assert approved["model_sha256"] == "a" * 64
+    assert approved["book"] == "draftkings"
+    assert approved["max_quote_age_minutes"] == 10
+    assert approved["min_minutes_before_start"] == 15
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    assert paper_rule_result(approved, review, QualityGate())["passes_launch_gate"]
+    approved["min_edge"] = 0.01
+    assert not paper_rule_result(approved, review, QualityGate())["passes_launch_gate"]
+
+
+def test_paper_promotion_respects_current_stricter_launch_thresholds(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="roi_below_launch_threshold"):
+        promote_paper_trial(
+            "nba_totals_fixture", db_path, rules_path, QualityGate(min_roi=0.99),
+            observed_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.parametrize("extra", [
+    {"min_moneyline": -110}, {"max_moneyline": -110},
+    {"locked_at": "2026-01-06T00:00:00+00:00"},
+    {"prediction_variant": "retuned"}, {"feature_variant": "retuned"},
+    {"feature_contract": "retuned"}, {"price_mode": "best_price"},
+    {"timing_bucket": "one_hour"}, {"future_filter": None},
+])
+def test_paper_approval_rejects_additional_strategy_fields(tmp_path, extra):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    assert paper_rule_result(canonical, review, QualityGate())["passes_launch_gate"]
+
+    result = paper_rule_result({**canonical, **extra}, review, QualityGate())
+
+    assert result["passes_launch_gate"] is False
+    assert result["launch_gate_failures"] == ["paper_trial_unrecognized_rule_fields"]
+    assert result["unrecognized_rule_fields"] == list(extra)
+
+
+def test_filtered_subset_cannot_inherit_the_full_trial_approval(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    rows = pd.DataFrame({
+        "game_id": ["cheaper", "dearer"], "market": ["totals"] * 2,
+        "league": ["NBA"] * 2, "model_type": ["ensemble"] * 2,
+        "model_sha256": ["a" * 64] * 2, "edge": [0.1] * 2,
+        "moneyline": [-105, -115],
+    })
+    filtered = {**canonical, "max_moneyline": -110}
+    assert len(publisher.filter_bets_for_rule(rows, canonical)) == 2
+    assert publisher.filter_bets_for_rule(rows, filtered)["game_id"].tolist() == ["dearer"]
+    assert not paper_rule_result(filtered, review, QualityGate())["passes_launch_gate"]
+
+
+def test_late_material_grade_changes_revoke_approval_without_rewriting_frozen_metrics(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    original_metrics = dict(review["metrics"])
+    assert paper_rule_result(canonical, review, QualityGate())["passes_launch_gate"]
+
+    review["late_grade_changes"] = 1
+    result = paper_rule_result(canonical, review, QualityGate())
+
+    assert result["passes_launch_gate"] is False
+    assert result["launch_gate_failures"] == ["paper_trial_has_late_grade_changes"]
+    assert review["metrics"] == original_metrics
+
+
+@pytest.mark.parametrize("correction", ["score", "original_close"])
+def test_source_correction_blocks_promotion_before_and_after_settlement_reconciliation(
+    tmp_path, correction
+):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    trial_id = "nba_totals_fixture"
+    observed = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+    original_rules = rules_path.read_bytes()
+    initial = paper_reviews(db_path, observed)[trial_id]
+    canonical = rule_for_trial(initial)
+    frozen_metrics = dict(initial["metrics"])
+    assert initial["unreconciled_grades"] == 0
+    assert paper_rule_result(canonical, initial, QualityGate())["passes_launch_gate"]
+    if correction == "score":
+        with closing(sqlite3.connect(db_path)) as conn, conn:
+            conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
+    else:
+        receipt = _raw_nba_path(db_path, "forward_close_0")
+        envelope = json.loads(receipt.read_text(encoding="utf-8"))
+        for outcome in envelope["results"][0]["bookmakers"][0]["markets"][0]["outcomes"]:
+            outcome["point"] = 200.0
+        receipt.write_text(json.dumps(envelope), encoding="utf-8")
+
+    stale = paper_reviews(db_path, observed)[trial_id]
+    stale_result = paper_rule_result(canonical, stale, QualityGate())
+
+    assert stale["unreconciled_grades"] == 1
+    assert stale["late_grade_changes"] == 0
+    assert stale["metrics"] == frozen_metrics
+    assert stale_result["launch_gate_failures"] == ["paper_trial_has_unreconciled_grades"]
+    with pytest.raises(RuntimeError, match="paper_trial_has_unreconciled_grades"):
+        promote_paper_trial(
+            trial_id, db_path, rules_path, QualityGate(), observed_at=observed
+        )
+    assert rules_path.read_bytes() == original_rules
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        # Reading approval cannot repair history or silently bless the changed source.
+        assert conn.execute("SELECT COUNT(*) FROM paper_settlement_history").fetchone()[0] == 150
+        assert conn.execute(
+            "SELECT outcome FROM paper_settlements WHERE game_id = 'forward0'"
+        ).fetchone()[0] == "win"
+        assert settle_open_trials(conn, observed) == 1
+        if correction == "original_close":
+            history = conn.execute(
+                """
+                SELECT outcome, profit_units, close_snapshot_id, settled_at
+                FROM paper_settlement_history WHERE game_id = 'forward0' ORDER BY revision_id
+                """
+            ).fetchall()
+            assert [tuple(row) for row in history] == [
+                ("win", 1.0, "forward0_close", datetime(2026, 1, 12, tzinfo=timezone.utc).isoformat()),
+                ("win", 1.0, None, observed.isoformat()),
+            ]
+        conn.commit()
+
+    reconciled = paper_reviews(db_path, observed + timedelta(hours=1))[trial_id]
+    reconciled_result = paper_rule_result(canonical, reconciled, QualityGate())
+    assert reconciled["unreconciled_grades"] == 0
+    assert reconciled["late_grade_changes"] == 1
+    assert reconciled["metrics"] == frozen_metrics
+    assert reconciled_result["launch_gate_failures"] == ["paper_trial_has_late_grade_changes"]
+    with pytest.raises(RuntimeError, match="paper_trial_has_late_grade_changes"):
+        promote_paper_trial(
+            trial_id, db_path, rules_path, QualityGate(),
+            observed_at=observed + timedelta(hours=1),
+        )
+    assert rules_path.read_bytes() == original_rules
+
+
+def test_future_grade_revision_cannot_hide_current_source_correction(tmp_path):
+    db_path = tmp_path / "paper.db"
+    trial_id = "nba_totals_fixture"
+    observed = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    _seed_paper_evidence(db_path)
+    initial = paper_reviews(db_path, observed)[trial_id]
+    rule = rule_for_trial(initial)
+    assert paper_rule_result(rule, initial, QualityGate())["passes_launch_gate"]
+
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
+        future = observed + timedelta(days=1)
+        assert settle_open_trials(conn, future) == 1
+        assert settle_open_trials(conn, observed) == 0
+
+    review = paper_reviews(db_path, observed)[trial_id]
+    assert review["metrics"] == initial["metrics"]
+    assert review["late_grade_changes"] == 0
+    assert review["unreconciled_grades"] == 1
+    result = paper_rule_result(rule, review, QualityGate())
+    assert not result["passes_launch_gate"]
+    assert result["launch_gate_failures"] == ["paper_trial_has_unreconciled_grades"]

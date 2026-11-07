@@ -1,7 +1,7 @@
 # Predeclared betting rules for subscriber-facing recommendations.
 #
 # Launch rule status:
-# - approved: may be shown only if the quality report says it passes launch gates.
+# - approved: requires a passing completed prospective trial and current launch gates.
 # - candidate: monitored and backtested, but not subscriber-facing.
 # - status: disabled or disabled: true: never subscriber-facing.
 #
@@ -14,6 +14,7 @@ launch_gate:
   min_bootstrap_roi_low: 0.0
   min_avg_clv: 0.0
   min_clv_win_rate: 0.5
+  min_clv_coverage: 0.80
   max_hours_before_start: 72
   require_positive_clv: true
   bootstrap_samples: 3000

@@ -2,12 +2,22 @@
 <#
 .SYNOPSIS
     Runs all data ingestion steps: Smart History + Live Odds + Live Scores.
+.PARAMETER ResearchProviderLeagues
+    Restrict live Odds API odds and scores to NBA and NCAAB.
 #>
 
 param(
     [switch]$SoccerOnly = $false,
-    [switch]$SkipOdds = $false
+    [switch]$SkipOdds = $false,
+    [switch]$Paper = $false,
+    [string]$NbaQuoteReceipt = "",
+    [switch]$ResearchProviderLeagues = $false
 )
+
+if ($ResearchProviderLeagues -and $SoccerOnly) {
+    Write-Error "ResearchProviderLeagues cannot be combined with SoccerOnly."
+    exit 64
+}
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -19,8 +29,36 @@ $soccerLeagues = @("EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
 $targetCoreLeagues = if ($SoccerOnly) { @() } else { $coreLeagues }
 $targetSoccerLeagues = $soccerLeagues
 $targetLeagues = $targetCoreLeagues + $targetSoccerLeagues
+$providerLeagues = if ($ResearchProviderLeagues) { @("NBA", "NCAAB") } else { $targetLeagues }
+$paperFailed = $false
+$capturePaperFirst = $Paper -and -not $SkipOdds -and ($providerLeagues -contains "NBA")
 
 Write-Host "=== Starting Data Ingestion ==="
+if ($ResearchProviderLeagues -and -not $SkipOdds) {
+    Write-Host "Live Odds API odds and scores limited to NBA and NCAAB."
+}
+
+if ($capturePaperFirst) {
+    try {
+        Write-Host "Fetching NBA odds for paper capture before history ingestion..."
+        $receiptArgs = @()
+        if ($NbaQuoteReceipt) { $receiptArgs = @("--receipt-output", $NbaQuoteReceipt) }
+        & poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh @receiptArgs 2>&1 | ForEach-Object { "$_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "NBA odds refresh failed. Paper capture could not run."
+            $paperFailed = $true
+        } else {
+            & poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only 2>&1 | ForEach-Object { "$_" }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "NBA paper capture failed (exit=$LASTEXITCODE)."
+                $paperFailed = $true
+            }
+        }
+    } catch {
+        Write-Warning "NBA odds or paper capture failed."
+        $paperFailed = $true
+    }
+}
 
 # 1. Smart History Ingestion
 Write-Host "Step 1: Smart History Ingestion..."
@@ -40,8 +78,8 @@ try {
 if (-not $SkipOdds) {
     Write-Host "Step 2: Fetching Live Odds..."
     $theOddsLeagues = @("NFL", "NBA", "CFB", "NCAAB", "NHL", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
-    foreach ($league in $targetLeagues) {
-        if ($theOddsLeagues -notcontains $league) { continue }
+    foreach ($league in $providerLeagues) {
+        if ($theOddsLeagues -notcontains $league -or ($capturePaperFirst -and $league -eq "NBA")) { continue }
         try {
             Write-Host "Fetching odds for $league..."
             & poetry run python -m src.data.ingest_odds --league $league --market h2h,totals --force-refresh 2>&1 | ForEach-Object { "$_" }
@@ -57,7 +95,7 @@ if (-not $SkipOdds) {
 if (-not $SkipOdds) {
     Write-Host "Step 3: Fetching Live Scores..."
     try {
-        $commaLeagues = $targetLeagues -join ","
+        $commaLeagues = $providerLeagues -join ","
         & poetry run python -m src.data.ingest_scores --leagues $commaLeagues --dotenv .env --resolve-stale --stale-lookback-days 14 2>&1 | ForEach-Object { "$_" }
         
     } catch {
@@ -68,3 +106,10 @@ if (-not $SkipOdds) {
 }
 
 Write-Host "=== Data Ingestion Completed ==="
+$ingestExitCode = $LASTEXITCODE
+if ($ingestExitCode -ne 0) {
+    Write-Warning "The final ingestion command failed (exit=$ingestExitCode)."
+    exit 1
+}
+if ($paperFailed) { exit 2 }
+exit 0

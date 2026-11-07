@@ -41,7 +41,8 @@ if [[ -n "$DATE" ]]; then
 fi
 
 echo "[drill] running restore into $WORK"
-if ! /app/scripts/restore_from_s3.sh "${ARGS[@]}"; then
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+if ! "$SCRIPT_DIR/restore_from_s3.sh" "${ARGS[@]}"; then
 	echo "[drill] FAIL: restore_from_s3.sh exited non-zero" >&2
 	exit 2
 fi
@@ -156,7 +157,7 @@ if models_dir.exists():
         if empty:
             failures.append(f"{len(empty)} model files restored at size 0")
 else:
-    warnings.append("models dir not present after restore")
+    failures.append("models dir not present after restore")
 
 if warnings:
     print("[drill] warnings:")

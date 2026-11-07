@@ -47,19 +47,16 @@ def backfill(
         raise ValueError("step_days must be >= 1")
 
     for target in _date_range(start_date, end_date, step_days):
-        LOGGER.info("Fetching odds history for %s %s", settings.sport, target.date())
-        try:
-            payload = fetch_odds_history(settings, target)
-        except Exception as exc:  # pragma: no cover - network guard
-            LOGGER.error("Failed to fetch odds for %s: %s", target.date(), exc)
-            break
         timestamp = target.strftime("%Y-%m-%d")
         snapshot_path = history_dir / f"odds_{timestamp}.json"
         if snapshot_path.exists() and not overwrite:
             LOGGER.debug("Skipping existing snapshot %s", snapshot_path)
-        else:
-            snapshot_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            continue
+
+        LOGGER.info("Fetching odds history for %s %s", settings.sport, target.date())
+        payload = fetch_odds_history(settings, target)
         load_odds_snapshot(payload, raw_path=str(snapshot_path), region=settings.region, sport_key=settings.sport)
+        snapshot_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
 

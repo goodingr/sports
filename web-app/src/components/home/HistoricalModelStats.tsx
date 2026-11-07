@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useStats } from '@/hooks/useStats';
 import { Container } from '@/components/ui/Container';
 import { TrendingUp, DollarSign, Percent, ChevronUp, ChevronDown } from 'lucide-react';
+import Link from 'next/link';
 
-export function HeroStats() {
+export function HistoricalModelStats() {
     const { stats, loading, error } = useStats();
     const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
@@ -45,6 +46,7 @@ export function HeroStats() {
         );
     }
 
+    const hasResults = stats.total_bets > 0;
     return (
         <div className={`relative bg-black/50 border-b border-white/10 transition-[padding] duration-300 ease-in-out ${isCollapsed ? 'pb-8' : 'pb-0'}`}>
             <div
@@ -54,15 +56,22 @@ export function HeroStats() {
                 <div className="overflow-hidden">
                     <div className="py-8">
                         <Container>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
+                            <div className="max-w-2xl mx-auto mb-3 text-center">
+                                <h4 className="text-sm font-semibold text-foreground">Historical totals model summary</h4>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {hasResults ? 'Settled model selections using simulated stakes.' : 'No settled model selections yet.'}
+                                </p>
+                                <Link href="/record" className="mt-2 inline-block text-xs text-primary hover:underline">View the published pick record</Link>
+                            </div>
+                            {hasResults && <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
                                 <StatCard
-                                    label="Total Profit"
-                                    value={`$${stats.total_profit.toLocaleString()}`}
-                                    icon={<DollarSign className="h-4 w-4 text-success" />}
-                                    trend="All Time"
+                                    label="Simulated P&L"
+                                    value={stats.total_profit.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                    icon={<DollarSign className="h-4 w-4 text-primary" />}
+                                    trend="Tracked selections"
                                 />
                                 <StatCard
-                                    label="ROI"
+                                    label="Simulated ROI"
                                     value={`${stats.roi}%`}
                                     icon={<TrendingUp className="h-4 w-4 text-primary" />}
                                     trend="Return on Investment"
@@ -71,9 +80,9 @@ export function HeroStats() {
                                     label="Win Rate"
                                     value={`${stats.win_rate}%`}
                                     icon={<Percent className="h-4 w-4 text-blue-500" />}
-                                    trend={`${stats.total_bets} Total Bets`}
+                                    trend={`${stats.total_bets.toLocaleString('en-US')} settled selections`}
                                 />
-                            </div>
+                            </div>}
                         </Container>
                     </div>
                 </div>

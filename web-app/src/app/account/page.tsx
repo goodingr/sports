@@ -4,6 +4,10 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ManageSubscriptionButton } from "@/components/account/ManageSubscriptionButton";
+import { isCheckoutSessionId } from "@/lib/stripe-entitlements";
+import { configuredStripeScope, hasScopedPremium, isPremiumStatus, scopedCustomerId } from "@/lib/billing";
+import { CheckoutReturnStatus } from "./CheckoutReturnStatus";
+import { RefreshSubscriptionButton } from "./RefreshSubscriptionButton";
 
 export const metadata: Metadata = {
     title: "Account | Sports Analytics",
@@ -11,7 +15,7 @@ export const metadata: Metadata = {
 };
 
 interface PageProps {
-    searchParams: Promise<{ success?: string; canceled?: string }>;
+    searchParams: Promise<{ success?: string; session_id?: string | string[] }>;
 }
 
 function formatDate(epochSeconds: number): string {
@@ -23,24 +27,29 @@ function formatDate(epochSeconds: number): string {
 }
 
 export default async function AccountPage({ searchParams }: PageProps) {
+    const params = await searchParams;
+    const sessionId = params.success === "true" && isCheckoutSessionId(params.session_id)
+        ? params.session_id : null;
     const { userId } = await auth();
     if (!userId) {
-        redirect("/login?redirect_url=/account");
+        const destination = sessionId ? `/account?success=true&session_id=${sessionId}` : "/account";
+        redirect(`/login?redirect_url=${encodeURIComponent(destination)}`);
     }
 
     const user = await currentUser();
-    const params = await searchParams;
-    const showSuccess = params.success === "true";
+    const showLegacyStatus = params.success === "true" && params.session_id === undefined;
 
     const meta = (user?.publicMetadata ?? {}) as Record<string, unknown>;
-    const isPremium = meta.is_premium === true || meta.isPremium === true;
-    const status = typeof meta.subscription_status === "string" ? meta.subscription_status : null;
+    const scope = configuredStripeScope();
+    const isPremium = hasScopedPremium(meta, scope);
+    const hasCustomer = scopedCustomerId(meta, scope) !== null;
+    const status = hasCustomer && typeof meta.subscription_status === "string"
+        && (isPremium || !isPremiumStatus(meta.subscription_status)) ? meta.subscription_status : null;
+    const cancelScheduled = meta.subscription_cancel_at_period_end === true;
     const periodEnd =
         typeof meta.subscription_current_period_end === "number"
             ? meta.subscription_current_period_end
             : null;
-    const hasCustomer =
-        typeof meta.stripe_customer_id === "string" && meta.stripe_customer_id.length > 0;
     const email = user?.emailAddresses?.[0]?.emailAddress ?? "";
 
     return (
@@ -50,13 +59,19 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 {email ? <>Signed in as {email}.</> : <>Manage your subscription and billing.</>}
             </p>
 
-            {showSuccess && (
+            {sessionId && <CheckoutReturnStatus key={sessionId} sessionId={sessionId} />}
+            {showLegacyStatus && isPremium && (
                 <div
                     role="status"
                     className="mb-6 rounded-xl border border-success/30 bg-success/10 p-4 text-sm text-success"
                 >
-                    <strong className="font-semibold">Subscription confirmed.</strong> Welcome to
-                    Pro Access — your premium picks are unlocked.
+                    <strong className="font-semibold">Subscription confirmed.</strong> You have access
+                    to published premium picks.
+                </div>
+            )}
+            {showLegacyStatus && !isPremium && (
+                <div role="status" className="mb-6 rounded-xl border border-white/10 bg-card p-4 text-sm text-muted-foreground">
+                    Billing confirmation is pending. Refresh this page to check your access.
                 </div>
             )}
 
@@ -78,18 +93,26 @@ export default async function AccountPage({ searchParams }: PageProps) {
                     <div className="flex items-center justify-between gap-4">
                         <dt className="text-muted-foreground">Status</dt>
                         <dd className="font-medium text-foreground capitalize">
-                            {status ? status.replace(/_/g, " ") : "No active subscription"}
+                            {cancelScheduled && isPremium ? "Cancellation scheduled" : status ? status.replace(/_/g, " ") : "No active subscription"}
                         </dd>
                     </div>
                     {periodEnd && isPremium && (
                         <div className="flex items-center justify-between gap-4">
-                            <dt className="text-muted-foreground">Renews</dt>
+                            <dt className="text-muted-foreground">{cancelScheduled ? "Access until" : "Renews"}</dt>
                             <dd className="font-medium text-foreground">{formatDate(periodEnd)}</dd>
                         </div>
                     )}
                 </dl>
 
                 <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                    {isPremium && (
+                        <Link
+                            href="/#upcoming-picks"
+                            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-white/20 px-6 py-3 font-bold text-foreground hover:bg-white/5 transition-colors"
+                        >
+                            View upcoming picks
+                        </Link>
+                    )}
                     {hasCustomer ? (
                         <ManageSubscriptionButton />
                     ) : (
@@ -97,10 +120,12 @@ export default async function AccountPage({ searchParams }: PageProps) {
                             href="/pricing"
                             className="inline-flex items-center justify-center bg-primary text-primary-foreground font-bold px-6 py-3 rounded-lg hover:bg-amber-500 transition-colors"
                         >
-                            Subscribe
+                            View plans
                         </Link>
                     )}
                 </div>
+
+                {hasCustomer && <div className="mt-3"><RefreshSubscriptionButton /></div>}
 
                 <p className="mt-4 text-xs text-muted-foreground">
                     Manage payment method, update billing, or cancel at any time. Cancellation

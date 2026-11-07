@@ -8,8 +8,11 @@ from src.models.betting_benchmark import (
     PredictionVariant,
     RollingConfig,
     StrictGate,
+    _gate_failures,
     _sort_number,
+    _totals_closing_line_value,
     rank_predeclared_rules,
+    rank_with_temporal_holdout,
     rolling_origin_predictions_for_variants,
     run_betting_benchmark,
 )
@@ -28,6 +31,93 @@ from src.models.train_betting import FeatureContract
 def test_sort_number_preserves_zero_values() -> None:
     assert _sort_number(0.0, 999.0) == 0.0
     assert _sort_number(None, 999.0) == 999.0
+
+
+def test_totals_clv_requires_a_later_same_book_quote_near_kickoff() -> None:
+    kickoff = pd.Timestamp("2026-01-02T00:00:00Z")
+    entry = kickoff - pd.Timedelta(hours=4)
+    row = pd.Series({
+        "line": 220.5,
+        "total_close": 224.5,
+        "selected_book_total_close": 222.5,
+        "snapshot_time_utc": entry,
+        "start_time_utc": kickoff,
+    })
+
+    for invalid_close in (None, entry, kickoff - pd.Timedelta(hours=2), kickoff):
+        row["selected_book_close_snapshot_time_utc"] = invalid_close
+        assert pd.isna(_totals_closing_line_value(row, "over", "selected_book")[0])
+
+    row["selected_book_close_snapshot_time_utc"] = kickoff - pd.Timedelta(minutes=30)
+    assert _totals_closing_line_value(row, "over", "selected_book")[0] == 2.0
+
+
+def test_gate_rejects_sparse_clv_even_when_observed_closes_are_positive() -> None:
+    result = {
+        "kind": "candidate",
+        "league": "NBA",
+        "bets": 150,
+        "roi": 0.15,
+        "bootstrap_roi_low": 0.04,
+        "model_beats_market_brier": True,
+        "closing_line_value_count": 5,
+        "avg_closing_line_value": 1.0,
+        "closing_line_value_win_rate": 1.0,
+    }
+    assert _gate_failures(result, StrictGate(), {"roi": 0.0}) == ["clv_coverage_below_0.8"]
+
+
+def test_temporal_holdout_scores_only_the_rule_ranked_on_development() -> None:
+    cutoff = pd.Timestamp("2026-05-04T00:00:00Z")
+    rule = {
+        "kind": "candidate",
+        "market": "totals",
+        "league": "NHL",
+        "prediction_variant": "raw",
+        "side": "over",
+        "min_edge": 0.0,
+        "residual": False,
+        "shrinkage": 1.0,
+        "calibration": "none",
+    }
+    rules = [{**rule, "id": model, "model_type": model} for model in ("logistic", "random_forest")]
+    rows = []
+    for game_id, hours, won in [("dev", -48, True), ("overlap", -4, True), ("test", 24, False)]:
+        for model in ("logistic", "random_forest"):
+            probability = 0.8 if model == "logistic" else 0.6
+            kickoff = cutoff + pd.Timedelta(hours=hours)
+            profit = 90.0 if won else -100.0
+            rows.append(
+                {
+                    **rule,
+                    "game_id": game_id,
+                    "model_type": model,
+                    "start_time_utc": kickoff,
+                    "predicted_at": kickoff - pd.Timedelta(hours=1),
+                    "edge": probability - 0.5,
+                    "predicted_prob": probability,
+                    "no_vig_market_prob": 0.5,
+                    "won": won,
+                    "profit": profit,
+                    "expected_value": 0.0,
+                    "actual_value": profit,
+                }
+            )
+    gate = StrictGate(
+        min_bets_narrow=1,
+        bootstrap_samples=20,
+        require_positive_clv=False,
+        require_roi_beats_market_baseline=False,
+    )
+
+    rankings, holdout = rank_with_temporal_holdout(pd.DataFrame(rows), rules, gate, cutoff)
+
+    assert [result["bets"] for result in rankings] == [1, 1]
+    assert holdout["development_games"] == holdout["holdout_games"] == 1
+    assert holdout["frozen_rule_id"] == "logistic"
+    assert holdout["result"]["bets"] == 1
+    assert holdout["result"]["roi"] == -1.0
+    assert not holdout["holdout_passes_strict_gate"]
 
 
 def _synthetic_totals_frame() -> pd.DataFrame:
@@ -246,7 +336,7 @@ def test_ranked_rules_include_market_baseline_and_strict_gate() -> None:
     ]
 
     ranked = rank_predeclared_rules(
-        bets,
+        bets.assign(hours_before_start=6.0),
         rules,
         StrictGate(
             min_bets_narrow=3,

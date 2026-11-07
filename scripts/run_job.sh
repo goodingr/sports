@@ -5,7 +5,7 @@
 # pipeline command, and writes a heartbeat file so the container healthcheck
 # can tell whether jobs are succeeding or silently failing.
 #
-# Usage: run_job.sh <predict|train|benchmark|backup_local|backup_remote>
+# Usage: run_job.sh <job>
 #
 # Heartbeats live in $HEARTBEAT_DIR (default /app/logs/heartbeat):
 #   <job>.ok    — touched on success, body = ISO-8601 UTC timestamp
@@ -16,7 +16,24 @@
 
 set -uo pipefail
 
-JOB=${1:?job name required: predict|train|benchmark|backup_local|backup_remote}
+JOB=${1:?job name required}
+
+validate_live_odds_jobs() {
+	case "${WORKER_LIVE_ODDS_JOBS:-}" in
+		""|predict|train|predict,train|train,predict) return 0 ;;
+		*)
+			echo "Invalid WORKER_LIVE_ODDS_JOBS. Use predict and/or train separated by a comma." >&2
+			return 64
+			;;
+	esac
+}
+
+if [[ "$JOB" == --validate-live-odds-jobs ]]; then
+	validate_live_odds_jobs
+	exit $?
+fi
+
+cd /app || exit 1
 
 # Load env that was captured by worker_entrypoint.sh.
 ENV_FILE=/app/scripts/.worker_env
@@ -42,6 +59,13 @@ run() {
 	"$@"
 }
 
+run_scheduled_pipeline() {
+	if [[ ",${WORKER_LIVE_ODDS_JOBS:-}," != *",$JOB,"* ]]; then
+		set -- "$@" --skip-odds
+	fi
+	run /app/scripts/pipeline.sh "$@"
+}
+
 write_heartbeat() {
 	local kind=$1 status=$2
 	# Atomic write: rename a sibling temp file so a partial write can never
@@ -58,17 +82,18 @@ write_heartbeat() {
 }
 
 dispatch() {
+	validate_live_odds_jobs || return $?
 	case "$JOB" in
 		predict)
 			# Hourly fast path: ingest + predict, no retraining.
 			log "Starting hourly predict pipeline"
-			run /app/scripts/pipeline.sh --skip-training
+			run_scheduled_pipeline --skip-training
 			;;
 
 		train)
 			# Daily full path: ingest + quality benchmark + predict + publish gate.
 			log "Starting daily paid-picks readiness pipeline"
-			run /app/scripts/pipeline.sh
+			run_scheduled_pipeline
 			;;
 
 		benchmark)
@@ -76,6 +101,21 @@ dispatch() {
 			# benchmark + publish gate, without the legacy prediction refresh.
 			log "Starting daily paid-picks benchmark"
 			run /app/scripts/pipeline.sh --skip-odds --skip-prediction
+			;;
+
+		paper_close)
+			log "Checking for paper decisions due for closing quotes"
+			run timeout 120s python -m src.predict.paper_close_poll --collect --batch-scheduled
+			;;
+
+		paper_entry)
+			log "Checking for early NBA paper entries"
+			run timeout 120s python -m src.predict.paper_entry_poll --collect --scheduled-official-fallback
+			;;
+
+		paper_events)
+			log "Checking for new NBA fixture IDs"
+			run timeout 120s python -m src.data.ingest_nba_events --collect --observe-paper
 			;;
 
 		backup_local)

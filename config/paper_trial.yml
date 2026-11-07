@@ -1,0 +1,16 @@
+# Prospective experiment through the end of the 2026–27 NBA regular season.
+trial_id: nba_totals_random_forest_draftkings_v2
+league: NBA
+market: totals
+model_type: random_forest
+model_sha256: b1d9da20f782d43b9f3195f6f5f8cda25783fd09a8b539914e9c24457ffa22e5
+book: draftkings
+odds_source: the-odds-api
+min_edge: 0.20
+max_quote_age_minutes: 10
+min_minutes_before_start: 15
+max_hours_before_start: 12
+min_decisions: 150
+min_roi: 0.05
+min_clv_coverage: 0.80
+review_at: "2027-04-12T04:00:00+00:00"

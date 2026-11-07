@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { mockCheckoutAvailability } from './_fixtures/mocks';
 
 test.describe('Checkout handoff (mocked)', () => {
     test('signed-out CTA does not call checkout API; routes to signup', async ({ page }) => {
+        await mockCheckoutAvailability(page, true);
         let checkoutCalled = false;
         await page.route('**/api/checkout', async (route) => {
             checkoutCalled = true;

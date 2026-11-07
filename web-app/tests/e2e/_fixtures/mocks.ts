@@ -65,9 +65,16 @@ export const MOCK_STATS = {
 
 interface MockOptions {
     upcoming?: unknown[];
+    premium?: boolean;
     history?: unknown[];
     stats?: unknown;
     historyTotal?: number;
+}
+
+export async function mockCheckoutAvailability(page: Page, checkoutAvailable: boolean): Promise<void> {
+    await page.route('**/api/bets/access', async (route) => {
+        await route.fulfill({ json: { checkout_available: checkoutAvailable } });
+    });
 }
 
 /**
@@ -87,7 +94,7 @@ export async function mockBetsRoutes(page: Page, opts: MockOptions = {}): Promis
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({ data: upcoming }),
+            body: JSON.stringify({ data: upcoming, is_premium: opts.premium ?? false }),
         });
     });
     await page.route('**/api/bets/history**', async (route) => {

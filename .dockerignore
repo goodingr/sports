@@ -32,6 +32,8 @@ dist
 .env.*
 !.env.example
 .odds_api_key_index
+config/research_provider_leagues.local
+config/paid_release_leagues.local
 
 # Data, models, logs (mounted via volumes; baking them blows up the image)
 data

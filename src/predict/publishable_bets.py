@@ -1,35 +1,41 @@
-"""Publish subscriber-facing bets behind the historical quality gate."""
+"""Publish subscriber-facing bets after a completed prospective trial passes."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import re
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, Optional
 
 import pandas as pd
 import yaml
 
-from src.db.core import DB_PATH
+from src.db.core import DB_PATH, connect, resolve_db_path
 from src.models.prediction_quality import (
     DEFAULT_RELEASE_LEAGUES,
     _json_default,
-    build_quality_report,
+    _quality_gate_from_config,
     configured_rules,
     filter_bets_for_rule,
     load_rules,
     no_vig_pair,
     rule_is_disabled,
 )
+from src.predict.paper_approval import paper_reviews, paper_rule_result, promote_paper_trial
+from src.predict.published_ledger import ApprovalCheck, publish_release
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT = Path("reports/publishable_bets/latest_publishable_bets.json")
 DEFAULT_QUALITY_OUTPUT = Path("reports/publishable_bets/latest_quality_report.json")
 BENCHMARK_METADATA_FIELDS = (
+    "model_sha256",
     "prediction_variant",
     "feature_contract",
     "feature_variant",
@@ -37,8 +43,15 @@ BENCHMARK_METADATA_FIELDS = (
     "timing_bucket",
 )
 LIVE_RULE_ID_FIELDS = ("rule_id", "source_rule_id", "published_rule_id")
+QUOTE_METADATA_FIELDS = (
+    "selected_totals_snapshot_id", "selected_totals_book_id",
+    "selected_h2h_snapshot_id", "selected_h2h_book_id",
+    "totals_model_sha256", "moneyline_model_sha256",
+)
 
 QUALITY_SUMMARY_FIELDS = (
+    "evidence_source",
+    "evidence_cutoff",
     "bets",
     "required_min_bets",
     "roi",
@@ -81,11 +94,15 @@ def _normalize_now(now: Optional[str | pd.Timestamp]) -> pd.Timestamp:
 
 def _latest_pre_game(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
-    frame["predicted_at"] = pd.to_datetime(frame["predicted_at"], utc=True, errors="coerce")
-    frame["start_time_utc"] = pd.to_datetime(frame["start_time_utc"], utc=True, errors="coerce")
+    for column in ("predicted_at", "start_time_utc"):
+        frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce", format="mixed")
     frame = frame[frame["predicted_at"].notna() & frame["start_time_utc"].notna()].copy()
-    frame = frame[frame["predicted_at"] <= frame["start_time_utc"]].copy()
-    return frame.sort_values("predicted_at").drop_duplicates(["game_id", "model_type"], keep="last")
+    frame = frame[frame["predicted_at"] < frame["start_time_utc"]].copy()
+    identity = ["game_id", "model_type"]
+    identity.extend(
+        field for field in (*BENCHMARK_METADATA_FIELDS, *LIVE_RULE_ID_FIELDS) if field in frame
+    )
+    return frame.sort_values("predicted_at").drop_duplicates(identity, keep="last")
 
 
 def load_current_prediction_output(
@@ -104,6 +121,7 @@ def load_current_prediction_output(
             "price_mode",
             "timing_bucket",
             "feature_contract",
+            *QUOTE_METADATA_FIELDS,
             *LIVE_RULE_ID_FIELDS,
         )
         if column in prediction_columns
@@ -151,14 +169,15 @@ def load_current_prediction_output(
     if df.empty:
         return df
 
-    df = _latest_pre_game(df)
+    now_utc = _normalize_now(now)
+    predicted = pd.to_datetime(df["predicted_at"], utc=True, errors="coerce", format="mixed")
+    df = _latest_pre_game(df[predicted <= now_utc])
     if df.empty:
         return df
 
-    now_utc = _normalize_now(now)
-    df = df[df["start_time_utc"] >= now_utc].copy()
+    df = df[df["start_time_utc"] > now_utc].copy()
     df = df[
-        ~df["game_status"].astype(str).str.lower().isin({"final", "completed", "closed", "post"})
+        df["game_status"].astype(str).str.lower().isin({"scheduled", "pre"})
     ].copy()
 
     if leagues:
@@ -207,6 +226,9 @@ def _expand_current_totals(predictions: pd.DataFrame) -> pd.DataFrame:
     )
     frame["over_no_vig_market_prob"] = no_vig[0]
     frame["under_no_vig_market_prob"] = no_vig[1]
+    frame["quote_snapshot_id"] = frame.get("selected_totals_snapshot_id")
+    frame["quote_book_id"] = frame.get("selected_totals_book_id")
+    frame["model_sha256"] = frame.get("totals_model_sha256")
 
     rows: list[pd.DataFrame] = []
     for side in ("over", "under"):
@@ -217,12 +239,10 @@ def _expand_current_totals(predictions: pd.DataFrame) -> pd.DataFrame:
         side_df["moneyline"] = side_df[f"{side}_moneyline"]
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_market_prob"]
         implied_column = f"{side}_implied_prob"
-        side_df["implied_prob"] = side_df["no_vig_market_prob"].fillna(side_df[implied_column])
-        side_df["edge"] = side_df[f"{side}_edge"]
-        missing_edge = side_df["edge"].isna()
-        side_df.loc[missing_edge, "edge"] = (
-            side_df.loc[missing_edge, "predicted_prob"] - side_df.loc[missing_edge, "implied_prob"]
-        )
+        side_df["implied_prob"] = side_df["no_vig_market_prob"]
+        if implied_column in side_df:
+            side_df["implied_prob"] = side_df["implied_prob"].fillna(side_df[implied_column])
+        side_df["edge"] = side_df["predicted_prob"] - side_df["no_vig_market_prob"]
         rows.append(side_df)
     return pd.concat(rows, ignore_index=True)
 
@@ -243,6 +263,9 @@ def _expand_current_moneyline(predictions: pd.DataFrame) -> pd.DataFrame:
     )
     frame["home_no_vig_market_prob"] = no_vig[0]
     frame["away_no_vig_market_prob"] = no_vig[1]
+    frame["quote_snapshot_id"] = frame.get("selected_h2h_snapshot_id")
+    frame["quote_book_id"] = frame.get("selected_h2h_book_id")
+    frame["model_sha256"] = frame.get("moneyline_model_sha256")
 
     rows: list[pd.DataFrame] = []
     for side in ("home", "away"):
@@ -254,11 +277,7 @@ def _expand_current_moneyline(predictions: pd.DataFrame) -> pd.DataFrame:
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_market_prob"]
         implied_column = f"{side}_implied_prob"
         side_df["implied_prob"] = side_df["no_vig_market_prob"].fillna(side_df[implied_column])
-        side_df["edge"] = side_df[f"{side}_edge"]
-        missing_edge = side_df["edge"].isna()
-        side_df.loc[missing_edge, "edge"] = (
-            side_df.loc[missing_edge, "predicted_prob"] - side_df.loc[missing_edge, "implied_prob"]
-        )
+        side_df["edge"] = side_df["predicted_prob"] - side_df["no_vig_market_prob"]
         rows.append(side_df)
     return pd.concat(rows, ignore_index=True)
 
@@ -268,6 +287,33 @@ def expand_current_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
     frames = [_expand_current_totals(predictions), _expand_current_moneyline(predictions)]
     non_empty = [frame for frame in frames if not frame.empty]
     return pd.concat(non_empty, ignore_index=True) if non_empty else pd.DataFrame()
+
+
+def _pinned_current_totals(db_path: Path, rule: dict[str, Any]) -> pd.DataFrame:
+    """Score a passing prospective rule without writing ordinary predictions."""
+    from src.predict.engine import FeatureContractError, PredictionEngine
+
+    digest = str(rule.get("model_sha256", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        return pd.DataFrame()
+    engine = PredictionEngine(model_type=rule["model_type"])
+    try:
+        scores = engine.predict_pinned_totals(rule["league"], digest, db_path=db_path)
+    except FeatureContractError:
+        LOGGER.warning(
+            "Cannot score approved NBA rule %s with its pinned model", rule["id"], exc_info=True
+        )
+        return pd.DataFrame()
+    if scores is None or scores.empty:
+        return pd.DataFrame()
+    predictions = scores.rename(
+        columns={
+            "commence_time": "start_time_utc",
+            "over_predicted_prob": "over_prob",
+            "under_predicted_prob": "under_prob",
+        }
+    ).assign(model_type=rule["model_type"], rule_id=rule["id"])
+    return _expand_current_totals(predictions)
 
 
 def _quality_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -292,18 +338,32 @@ def _serialize_bet(
         "league": row.get("league"),
         "game_id": row.get("game_id"),
         "start_time_utc": row.get("start_time_utc"),
+        "predicted_at": row.get("predicted_at"),
+        "quote_snapshot_id": row.get("quote_snapshot_id"),
+        "quote_book_id": _safe_float(row.get("quote_book_id")),
+        "input_h2h_snapshot_id": row.get("selected_h2h_snapshot_id"),
+        "input_h2h_book_id": _safe_float(row.get("selected_h2h_book_id")),
+        "input_home_moneyline": _safe_float(row.get("home_moneyline")),
+        "input_away_moneyline": _safe_float(row.get("away_moneyline")),
         "home_team": row.get("home_team"),
         "away_team": row.get("away_team"),
         "side": row.get("side"),
         "odds": _safe_float(row.get("moneyline")),
         "moneyline": _safe_float(row.get("moneyline")),
-        "total_line": _safe_float(row.get("total_line", row.get("line"))),
-        "predicted_total_points": _safe_float(row.get("predicted_total_points")),
+        "total_line": _safe_float(row.get("total_line", row.get("line"))) if row.get("market") == "totals" else None,
+        "predicted_total_points": _safe_float(row.get("predicted_total_points")) if row.get("market") == "totals" else None,
         "book": row.get("book"),
         "edge": _safe_float(row.get("edge")),
         "model_probability": _safe_float(row.get("predicted_prob")),
         "market_probability": _safe_float(market_probability),
         "quality_summary": _quality_summary(quality_result),
+        "execution_contract": {
+            field: rule[field] for field in (
+                "book", "odds_source", "max_quote_age_minutes", "min_minutes_before_start",
+                "max_hours_before_start", "min_edge",
+                "same_snapshot_moneyline_inputs",
+            ) if field in rule
+        },
     }
     for field in BENCHMARK_METADATA_FIELDS:
         value = row.get(field, rule.get(field))
@@ -327,25 +387,88 @@ def _live_metadata_mismatches(current_bets: pd.DataFrame, rule: dict[str, Any]) 
     return sorted(set(mismatches))
 
 
-def _rule_id_metadata_mismatch(current_bets: pd.DataFrame, rule: dict[str, Any]) -> bool:
-    present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in current_bets]
-    if not present_rule_fields:
-        return bool(_required_live_metadata(rule))
-    rule_id = str(rule.get("id"))
-    return not any(
-        rule_id in {str(value) for value in current_bets[field].dropna().unique()}
-        for field in present_rule_fields
-    )
+def _matching_live_rows(
+    current_bets: pd.DataFrame, rule: dict[str, Any]
+) -> tuple[pd.DataFrame, list[str], bool]:
+    if not re.fullmatch(r"[0-9a-f]{64}", str(rule.get("model_sha256", ""))):
+        return current_bets.iloc[0:0], ["model_sha256"], False
+    rows = current_bets
+    present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in rows]
+    missing_matching_id = False
+    if present_rule_fields:
+        tagged = rows[present_rule_fields].astype("string")
+        id_matches = tagged.eq(str(rule.get("id")))
+        conflicting_id = (tagged.notna() & ~id_matches.fillna(False)).any(axis=1)
+        rows = rows[id_matches.any(axis=1) & ~conflicting_id]
+        missing_matching_id = rows.empty
+    elif any(field != "model_sha256" for field in _required_live_metadata(rule)):
+        missing_matching_id = True
+
+    mismatches = _live_metadata_mismatches(rows, rule)
+    if missing_matching_id or mismatches:
+        return rows.iloc[0:0], mismatches, missing_matching_id
+    for field in _required_live_metadata(rule):
+        rows = rows[rows[field].astype(str) == str(rule[field])]
+    return rows, [], False
 
 
 def _remove_paid_output(path: Path) -> None:
-    if path.exists() and path.is_file():
-        path.unlink()
+    path.unlink(missing_ok=True)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as temp:
+            temp_path = Path(temp.name)
+            json.dump(payload, temp, indent=2, default=_json_default)
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
+def _persist_release(
+    status: dict[str, Any],
+    db_path: Path,
+    output_path: Path,
+    *,
+    commit_at: datetime | None = None,
+    quality: tuple[Path, dict[str, Any]] | None = None,
+    approval_check: ApprovalCheck | None = None,
+) -> dict[str, Any]:
+    payload = json.loads(json.dumps(status, default=_json_default, allow_nan=False))
+    released = publish_release(payload, db_path, commit_at=commit_at, approval_check=approval_check)
+    if released.get("superseded"):
+        return released
+    with connect(db_path) as conn:
+        # A newer release may have committed before this job reached the export.
+        conn.execute("BEGIN IMMEDIATE")
+        latest = conn.execute(
+            "SELECT release_id, payload FROM published_releases ORDER BY release_id DESC LIMIT 1"
+        ).fetchone()
+        if latest["release_id"] != released["release_id"]:
+            return {**json.loads(latest["payload"]), "superseded": True}
+        if quality is not None:
+            _write_json(*quality)
+        if released["publishable_profitable_list_exists"]:
+            _write_json(output_path, released)
+        else:
+            _remove_paid_output(output_path)
+    return released
+
+
+def revoke_release(
+    db_path: Path, output_path: Path = DEFAULT_OUTPUT, *, reason: str = "release_revoked"
+) -> dict[str, Any]:
+    return _persist_release({
+        "generated_at": _normalize_now(None).isoformat(),
+        "bets": [], "passing_approved_rule_ids": [],
+        "publishable_profitable_list_exists": False, "reason": reason,
+    }, db_path, output_path)
 
 
 def publishable_bets(
@@ -359,33 +482,67 @@ def publishable_bets(
     benchmark_prediction_paths: Optional[Iterable[Path]] = None,
 ) -> dict[str, Any]:
     """Write the latest paid bet list only when approved rules pass the gate."""
+    observed = _normalize_now(now)
+    commit_at = observed.to_pydatetime() if now is not None else None
     rules_config = load_rules(rules_path)
     rules = configured_rules(rules_config)
     approved_rules = [
         rule for rule in rules if rule.get("status") == "approved" and not rule_is_disabled(rule)
     ]
 
-    report = build_quality_report(
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
-    )
-    _write_json(quality_output_path, report)
-
-    result_by_id = {
-        str(result.get("rule_id")): result
-        for result in report.get("rule_results", [])
-        if result.get("rule_id") is not None
-    }
+    reviews = paper_reviews(db_path, observed.to_pydatetime()) if approved_rules else {}
+    gate = _quality_gate_from_config(rules_config)
+    results = [
+        paper_rule_result(rule, reviews.get(str(rule.get("paper_trial_id"))), gate)
+        for rule in approved_rules
+    ]
+    result_by_id = {str(result["rule_id"]): result for result in results}
     passing_rules = [
         rule
         for rule in approved_rules
         if result_by_id.get(str(rule.get("id")), {}).get("passes_launch_gate") is True
     ]
+    report = {
+        "generated_at": observed.isoformat(), "db_path": str(db_path),
+        "rules_path": str(rules_path), "launch_gate": gate.__dict__, "rule_results": results,
+        "passing_approved_rule_ids": [str(rule["id"]) for rule in passing_rules],
+        "publishable_profitable_list_exists": bool(passing_rules),
+        "evidence_source": "prospective_paper",
+    }
+
+    def check_approval(conn: sqlite3.Connection, write_at: datetime) -> dict[str, dict[str, Any]]:
+        current_config = load_rules(rules_path)
+        current_rules = configured_rules(current_config)
+        current_gate = _quality_gate_from_config(current_config)
+        current_reviews = paper_reviews(db_path, write_at, connection=conn)
+        verified = {}
+        for rule in passing_rules:
+            rule_id = str(rule["id"])
+            result = (
+                paper_rule_result(rule, current_reviews.get(str(rule.get("paper_trial_id"))), current_gate)
+                if rule in current_rules else {
+                    **result_by_id[rule_id],
+                    "passes_launch_gate": False,
+                    "launch_gate_failures": ["approval_rule_changed_before_publication"],
+                }
+            )
+            result_by_id[rule_id] = result
+            if result["passes_launch_gate"]:
+                verified[rule_id] = _quality_summary(result)
+        report["rule_results"] = list(result_by_id.values())
+        report["passing_approved_rule_ids"] = list(verified)
+        report["publishable_profitable_list_exists"] = bool(verified)
+        report["approval_checked_at"] = write_at.isoformat()
+        return verified
+
+    def persist(status: dict[str, Any]) -> dict[str, Any]:
+        return _persist_release(
+            status, db_path, output_path, commit_at=commit_at, quality=(quality_output_path, report),
+            approval_check=check_approval if passing_rules else None,
+        )
 
     status: dict[str, Any] = {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "generated_at": observed.isoformat(),
         "rules_path": str(rules_path),
         "quality_report_path": str(quality_output_path),
         "output_path": str(output_path),
@@ -398,32 +555,51 @@ def publishable_bets(
     }
 
     if not passing_rules:
-        _remove_paid_output(output_path)
         status["reason"] = "no_passing_approved_rule"
-        return status
+        return persist(status)
 
-    current_predictions = load_current_prediction_output(db_path=db_path, leagues=leagues, now=now)
-    current_bets = expand_current_predictions(current_predictions)
-    if current_bets.empty:
-        _remove_paid_output(output_path)
-        status["reason"] = "no_current_prediction_bets"
-        return status
-
+    release_leagues = tuple(leagues) if leagues is not None else None
+    allowed_leagues = {league.upper() for league in release_leagues or ()}
+    current_bets: pd.DataFrame | None = None
+    had_current_bets = False
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
-        metadata_mismatches = _live_metadata_mismatches(current_bets, rule)
-        if metadata_mismatches or _rule_id_metadata_mismatch(current_bets, rule):
+        pinned_live_totals = (
+            now is None
+            and rule.get("validation") == "prospective_paper"
+            and rule.get("league") == "NBA"
+            and rule.get("market") == "totals"
+            and rule.get("same_snapshot_moneyline_inputs") is True
+        )
+        if pinned_live_totals:
+            if allowed_leagues and "NBA" not in allowed_leagues:
+                continue
+            candidates = _pinned_current_totals(db_path, rule)
+        else:
+            if current_bets is None:
+                current_predictions = load_current_prediction_output(
+                    db_path=db_path, leagues=release_leagues, now=observed
+                )
+                current_bets = expand_current_predictions(current_predictions)
+            candidates = current_bets
+        if candidates.empty:
+            continue
+        had_current_bets = True
+        matching_rows, metadata_mismatches, missing_matching_id = _matching_live_rows(
+            candidates, rule
+        )
+        if metadata_mismatches or missing_matching_id:
             rule_id = str(rule.get("id"))
             status["skipped_passing_rule_ids"].append(rule_id)
             status["live_metadata_mismatches"][rule_id] = {
                 "missing_or_mismatched_fields": metadata_mismatches,
-                "missing_matching_rule_id": _rule_id_metadata_mismatch(current_bets, rule),
+                "missing_matching_rule_id": missing_matching_id,
             }
             continue
         quality_result = result_by_id[str(rule.get("id"))]
         timing_filter = quality_result.get("odds_timing_filter") or {}
         rule_bets = filter_bets_for_rule(
-            current_bets,
+            matching_rows,
             rule,
             max_hours_before_start=timing_filter.get("max_hours_before_start"),
         )
@@ -433,36 +609,21 @@ def publishable_bets(
             publish_rows.append(_serialize_bet(row, rule, quality_result))
 
     if not publish_rows:
-        _remove_paid_output(output_path)
-        if status["skipped_passing_rule_ids"]:
+        if not had_current_bets:
+            status["reason"] = "no_current_prediction_bets"
+        elif status["skipped_passing_rule_ids"]:
             status["reason"] = "passing_rules_require_benchmarked_live_metadata"
         else:
             status["reason"] = "no_current_bets_matching_passing_rules"
-        return status
+        return persist(status)
 
     status["publishable_profitable_list_exists"] = True
     status["bets"] = publish_rows
     status["bet_count"] = len(publish_rows)
-    _write_json(output_path, status)
-    return status
-
-
-def _load_or_build_report(
-    *,
-    quality_report_path: Optional[Path],
-    db_path: Path,
-    rules_path: Path,
-    leagues: Optional[Iterable[str]],
-    benchmark_prediction_paths: Optional[Iterable[Path]],
-) -> dict[str, Any]:
-    if quality_report_path and quality_report_path.exists():
-        return json.loads(quality_report_path.read_text(encoding="utf-8"))
-    return build_quality_report(
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
-    )
+    released = persist(status)
+    if not released["bets"] and not released.get("superseded"):
+        released.setdefault("reason", "no_current_bets_matching_original_quotes")
+    return released
 
 
 def promote_candidate_rule(
@@ -474,56 +635,17 @@ def promote_candidate_rule(
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
     benchmark_prediction_paths: Optional[Iterable[Path]] = None,
 ) -> dict[str, Any]:
-    """Promote a candidate rule into approved_rules only if it passes a strict source."""
+    """Retain the command while directing promotion to frozen trial evidence."""
     config = load_rules(rules_path)
-    candidate_rules = config.get("candidate_rules", []) or []
-    locked_candidate_rules = config.get("locked_candidate_rules", []) or []
-    approved_rules = config.get("approved_rules", []) or []
-    candidate = next(
-        (
-            rule
-            for rule in [*locked_candidate_rules, *candidate_rules]
-            if str(rule.get("id")) == rule_id
-        ),
-        None,
-    )
+    candidate = next((rule for rule in configured_rules(config) if str(rule.get("id")) == rule_id), None)
     if candidate is None:
         raise ValueError(f"Candidate rule not found: {rule_id}")
-
-    report = _load_or_build_report(
-        quality_report_path=quality_report_path,
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
+    if candidate.get("status") != "locked_candidate" or not candidate.get("locked_at"):
+        raise RuntimeError("Lock the candidate before collecting forward evidence for promotion.")
+    raise RuntimeError(
+        "Promotion requires a completed prospective paper trial. "
+        "Use promote-paper --trial-id with its registered trial ID."
     )
-    passing_sources: list[str] = []
-    for source in report.get("evaluation_sources", []):
-        for result in source.get("rule_results", []):
-            if str(result.get("rule_id")) == rule_id and result.get("passes_launch_gate") is True:
-                passing_sources.append(str(source.get("source_id")))
-    if not passing_sources:
-        raise RuntimeError(f"Candidate rule {rule_id} does not pass the launch gate")
-
-    promoted = {**candidate, "status": "approved"}
-    promoted.pop("disabled", None)
-    approved_without_duplicate = [rule for rule in approved_rules if str(rule.get("id")) != rule_id]
-    candidate_without_promoted = [
-        rule for rule in candidate_rules if str(rule.get("id")) != rule_id
-    ]
-    locked_without_promoted = [
-        rule for rule in locked_candidate_rules if str(rule.get("id")) != rule_id
-    ]
-    config["approved_rules"] = [*approved_without_duplicate, promoted]
-    config["candidate_rules"] = candidate_without_promoted
-    config["locked_candidate_rules"] = locked_without_promoted
-    rules_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    return {
-        "rule_id": rule_id,
-        "promoted": True,
-        "passing_sources": passing_sources,
-        "rules_path": str(rules_path),
-    }
 
 
 def _candidate_from_lock_report(report: dict[str, Any], rule_id: str) -> Optional[dict[str, Any]]:
@@ -536,6 +658,7 @@ def _candidate_from_lock_report(report: dict[str, Any], rule_id: str) -> Optiona
         return None
     return {
         "id": rule_id,
+        **({"model_sha256": match["model_sha256"]} if match.get("model_sha256") else {}),
         "status": "locked_candidate",
         "market": match.get("market"),
         "league": match.get("league"),
@@ -579,12 +702,10 @@ def lock_candidate_rule(
     report_candidate = _candidate_from_lock_report(report, rule_id)
     if report_candidate is None:
         raise RuntimeError(f"Rule {rule_id} was not recommended for locked paper tracking")
-    if candidate is None:
-        candidate = report_candidate
-
     lock_time = _normalize_now(locked_at).isoformat()
     locked = {
-        **candidate,
+        **(candidate or {}),
+        **report_candidate,
         "status": "locked_candidate",
         "locked_at": lock_time,
         "lock_source": str(benchmark_report_path),
@@ -615,7 +736,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     publish = subparsers.add_parser("publish", help="Write latest publishable bet list.")
-    publish.add_argument("--db", type=Path, default=DB_PATH)
+    publish.add_argument("--db", type=Path)
     publish.add_argument("--rules", type=Path, default=Path("config/published_rules.yml"))
     publish.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     publish.add_argument("--quality-output", type=Path, default=DEFAULT_QUALITY_OUTPUT)
@@ -648,6 +769,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+    paper = subparsers.add_parser("promote-paper", help="Approve a completed prospective trial.")
+    paper.add_argument("--trial-id", required=True)
+    paper.add_argument("--db", type=Path)
+    paper.add_argument("--rules", type=Path, default=Path("config/published_rules.yml"))
+    paper.add_argument("--log-level", default="INFO")
 
     lock = subparsers.add_parser("lock", help="Lock a benchmark-recommended candidate.")
     lock.add_argument("--rule-id", required=True)
@@ -659,18 +785,39 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+    revoke = subparsers.add_parser("revoke", help="Revoke active picks while preserving the record.")
+    revoke.add_argument("--db", type=Path)
+    revoke.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    revoke.add_argument("--reason", default="release_revoked")
+    revoke.add_argument("--log-level", default="INFO")
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"publish", "promote", "lock"}:
+    if not raw_args or raw_args[0] not in {"publish", "promote", "promote-paper", "lock", "revoke"}:
         raw_args = ["publish", *raw_args]
 
     parser = _build_parser()
     args = parser.parse_args(raw_args)
     logging.basicConfig(level=getattr(logging, args.log_level))
     leagues = _parse_leagues(args.leagues) if hasattr(args, "leagues") else []
+
+    if args.command == "revoke":
+        result = revoke_release(resolve_db_path(args.db), args.output, reason=args.reason)
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
+    if args.command == "promote-paper":
+        try:
+            result = promote_paper_trial(
+                args.trial_id, resolve_db_path(args.db), args.rules,
+                _quality_gate_from_config(load_rules(args.rules)),
+            )
+        except (RuntimeError, ValueError, OSError, sqlite3.Error) as exc:
+            LOGGER.error("%s", exc)
+            return 1
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
 
     if args.command == "promote":
         try:
@@ -702,15 +849,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(result, indent=2, default=_json_default))
         return 0
 
-    result = publishable_bets(
-        db_path=args.db,
-        rules_path=args.rules,
-        output_path=args.output,
-        quality_output_path=args.quality_output,
-        leagues=leagues,
-        now=args.now,
-        benchmark_prediction_paths=args.benchmark_predictions,
-    )
+    db_path = resolve_db_path(args.db)
+    try:
+        result = publishable_bets(
+            db_path=db_path,
+            rules_path=args.rules,
+            output_path=args.output,
+            quality_output_path=args.quality_output,
+            leagues=leagues,
+            now=args.now,
+            benchmark_prediction_paths=args.benchmark_predictions,
+        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error):
+        LOGGER.exception("Paid-pick publication failed")
+        revoke_release(db_path, args.output, reason="publication_failed")
+        return 1
     if result.get("publishable_profitable_list_exists"):
         LOGGER.info("Wrote %d publishable bets to %s", result.get("bet_count", 0), args.output)
         return 0

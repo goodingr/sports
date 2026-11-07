@@ -1,5 +1,8 @@
 import { Container } from "@/components/ui/Container";
 import type { Metadata } from "next";
+import { publicContactEmail } from "@/lib/public-contact";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
     title: "Terms of Service | Sports Analytics",
@@ -9,6 +12,7 @@ export const metadata: Metadata = {
 const LAST_UPDATED = "April 26, 2026";
 
 export default function TermsPage() {
+    const contactEmail = publicContactEmail();
     return (
         <Container className="py-16 max-w-3xl">
             <div className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
@@ -135,13 +139,14 @@ export default function TermsPage() {
 
                 <section>
                     <h2 className="text-2xl font-bold text-foreground mb-3">12. Contact</h2>
-                    <p>
-                        Questions about these Terms can be sent to{" "}
-                        <a href="mailto:support@sportsanalytics.example" className="text-primary hover:underline">
-                            support@sportsanalytics.example
-                        </a>
-                        .
-                    </p>
+                    {contactEmail ? (
+                        <p>
+                            Questions about these Terms can be sent to{" "}
+                            <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                                {contactEmail}
+                            </a>.
+                        </p>
+                    ) : <p>Support email is currently unavailable.</p>}
                 </section>
             </div>
         </Container>

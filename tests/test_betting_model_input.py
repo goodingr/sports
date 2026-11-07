@@ -53,7 +53,8 @@ def _create_market_db(path):
             CREATE TABLE odds_snapshots (
                 snapshot_id TEXT PRIMARY KEY,
                 fetched_at_utc TEXT NOT NULL,
-                sport_id INTEGER NOT NULL
+                sport_id INTEGER NOT NULL,
+                source TEXT
             );
             CREATE TABLE odds (
                 snapshot_id TEXT NOT NULL,
@@ -123,9 +124,10 @@ def _create_market_db(path):
             INSERT INTO game_results VALUES ('FUTURE_HOME', 150, 70, -200, 170, 221.5);
             INSERT INTO books VALUES (1, 'DraftKings');
             INSERT INTO books VALUES (2, 'FanDuel');
-            INSERT INTO odds_snapshots VALUES ('OPEN', '2026-01-01T12:00:00+00:00', 1);
-            INSERT INTO odds_snapshots VALUES ('LATEST', '2026-01-01T19:00:00+00:00', 1);
-            INSERT INTO odds_snapshots VALUES ('AFTER', '2026-01-01T21:00:00+00:00', 1);
+            INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id) VALUES
+                ('OPEN', '2026-01-01T12:00:00+00:00', 1),
+                ('LATEST', '2026-01-01T19:00:00+00:00', 1),
+                ('AFTER', '2026-01-01T21:00:00+00:00', 1);
             """
         )
         conn.executemany(
@@ -275,7 +277,8 @@ def _create_soccer_market_db(path):
             CREATE TABLE odds_snapshots (
                 snapshot_id TEXT PRIMARY KEY,
                 fetched_at_utc TEXT NOT NULL,
-                sport_id INTEGER NOT NULL
+                sport_id INTEGER NOT NULL,
+                source TEXT
             );
             CREATE TABLE odds (
                 snapshot_id TEXT NOT NULL,
@@ -296,7 +299,8 @@ def _create_soccer_market_db(path):
             INSERT INTO game_results VALUES ('EPL_PREV', 1, 0, -120, 110, 2.5);
             INSERT INTO game_results VALUES ('EPL_TARGET', 9, 8, -130, 120, 3.0);
             INSERT INTO books VALUES (1, 'DraftKings');
-            INSERT INTO odds_snapshots VALUES ('EPL_LATEST', '2025-08-10T10:00:00+00:00', 1);
+            INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id)
+                VALUES ('EPL_LATEST', '2025-08-10T10:00:00+00:00', 1);
             """
         )
         conn.executemany(
@@ -307,6 +311,27 @@ def _create_soccer_market_db(path):
             """,
             [("Over", -110), ("Under", -110)],
         )
+
+
+def test_legacy_cfbd_snapshots_do_not_enter_betting_models(tmp_path):
+    db_path = tmp_path / "market.db"
+    _create_market_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            UPDATE sports SET league = 'CFB';
+            INSERT INTO odds_snapshots VALUES ('CFBD', '2026-01-01T19:30:00+00:00', 1, 'cfbd_lines');
+            INSERT INTO odds SELECT 'CFBD', game_id, book_id, market, outcome,
+                price_american, price_decimal, implied_prob, line FROM odds WHERE snapshot_id = 'LATEST';
+            """
+        )
+
+    totals = build_totals_model_input(db_path=db_path, leagues=["CFB"])
+    moneyline = build_moneyline_model_input(db_path=db_path, leagues=["CFB"])
+
+    assert totals["snapshot_id"].tolist() == ["LATEST"]
+    assert totals["selected_book_close_snapshot_id"].tolist() == ["LATEST"]
+    assert moneyline["snapshot_id"].tolist() == ["LATEST"]
 
 
 def test_totals_model_input_uses_market_snapshots_without_leakage(tmp_path):
@@ -473,6 +498,37 @@ def test_nba_advanced_and_availability_features_are_pregame(tmp_path):
     assert row["home_injuries_skill_out"] == 1
     assert row["home_injuries_out_minutes_l10"] == 32
     assert row["home_injuries_impact_points_l10"] == 18
+
+
+def test_form_and_injuries_use_each_quote_time(tmp_path):
+    db_path = tmp_path / "market.db"
+    _create_market_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = '2026-01-01T10:00:00Z' "
+            "WHERE game_id = 'PREV_HOME'"
+        )
+        conn.execute(
+            """
+            INSERT INTO injury_reports (
+                league, team_id, team_code, player_name, position, status,
+                report_date, game_date, source_key
+            ) VALUES (
+                'NBA', 1, 'LAL', 'Afternoon Out', 'G', 'Out',
+                '2026-01-01T17:00:00Z', '2026-01-01', 'test'
+            )
+            """
+        )
+
+    rows = build_totals_model_input(db_path, leagues=["NBA"], latest_only=False)
+    opening = rows[rows["snapshot_id"] == "OPEN"].iloc[0]
+    latest = rows[rows["snapshot_id"] == "LATEST"].iloc[0]
+
+    assert opening["home_games_l5"] == 0
+    assert pd.isna(opening["home_injuries_out"])
+    assert latest["home_games_l5"] == 1
+    assert latest["home_score_for_l5"] == 100
+    assert latest["home_injuries_out"] == 1
 
 
 def test_feature_coverage_report_includes_density_and_drop_reasons(tmp_path):

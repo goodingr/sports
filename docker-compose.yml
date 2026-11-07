@@ -7,12 +7,13 @@
 #   - worker  : cron-driven ingest / predict / backup pipeline
 #   - web     : Next.js frontend
 #
-# State lives on three named volumes that are mounted into both `api` and
-# `worker` so the worker can write while the API reads:
+# State lives on named volumes so the worker can write while the API reads:
 #   - sports_data    -> /app/data    (SQLite + parquet)
 #   - sports_models  -> /app/models  (serialized model artefacts)
 #   - sports_logs    -> /app/logs    (pipeline transcripts)
+#   - sports_reports -> /app/reports (quality reports and gated pick output)
 #   - sports_backups -> /app/backups (local snapshots before remote push)
+#   - sports_checkout -> /app/checkout-state (private Stripe checkout reservations)
 #
 # Secrets come from `.env` at the repo root. Never commit it.
 # ============================================================================
@@ -47,6 +48,7 @@ services:
       - sports_data:/app/data
       - sports_models:/app/models:ro
       - sports_logs:/app/logs
+      - sports_reports:/app/reports:ro
     expose:
       - "8000"
     # Compose only supports a single healthcheck and that healthcheck is what
@@ -74,12 +76,17 @@ services:
       <<: *python-env
       WORKER_PREDICT_CRON: ${WORKER_PREDICT_CRON:-15 * * * *}
       WORKER_TRAIN_CRON: ${WORKER_TRAIN_CRON:-0 9 * * *}
+      WORKER_LIVE_ODDS_JOBS: "${WORKER_LIVE_ODDS_JOBS:-}"
       WORKER_BACKUP_CRON: ${WORKER_BACKUP_CRON:-0 18 * * *}
       WORKER_REMOTE_BACKUP_CRON: ${WORKER_REMOTE_BACKUP_CRON:-30 18 * * *}
+      WORKER_PAPER_CLOSE_ENABLED: ${WORKER_PAPER_CLOSE_ENABLED:-0}
+      WORKER_PAPER_ENTRY_ENABLED: ${WORKER_PAPER_ENTRY_ENABLED:-0}
+      WORKER_PAPER_EVENTS_ENABLED: ${WORKER_PAPER_EVENTS_ENABLED:-0}
     volumes:
       - sports_data:/app/data
       - sports_models:/app/models
       - sports_logs:/app/logs
+      - sports_reports:/app/reports
       - sports_backups:/app/backups
     # Cron requires PID 1 + a writable /etc/cron.d. Drop tini's exec form,
     # run as root (the worker drops to `app` per-job), and execute our
@@ -121,6 +128,11 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: 0.0.0.0
+      SPORTS_API_INTERNAL_URL: http://api:8000
+      SPORTS_CHECKOUT_DB_PATH: /app/checkout-state/intents.db
+      COMMERCIAL_CONTACT_EMAIL: ${COMMERCIAL_CONTACT_EMAIL:-}
+    volumes:
+      - sports_checkout:/app/checkout-state
     expose:
       - "3000"
     depends_on:
@@ -168,6 +180,8 @@ volumes:
   sports_data:
   sports_models:
   sports_logs:
+  sports_reports:
   sports_backups:
+  sports_checkout:
   caddy_data:
   caddy_config:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import os
 import time
@@ -108,12 +108,12 @@ def _iter_dates(start_date: date, end_date: date) -> Iterator[date]:
 
 
 def _parse_score(value: Optional[str], *, is_final: bool) -> Optional[int]:
-    if value is None:
+    if not is_final or value is None:
         return None
     try:
         return int(value)
     except (TypeError, ValueError):
-        return None if not is_final else 0
+        return None
 
 
 def _format_game_times(start_iso: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -141,7 +141,8 @@ def fetch_from_espn(
         leagues = list(ESPN_SOCCER_MAP.keys())
 
     ranges: List[Tuple[date, date]] = []
-    today = datetime.utcnow().date()
+    now = datetime.now(timezone.utc)
+    today = now.date()
     if start_date and end_date:
         ranges.append((start_date, end_date))
     elif seasons:
@@ -238,10 +239,17 @@ def fetch_from_espn(
                     status_info = competition.get("status", {})
                     status_type = status_info.get("type", {}) if isinstance(status_info, dict) else {}
                     status_code = str(status_type.get("name") or "").upper()
-                    is_final = status_code in FINAL_STATUS_CODES
-
                     start_time_iso = competition.get("date") or event.get("date")
                     gameday, gametime, weekday = _format_game_times(start_time_iso)
+                    is_final = (
+                        status_code in FINAL_STATUS_CODES
+                        and bool(gameday and gametime)
+                        and datetime.fromisoformat(f"{gameday}T{gametime}+00:00") <= now
+                    )
+                    home_score = _parse_score(home_entry.get("score"), is_final=is_final)
+                    away_score = _parse_score(away_entry.get("score"), is_final=is_final)
+                    if home_score is None or away_score is None:
+                        home_score = away_score = None
 
                     season_year = event.get("season", {}).get("year")
                     if season_year is None and gameday:
@@ -280,8 +288,8 @@ def fetch_from_espn(
                         "weekday": weekday,
                         "home_team_name": home_name,
                         "away_team_name": away_name,
-                        "home_score": _parse_score(home_entry.get("score"), is_final=is_final),
-                        "away_score": _parse_score(away_entry.get("score"), is_final=is_final),
+                        "home_score": home_score,
+                        "away_score": away_score,
                         "home_moneyline": home_ml,
                         "away_moneyline": away_ml,
                         "status": status_code,

@@ -4,7 +4,7 @@ Two layers of backup, both automated by the worker:
 
 | Layer    | Where           | Frequency  | Retention | Script                              |
 |----------|-----------------|------------|-----------|-------------------------------------|
-| Local    | `sports_backups` volume on the host | daily 18:00 UTC | 7 days  | `scripts/backup_data.py` |
+| Local    | `sports_backups` volume on the host | daily and before pipeline runs | 7 completed snapshots | `scripts/backup_data.py` |
 | Remote   | S3-compatible bucket               | daily 18:30 UTC | 30 days | `scripts/backup_to_s3.sh` |
 
 The local layer is fast to restore (no network, full fidelity). The remote
@@ -12,30 +12,66 @@ layer is the only thing that survives a host loss. **Both** must work.
 
 ## What is backed up
 
-Snapshot contents per day:
+Each local snapshot is built in a hidden staging directory and published by
+rename after SQLite integrity validation, all copies, and the checksum manifest
+complete. A failed database check or missing configured models directory leaves
+earlier snapshots intact and skips retention pruning. Snapshot names include
+microseconds and a random suffix, so overlapping jobs use different directories.
 
 ```
 backups/
-└── 2026-04-26_18-03-59/
-    ├── betting.db                       # full SQLite copy
-    └── predictions_master.parquet       # forward-test ledger
+└── 2026-04-26_18-03-59_123456_a1b2c3d4e5f6/
+    ├── betting.db                       # full SQLite copy, including evidence ledgers
+    ├── predictions_master.parquet       # when present
+    ├── models/                          # artifacts frozen with the snapshot
+    ├── source_evidence.zip              # original observations and research evidence
+    └── manifest.json                    # version, time, file sizes and SHA-256
 ```
 
-Plus, for the remote tier only:
+Remote uploads use a new immutable generation for each invocation.
 
 ```
 s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX}/
 ├── 2026-04-26/
-│   ├── betting.db
-│   ├── predictions_master.parquet
-│   └── models/                          # full models tree
-└── latest.txt                           # manifest pointing at latest date
+│   ├── <snapshot-name>-<upload-id>/
+│   │   ├── betting.db
+│   │   ├── predictions_master.parquet
+│   │   ├── models/
+│   │   ├── source_evidence.zip
+│   │   └── manifest.json
+│   └── latest.txt                       # pointer for this date
+└── latest.txt                           # latest completed upload
 ```
 
-`models/` is captured in the remote tier because a full restore needs both
-the data and the artefacts that the API serves predictions from. Skipping
-the models tree means a restored host can run ingest but cannot serve
-predictions until you re-train.
+Both pointers are published only after the archive upload succeeds. A failed
+model upload leaves the previous pointers intact. Restore checks every file
+against the archive manifest and runs SQLite's integrity check before changing
+targets. The existing flat date layout and older pointers remain readable.
+Older local snapshots without models are packaged with the configured models
+directory before upload. New local snapshots freeze models at capture time.
+
+The evidence ZIP preserves the ingestion tree at `<project>/data/raw/`,
+including when `SPORTS_DB_PATH` places the warehouse elsewhere,
+plus `reports/research/` and JSON records under `reports/data_quality/` and
+`reports/odds_coverage/` and `reports/betting_benchmarks/`. Benchmark results and
+triage records preserve the cohorts and strategy rules already examined.
+Research source, protocols, frozen models, datasets,
+splits and results are retained together. Compiled Python caches are excluded.
+These records include original quote capture times, superseded injury states,
+settlement reviews and previously examined holdouts. Current upstream endpoints
+cannot recreate those observations.
+
+Evidence files are streamed into the ZIP with individual SHA-256 checksums and
+an internal manifest. Capture rejects source files that change while being copied,
+symbolic links, unsafe or duplicate paths and oversized members. The completed ZIP
+is also covered by the outer backup manifest. New files added after the inventory
+is frozen are collected by the next snapshot. Existing selected files must remain
+stable until the snapshot finishes.
+
+Each new snapshot includes the cumulative local source and research trees.
+Keep original observations and frozen experiment runs for the lifetime of the
+associated dataset or strategy. Snapshot retention controls backup generations,
+so removing local evidence also removes it from later snapshots.
 
 ## What is NOT backed up
 
@@ -43,8 +79,8 @@ predictions until you re-train.
   past 30 days.
 - **Caddy data** (`caddy_data`): TLS certs, re-issued on demand by ACME.
 - **Web image cache**: rebuilt from source.
-- **Raw CSV/parquet ingest dumps** (`data/raw/`, `data/processed/`):
-  derived from upstream APIs. If you genuinely lose them, replay ingest.
+- **Processed feature tables** (`data/processed/`) can be regenerated from their
+  preserved sources and versioned code.
 
 ## Backup configuration
 
@@ -59,7 +95,7 @@ BACKUP_S3_PREFIX=prod
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 
-LOCAL_BACKUP_RETENTION_DAYS=7
+BACKUP_RETENTION_DAYS=7
 REMOTE_BACKUP_RETENTION_DAYS=30
 ```
 
@@ -90,18 +126,37 @@ docker compose exec -u app worker /app/scripts/backup_to_s3.sh
 
 ### Latest snapshot, into the live volume
 
-DESTRUCTIVE. Overwrites the running DB and models tree.
+Restore replaces the database and model contents. Stop the API, worker, and
+any host-scheduled prediction jobs first. Run the restore as the application
+user so restored files remain writable by the service.
+
+When present, `source_evidence.zip` is installed beside the target database through
+the same staging and rollback mechanism as parquet sidecars. It remains there
+after temporary remote downloads are removed. Its original raw and research
+paths can be inspected with standard ZIP tools. Legacy backups remain readable.
+
+The next backup validates this installed bundle and carries its members forward
+with new local observations. Byte-identical overlaps are recorded once. A
+different file at the same archive path stops the backup and leaves previous
+snapshots available. Preserve both observations under distinct filenames before
+retrying. Keep the restored bundle beside the database even if you extract a
+copy for analysis.
+
+The local quote replay reader first checks the captured original path, then a
+relocated `raw/` tree beside the target database, then the corresponding `raw/`
+member inside the restored ZIP. File hashes are verified during replay. Absolute
+database provenance strings retain their original values across relocation.
 
 ```bash
 docker compose stop api worker
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
 docker compose up -d api worker
 ```
 
 ### A specific date
 
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh \
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker \
   --date 2026-04-23 --force
 ```
 
@@ -109,20 +164,17 @@ docker compose run --rm worker /app/scripts/restore_from_s3.sh \
 
 Lists everything that would be pulled, without writing locally:
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --dry-run
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --dry-run
 ```
 
 ### Restore from a local snapshot (no S3)
 
 ```bash
-SNAP=$(docker compose exec worker bash -c \
-  'ls -1d /app/backups/* | grep -E "/[0-9]{4}-" | sort | tail -1')
 docker compose stop api worker
-docker compose exec -u 0 worker bash -c "
-  cp '$SNAP/betting.db' /app/data/betting.db.restore
-  mv /app/data/betting.db.restore /app/data/betting.db
-  chown app:app /app/data/betting.db
-"
+SNAP=$(docker compose run --rm --user app --entrypoint python worker \
+  scripts/backup_archive.py latest /app/backups)
+docker compose run --rm --user app --entrypoint python worker \
+  scripts/backup_archive.py install "$SNAP" /app/data/betting.db /app/models --force
 docker compose up -d api worker
 ```
 
@@ -135,13 +187,49 @@ after any change to the backup or restore scripts:
 docker compose exec -u app worker /app/scripts/restore_drill.sh
 ```
 
-The drill:
+For legacy local snapshots, first package the snapshot with its model artifacts
+and generate a manifest using backup_archive.py prepare-legacy. Use a temporary
+destination rather than modifying the old snapshot.
+
+Readable destination databases are restored with SQLite's backup API, which
+preserves transactional handling of existing WAL sidecars. A damaged
+destination is quarantined with its sidecars under a .betting.db.damaged-*
+directory before creating the replacement. Failed installation rolls model
+and parquet changes back. Keep services stopped after a restore error.
+[SQLite backup API](https://www.sqlite.org/backup.html) ·
+[SQLite WAL files](https://www.sqlite.org/wal.html)
+
+If a process stops during installation, a .restore-* directory remains inside
+the models directory with recovery copies. API readiness and worker startup
+reject this state. Inspect and recover those copies before removing the marker
+and retrying. Allow room for the downloaded archive, new model files, and
+rollback copies during restore.
+
+The drill performs these checks.
+
 1. Restores the latest S3 snapshot into a temp dir.
 2. Opens the restored DB read-only.
 3. Asserts that `games`, `odds`, `predictions`, and `models` tables exist
    and have row counts.
 4. Asserts the models tree is non-empty.
 5. Throws the temp dir away.
+
+The November 6, 2026 local warehouse drill restored a 3,046.60 MB snapshot
+into an isolated directory with its frozen models. Counts matched for 9,015
+games, 973,752 odds rows, 17,880 predictions, and the paper trial tables.
+
+The November 7, 2026 cross-platform drill restored the 3.64 GB Windows
+snapshot into empty volumes in an isolated Linux worker container with
+networking disabled. The installer ran as `app` (UID 1001). SQLite integrity
+and 14 source table counts matched. The pinned NBA totals model digest
+matched, both archived NBA receipts resolved from their original Windows
+paths, and the application user verified writes to both volumes. The
+temporary WSL wrapper emitted a Bash trap error after the installer, data
+checks, and scratch cleanup had succeeded.
+
+Remote transfer regression tests use a local AWS CLI stand-in, including
+failed model uploads and corrupted archives. A configured bucket still needs
+the remote drill above.
 
 **Drill PASS ⇒ you have a backup.**
 **Drill FAIL ⇒ you do not, regardless of what the upload logs say.** Treat
@@ -167,16 +255,13 @@ $EDITOR .env
 # 2. Build images.
 docker compose build
 
-# 3. Start proxy + api WITHOUT worker so we don't race the restore.
-docker compose up -d proxy api web
+# 3. Restore data + models before starting application services.
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
 
-# 4. Restore data + models from S3.
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
+# 4. Start the application and worker after restore succeeds.
+docker compose up -d proxy api web worker
 
-# 5. Start the worker.
-docker compose up -d worker
-
-# 6. Verify.
+# 5. Verify.
 curl -fsS "https://${API_DOMAIN}/health"
 docker compose exec -u app worker /app/scripts/restore_drill.sh
 ```

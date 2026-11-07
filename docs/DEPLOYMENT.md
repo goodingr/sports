@@ -60,32 +60,86 @@ git clone <repo-url> sports && cd sports
 cp .env.example .env
 $EDITOR .env                 # fill in REQUIRED values
 docker compose pull caddy    # warm the proxy image
-docker compose build         # ~10 min on a 4 vCPU host first time
-docker compose up -d proxy api web
-docker compose logs -f api   # watch /health flip to 200
+docker compose build
 ```
 
-The first `docker compose up -d` will:
-- create the `sports_data`, `sports_models`, `sports_logs`, `sports_backups`
-  volumes
-- bind 80/443 on the host
-- request Let's Encrypt certs once DNS resolves
-
-Once the API is healthy:
+Restore the warehouse and model artifacts before starting the service stack.
+The one-shot restore creates the named volumes and writes as the same `app`
+user that runs cron jobs. [Backup and restore](BACKUP_RESTORE.md)
 
 ```bash
-# Restore DB + models from S3 BEFORE starting the worker so we don't
-# overwrite a fresh empty DB.
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
-docker compose up -d worker
+docker compose run --rm --no-deps --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
 ```
 
-Verify:
+Scheduled `predict` and `train` jobs skip broad Odds API odds and scores by
+default, even with provider credentials installed. Set
+`WORKER_LIVE_ODDS_JOBS=train` in `.env` for one broad refresh per day at the
+default cron. Set `WORKER_TRAIN_CRON` in UTC to match the intended collection
+window, including Eastern daylight-saving changes. Adding `predict` also
+enables the hourly refresh, for 25 broad passes per day at the default crons.
+Budget for both markets per available league and scores. The paper reserve
+and request caps cover supplemental collection only.
+[Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
+
+Set both league scopes explicitly in the host's `.env`. The example below
+scopes a future paid release to the NBA.
+
+```dotenv
+PAID_RELEASE_LEAGUES=NBA
+RELEASE_LEAGUES=NBA
+```
+
+`PAID_RELEASE_LEAGUES` scopes the worker's data hygiene, strict data-quality
+checks, and publication candidates. On a publication run, a quality failure
+in any listed league revokes the active release. Select provider collection
+separately using the job settings above. Each issued pick requires a passing
+approved prospective rule and an exact fresh pregame quote. Checkout also
+requires recent delivery from a passing rule and the enrollment flag.
+
+`RELEASE_LEAGUES` scopes API readiness. Each listed league needs recent priced
+odds, recent predictions in the warehouse, and a model artifact. Compose
+waits for the API's `/ready` health check before starting the web app and proxy.
+A league left in either list can block its respective gate even if no rule for
+that league is approved.
+
 ```bash
+docker compose up -d api worker
+```
+
+The default readiness limits are three hours for odds and 24 hours for
+predictions. With one daily refresh, start the dependent services while the
+required leagues have recent priced receipts. If the warehouse needs a fresh
+receipt, wait for an opted-in broad job or run one manual refresh in its place.
+The command below fetches live odds and scores. Count it against the same
+daily budget and run it only on the collection owner.
+
+```bash
+docker compose run --rm --no-deps --user app --entrypoint /app/scripts/pipeline.sh worker --skip-training
+```
+
+Once the API passes `/ready`, start the web app and proxy. The proxy binds
+ports 80 and 443 and requests certificates once DNS resolves.
+
+```bash
+docker compose exec api curl -fsS http://localhost:8000/ready
+docker compose up -d web proxy
 curl -fsS https://${API_DOMAIN}/health
 curl -fsS https://${APP_DOMAIN}/ | head
-docker compose exec worker crontab -l -u app
+docker compose exec worker cat /etc/cron.d/sports
 ```
+
+When moving the paper trial to this worker, pause the Windows prediction,
+fixture discovery, early entry and closing jobs before taking the warehouse
+snapshot. Restore it and the pinned model, opt in to one broad job with
+`WORKER_LIVE_ODDS_JOBS=train`, and set `WORKER_PAPER_CLOSE_ENABLED`,
+`WORKER_PAPER_ENTRY_ENABLED` and `WORKER_PAPER_EVENTS_ENABLED` to `1` in `.env`
+on one worker. Closing checks start on each UTC quarter hour. Early entry and
+fixture discovery checks start five and ten minutes later. Each job writes
+its own log and health heartbeat. The independently enabled supplemental jobs
+use the same trial cutoffs and caps on both platforms. Entry reserves 200
+credits and can spend up to two credits per Eastern date. Closing reserves
+200 and can spend up to three credits per UTC date. Discovery uses the
+zero-credit events endpoint.
 
 ## Rebuild / redeploy
 
@@ -119,6 +173,91 @@ See [docs/RUNBOOK.md](RUNBOOK.md) for the full rollback procedure.
 `NEXT_PUBLIC_*` variables ship in the JavaScript bundle. Changing them
 requires `docker compose build web`. Server-only secrets (Clerk secret key,
 Stripe secret key) are read at runtime from `.env`.
+
+Set the same `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, and Stripe key mode
+in the web and API environments. Checkout and entitlement reconciliation
+verify the provider account against `STRIPE_ACCOUNT_ID`. The subscriber
+gate checks that Clerk's verified billing record matches the account, key
+mode, price, and canonical customer. A legacy premium flag requires provider
+reconciliation before it grants access. [Stripe API keys](https://docs.stripe.com/keys)
+· [Clerk metadata](https://clerk.com/docs/guides/users/extending)
+
+Run paid test drills with a separate Clerk instance. Use the same production
+Clerk instance for the no-charge pilot and paid site so a signed-in pilot
+participant retains their account. Before changing a live Stripe account or
+price, close enrollment and reconcile existing active subscriptions in the
+old configuration.
+
+`PAID_ENROLLMENT_ENABLED` defaults to `false`. After verifying the paid launch
+checklist, set it to `true` in the API environment and recreate the API service.
+The endpoint for starting new Checkout sessions still requires a passing publisher
+run within 30 hours and at least one genuine pick issued by a currently passing
+rule in the past seven days. A clean publisher run with zero qualifying bets can
+still satisfy the first condition. Revoked releases, failed runs, and voided picks
+cannot satisfy the relevant checks. Quote expiry still controls each pick shown
+to subscribers. Set the flag back to `false` and recreate the API service to close
+new enrollment.
+
+Full-stack Compose mounts the private `sports_checkout` volume at
+`/app/checkout-state`. Before the first paid enrollment, provision the SQLite
+file once as the web service user. The web route requires the file to exist
+and stops checkout if it is missing. An empty directory after a restart or
+restore requires investigation before checkout can resume.
+
+```bash
+docker compose exec web node --input-type=module -e '
+import { closeSync, openSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+closeSync(openSync(path, "wx", 0o600));
+const db = new DatabaseSync(path);
+db.exec("PRAGMA user_version = 1");
+db.close();'
+```
+
+Keep the volume across redeployments and include it in the private restore
+drill. Use a consistent SQLite backup of the live database. Close enrollment
+before any restore or rollback. Reconcile Stripe and Clerk activity after the
+backup cutoff with the restored reservations before reopening. Disabling the
+app route stops new sessions. Expire existing open Stripe sessions if payment
+must stop immediately. Web processes on one host share this file. A second
+host needs an equivalent shared transactional store before accepting checkout
+traffic.
+
+The store saves Stripe resource IDs, the Clerk account ID, and the exact
+server-created requests. Stripe collects the billing email for new customers.
+Checkout retries use the same saved idempotency key. Unresolved requests
+that reach 23 hours require reconciliation in Stripe before an operator
+can recover checkout. Provider-confirmed terminal sessions can be replaced.
+Keep Stripe's single-subscription setting enabled as a separate control.
+[Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests) · [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
+
+New Checkout sessions return to `/account` with the Stripe session ID. The
+signed-in account can confirm a paid session and recover access while webhook
+delivery is pending. The same reconciliation handles webhook updates, including
+later cancellations. Regular subscriber access requires a positive paid Stripe
+invoice with an exact recurring line for the configured price and subscription
+item. Access ends at the paid service boundary or an earlier verified cutoff.
+A renewal advances that boundary once the new paid service period starts.
+
+The full-stack Caddy web access log and upstream error log record request paths
+and status codes. They omit query strings and request and response headers
+because checkout returns and sign-in redirects can contain session identifiers.
+Provider-authorized trial access ends at its explicit trial cutoff.
+
+A signed-in subscriber can use **Refresh subscription status** on the account
+page if a renewal webhook is delayed. The refresh checks the existing Stripe
+account, customer, subscription, and billing evidence while enrollment is
+closed. The paid feed can take up to the configured Clerk cache lifetime to
+reflect the update.
+
+During the test-mode drill, complete Checkout with webhook delivery paused and
+confirm access on the return page. Keep a renewal invoice unpaid and verify
+access expires at the previous paid boundary. Pay the renewal and verify the
+account refresh restores access. Resume webhook delivery and verify the
+cancellation cutoff.
+[Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment?ui=full-page) ·
+[Stripe subscription webhook guidance](https://docs.stripe.com/billing/subscriptions/webhooks#track-active-subscriptions)
 
 ## Networking
 

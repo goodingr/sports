@@ -2,9 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = Number(process.env.PORT ?? 3100);
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
+const pilot = process.env.PLAYWRIGHT_PILOT === '1';
 
 export default defineConfig({
-    testDir: './tests/e2e',
+    testDir: pilot ? './tests/pilot' : './tests/e2e',
     timeout: 30_000,
     expect: { timeout: 5_000 },
     fullyParallel: true,
@@ -16,7 +17,18 @@ export default defineConfig({
     webServer: {
         command: `npm run dev -- --port ${PORT}`,
         url: BASE_URL,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
+        // Product UI checks use a signed-out identity fixture, without external credentials.
+        env: {
+            PLAYWRIGHT_MOCK_AUTH: '1',
+            NEXT_PUBLIC_CLERK_KEYLESS_DISABLED: '1',
+            CLERK_SECRET_KEY: '',
+            STRIPE_SECRET_KEY: '',
+            COMMERCIAL_PILOT_ONLY: String(pilot),
+            COMMERCIAL_INTEREST_ENABLED: String(pilot),
+            COMMERCIAL_INTEREST_ENROLLMENT_CLOSED: 'false',
+            COMMERCIAL_PILOT_CONTACT_EMAIL: 'pilot-contact@example.invalid',
+        },
         timeout: 120_000,
     },
     projects: [

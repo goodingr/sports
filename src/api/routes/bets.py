@@ -1,81 +1,88 @@
 from __future__ import annotations
 
-import json
+import sqlite3
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user, is_user_premium
+from src.api.settings import get_settings
 from src.dashboard.data import (
     _expand_totals,
     filter_by_version,
     get_batch_game_odds,
     get_game_odds,
-    get_totals_odds_for_recommended,
     load_forward_test_data,
 )
 from src.data.sportsbook_urls import get_sportsbook_url
 from src.data.team_mappings import get_full_team_name
-from src.predict.publishable_bets import DEFAULT_OUTPUT as PUBLISHABLE_BETS_PATH
+from src.predict.published_ledger import (
+    MAX_RELEASE_AGE,
+    checkout_has_recent_delivery,
+    load_active_release,
+    published_record,
+)
 
 router = APIRouter(prefix="/api/bets", tags=["bets"])
 
 
 def _load_gated_publishable_bets() -> dict[tuple[str, str, str], dict[str, Any]]:
-    """Read the gated paid-pick output if a passing approved rule produced it.
+    """Read the committed paid release if a passing approved rule produced it.
 
     Returns an empty mapping when the file is missing, malformed, or the gate
     has not been satisfied. Keys are (game_id, market, side) tuples; the value
     is the serialized bet record from src.predict.publishable_bets.
     """
-    path: Path = PUBLISHABLE_BETS_PATH
-    if not path.exists() or not path.is_file():
-        return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        payload = load_active_release(get_settings().db_path)
+    except (sqlite3.Error, OSError, ValueError):
         return {}
     if not isinstance(payload, dict):
         return {}
-    if not payload.get("publishable_profitable_list_exists"):
+    if payload.get("publishable_profitable_list_exists") is not True:
         return {}
-    bets_list = payload.get("bets") or []
+    generated_at = payload.get("generated_at")
+    if not isinstance(generated_at, str):
+        return {}
+    generated = pd.to_datetime(generated_at, utc=True, errors="coerce")
+    now = pd.Timestamp.now(tz="UTC")
+    if pd.isna(generated) or not now - MAX_RELEASE_AGE <= generated <= now:
+        return {}
+    passing_ids = payload.get("passing_approved_rule_ids")
+    bets_list = payload.get("bets")
+    if not isinstance(passing_ids, list) or not isinstance(bets_list, list):
+        return {}
     keyed: dict[tuple[str, str, str], dict[str, Any]] = {}
     for bet in bets_list:
         if not isinstance(bet, dict):
             continue
+        quality = bet.get("quality_summary")
+        if (
+            not isinstance(bet.get("rule_id"), str)
+            or bet["rule_id"] not in passing_ids
+            or not isinstance(quality, dict)
+            or quality.get("passes_launch_gate") is not True
+        ):
+            continue
         game_id = bet.get("game_id")
         market = bet.get("market")
         side = bet.get("side")
-        if game_id is None or market is None or side is None:
+        if not all(isinstance(value, str) and value for value in (game_id, market, side)):
             continue
-        keyed[(str(game_id), str(market).lower(), str(side).lower())] = bet
+        keyed[(game_id, market.lower(), side.lower())] = bet
     return keyed
-
-
-def _gated_keys_for_market(
-    gated: dict[tuple[str, str, str], dict[str, Any]], market: str
-) -> set[tuple[str, str]]:
-    market = market.lower()
-    return {(game_id, side) for (game_id, m, side) in gated if m == market}
 
 
 def _publishable_bets_frame(
     gated: dict[tuple[str, str, str], dict[str, Any]],
-    *,
-    market: str | None = None,
 ) -> pd.DataFrame:
     records: list[dict[str, Any]] = []
-    market_filter = market.lower() if market else None
     for (game_id, bet_market, side), bet in gated.items():
-        if market_filter and bet_market != market_filter:
-            continue
         record = dict(bet)
         record.setdefault("game_id", game_id)
         record.setdefault("market", bet_market)
@@ -90,7 +97,9 @@ def _publishable_bets_frame(
         return pd.DataFrame()
     frame = pd.DataFrame(records)
     if "commence_time" in frame.columns:
-        frame["commence_time"] = pd.to_datetime(frame["commence_time"], utc=True, errors="coerce")
+        frame["commence_time"] = pd.to_datetime(
+            frame["commence_time"], utc=True, errors="coerce", format="mixed"
+        )
     return frame
 
 
@@ -103,6 +112,8 @@ class OddsRecord(BaseModel):
     book: str | None = None
     book_url: str | None = None
     fetched_at_utc: datetime | str | None = None
+    snapshot_id: str | None = None
+    observed_start_utc: datetime | str | None = None
 
 
 class PublicBet(BaseModel):
@@ -121,6 +132,8 @@ class PublicBet(BaseModel):
 
 
 class PremiumBet(PublicBet):
+    market: str | None = None
+    quote_expires_at: datetime | None = None
     predicted_total_points: float | None = None
     edge: float | None = None
     side: str | None = None
@@ -151,6 +164,10 @@ class UpcomingResponse(BaseModel):
     data: list[PremiumBet | PublicBet]
     count: int
     is_premium: bool
+
+
+class AccessResponse(BaseModel):
+    checkout_available: bool
 
 
 class PredictionInfo(BaseModel):
@@ -241,17 +258,20 @@ def _ensure_utc_column(df: pd.DataFrame, column: str = "commence_time") -> pd.Da
 def _odds_record_from_mapping(record: dict[str, Any]) -> OddsRecord:
     book = _clean_value(record.get("book"))
     book_url = _clean_value(record.get("book_url"))
+    market = _clean_value(record.get("market"))
     if book and not book_url:
         book_url = get_sportsbook_url(str(book))
     return OddsRecord(
         game_id=_clean_value(record.get("game_id")),
-        market=_clean_value(record.get("market")),
+        market=market,
         outcome=_clean_value(record.get("outcome")),
         line=_clean_value(record.get("line")),
         moneyline=_clean_value(record.get("moneyline")),
         book=book,
         book_url=book_url,
         fetched_at_utc=_clean_value(record.get("fetched_at_utc")),
+        snapshot_id=_clean_value(record.get("snapshot_id")) if market == "totals" else None,
+        observed_start_utc=_clean_value(record.get("observed_start_utc")) if market == "totals" else None,
     )
 
 
@@ -274,42 +294,15 @@ def _build_batch_odds_map(game_ids: list[str]) -> dict[str, list[OddsRecord]]:
     return odds_map
 
 
-def _build_sportsbook_map(recommended: pd.DataFrame) -> dict[str, dict[str, Any]]:
-    if recommended.empty:
-        return {}
-    side_by_game = {
-        str(row["game_id"]): str(row.get("side", "")).lower()
-        for _, row in recommended.iterrows()
-        if _clean_value(row.get("game_id")) is not None
-    }
-    try:
-        odds_df = get_totals_odds_for_recommended(recommended)
-    except Exception as exc:
-        print(f"ERROR: Deferred sportsbook fetch failed: {exc}")
-        return {}
-    if odds_df.empty:
-        return {}
-
-    sportsbook_map: dict[str, dict[str, Any]] = {}
-    for _, odds_row in odds_df.iterrows():
-        game_id = _clean_value(odds_row.get("forward_game_id"))
-        if game_id is None:
-            continue
-        key = str(game_id)
-        outcome = str(_clean_value(odds_row.get("outcome")) or "").lower()
-        preferred = outcome == side_by_game.get(key)
-        if key not in sportsbook_map or preferred:
-            sportsbook_map[key] = {
-                column: _clean_value(odds_row.get(column)) for column in odds_df.columns
-            }
-    return sportsbook_map
-
-
-def _recommended_bet(side: str | None, line: Any) -> str | None:
-    clean_line = _clean_value(line)
-    if not side or clean_line is None:
+def _recommended_bet(row: pd.Series) -> str | None:
+    side = _string_value(row, "side")
+    if side in {"home", "away"}:
+        team = _string_value(row, f"{side}_team")
+        return f"{team} moneyline" if team else None
+    line = _row_value(row, "total_line")
+    if side not in {"over", "under"} or line is None:
         return None
-    return f"{side.title()} {clean_line}"
+    return f"{side.title()} {line}"
 
 
 def _public_bet(row: pd.Series, *, is_locked: bool = False) -> PublicBet:
@@ -334,33 +327,29 @@ def _premium_bet(
     row: pd.Series,
     *,
     odds_map: dict[str, list[OddsRecord]],
-    sportsbook_map: dict[str, dict[str, Any]],
 ) -> PremiumBet:
     base = _public_bet(row)
     game_id = base.game_id
-    sportsbook = sportsbook_map.get(game_id, {})
     side = _string_value(row, "side")
-    line = (
-        sportsbook.get("line")
-        if sportsbook.get("line") is not None
-        else _row_value(row, "total_line")
-    )
-    book = sportsbook.get("book") or _row_value(row, "book")
+    line = _row_value(row, "total_line")
+    book = _row_value(row, "book")
     book_url = _row_value(row, "book_url")
     if book and not book_url:
         book_url = get_sportsbook_url(str(book))
 
     return PremiumBet(
         **base.model_dump(),
+        market=_string_value(row, "market"),
+        quote_expires_at=_row_value(row, "quote_expires_at"),
         predicted_total_points=_float_value(row, "predicted_total_points"),
         edge=_float_value(row, "edge"),
         side=side,
         description=_string_value(row, "description"),
-        moneyline=sportsbook.get("moneyline") or _float_value(row, "moneyline"),
+        moneyline=_float_value(row, "moneyline"),
         total_line=_clean_value(line),
         book=_clean_value(book),
         book_url=_clean_value(book_url),
-        recommended_bet=_string_value(row, "recommended_bet") or _recommended_bet(side, line),
+        recommended_bet=_string_value(row, "recommended_bet") or _recommended_bet(row),
         odds_data=odds_map.get(game_id, []),
     )
 
@@ -370,38 +359,19 @@ def _serialize_bets(
     *,
     premium: bool,
     odds_map: dict[str, list[OddsRecord]] | None = None,
-    sportsbook_map: dict[str, dict[str, Any]] | None = None,
     lock_unstarted: bool = False,
 ) -> list[dict[str, Any]]:
     odds_map = odds_map or {}
-    sportsbook_map = sportsbook_map or {}
     records: list[dict[str, Any]] = []
     for _, row in rows.iterrows():
         if premium:
             records.append(
-                _model_dump(_premium_bet(row, odds_map=odds_map, sportsbook_map=sportsbook_map))
+                _model_dump(_premium_bet(row, odds_map=odds_map))
             )
         else:
             is_locked = lock_unstarted or bool(_row_value(row, "is_live"))
             records.append(_model_dump(_public_bet(row, is_locked=is_locked)))
     return records
-
-
-def _filter_rows_to_gated(rows: pd.DataFrame, gated_keys: set[tuple[str, str]]) -> pd.DataFrame:
-    """Keep only rows whose (game_id, side) is in the gated key set."""
-    if rows.empty:
-        return rows
-    if not gated_keys:
-        return rows.iloc[0:0].copy()
-    mask = rows.apply(
-        lambda row: (
-            str(_clean_value(row.get("game_id")) or ""),
-            str(_clean_value(row.get("side")) or "").lower(),
-        )
-        in gated_keys,
-        axis=1,
-    )
-    return rows[mask].copy()
 
 
 def get_totals_data(model_type: str = "ensemble", version: Optional[str] = "all") -> pd.DataFrame:
@@ -446,18 +416,23 @@ def get_totals_data(model_type: str = "ensemble", version: Optional[str] = "all"
     return df
 
 
+def _completed_model_bets(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    completed = frame[frame["status"] == "Completed"].copy()
+    if "commence_time" in completed.columns:
+        completed = _ensure_utc_column(completed)
+        completed = completed[completed["commence_time"] < pd.Timestamp.now(tz="UTC")]
+        completed = completed.sort_values("commence_time", ascending=False)
+    return completed
+
+
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(model_type: str = "ensemble") -> dict[str, Any]:
     """Get aggregate statistics for Over/Under bets."""
-    df = get_totals_data(model_type)
-
-    empty_response = StatsResponse(roi=0.0, win_rate=0.0, total_profit=0.0, total_bets=0)
-    if df.empty:
-        return _model_dump(empty_response)
-
-    completed = df[df["status"] == "Completed"].copy()
+    completed = _completed_model_bets(get_totals_data(model_type))
     if completed.empty:
-        return _model_dump(empty_response)
+        return _model_dump(StatsResponse(roi=0.0, win_rate=0.0, total_profit=0.0, total_bets=0))
 
     total_bets = len(completed)
     wins = int(completed["won"].eq(True).sum())
@@ -483,62 +458,25 @@ async def get_stats(model_type: str = "ensemble") -> dict[str, Any]:
     response_model_exclude_defaults=True,
 )
 async def get_history(
+    response: Response,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     model_type: str = "ensemble",
     user: Optional[dict[str, Any]] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get completed and live bets. Prediction details require premium."""
+    """Get completed model-tracking results."""
+    response.headers["Cache-Control"] = "private, no-store"
     premium = is_user_premium(user)
-    df = get_totals_data(model_type)
-
-    if df.empty:
-        return _model_dump(HistoryResponse(data=[], total=0, page=page, limit=limit))
-
-    df = _ensure_utc_column(df)
-    now = pd.Timestamp.now(tz="UTC")
-
-    if "commence_time" in df.columns:
-        df["is_live"] = False
-        mask_live = (df["status"] == "Pending") & (df["commence_time"] <= now)
-        df.loc[mask_live, "is_live"] = True
-        history = df[(df["status"] == "Completed") | mask_live].copy()
-        history = history.sort_values(["is_live", "commence_time"], ascending=[False, False])
-    else:
-        history = df[df["status"] == "Completed"].copy()
-
-    if premium and not history.empty:
-        gated_keys = _gated_keys_for_market(_load_gated_publishable_bets(), "totals")
-        completed_mask = history["status"] == "Completed"
-        live_rows = _filter_rows_to_gated(history[~completed_mask], gated_keys)
-        completed_rows = history[completed_mask]
-        history = pd.concat([live_rows, completed_rows])
-        if "is_live" in history.columns and "commence_time" in history.columns:
-            history = history.sort_values(["is_live", "commence_time"], ascending=[False, False])
-
+    history = _completed_model_bets(get_totals_data(model_type))
     start = (page - 1) * limit
     paginated = history.iloc[start : start + limit]
-
-    odds_map: dict[str, list[OddsRecord]] = {}
-    sportsbook_map: dict[str, dict[str, Any]] = {}
-    if premium and not paginated.empty:
-        game_ids = [
-            str(row["game_id"])
-            for _, row in paginated.iterrows()
-            if _clean_value(row.get("game_id")) is not None
-        ]
-        odds_map = _build_batch_odds_map(game_ids)
-        sportsbook_map = _build_sportsbook_map(paginated)
-
-    response = HistoryResponse(
-        data=_serialize_bets(
-            paginated, premium=premium, odds_map=odds_map, sportsbook_map=sportsbook_map
-        ),
+    payload = HistoryResponse(
+        data=_serialize_bets(paginated, premium=premium),
         total=len(history),
         page=page,
         limit=limit,
     )
-    return _model_dump(response)
+    return _model_dump(payload)
 
 
 @router.get(
@@ -548,83 +486,65 @@ async def get_history(
     response_model_exclude_defaults=True,
 )
 async def get_upcoming(
+    response: Response,
     model_type: str = "ensemble",
     user: Optional[dict[str, Any]] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get upcoming active bets.
-
-    Premium users only receive paid recommendations sourced from the gated
-    publishable-picks output. If no approved rule passes the launch gate, the
-    response contains an empty data array. Free users see locked-card metadata
-    for upcoming games (no edge/side/odds/recommendation fields).
-    """
+    """Return current gated picks, with matchup metadata only for free users."""
+    response.headers["Cache-Control"] = "private, no-store"
     premium = is_user_premium(user)
-    if premium:
-        gated = _load_gated_publishable_bets()
-        upcoming = _publishable_bets_frame(gated)
-        if upcoming.empty:
-            return _model_dump(UpcomingResponse(data=[], count=0, is_premium=True))
-        now = pd.Timestamp.now(tz="UTC")
-        if "commence_time" in upcoming.columns:
-            upcoming = upcoming[upcoming["commence_time"] > now]
-            upcoming = upcoming.sort_values("commence_time", ascending=True)
-        odds_map: dict[str, list[OddsRecord]] = {}
-        sportsbook_map: dict[str, dict[str, Any]] = {}
-        if not upcoming.empty:
-            game_ids = [
-                str(row["game_id"])
-                for _, row in upcoming.iterrows()
-                if _clean_value(row.get("game_id")) is not None
-            ]
-            odds_map = _build_batch_odds_map(game_ids)
-        response = UpcomingResponse(
-            data=_serialize_bets(
-                upcoming,
-                premium=True,
-                odds_map=odds_map,
-                sportsbook_map=sportsbook_map,
-            ),
-            count=len(upcoming),
-            is_premium=True,
-        )
-        return _model_dump(response)
-
-    df = get_totals_data(model_type)
-
-    if df.empty:
-        return _model_dump(UpcomingResponse(data=[], count=0, is_premium=premium))
-
-    upcoming = df[df["status"] == "Pending"].copy()
-    upcoming = _ensure_utc_column(upcoming)
-
-    now = pd.Timestamp.now(tz="UTC")
-    if "commence_time" in upcoming.columns:
-        upcoming = upcoming[upcoming["commence_time"] > now]
-        upcoming = upcoming.sort_values("commence_time", ascending=True)
-
-    odds_map: dict[str, list[OddsRecord]] = {}
-    sportsbook_map: dict[str, dict[str, Any]] = {}
-    if premium and not upcoming.empty:
-        game_ids = [
-            str(row["game_id"])
-            for _, row in upcoming.iterrows()
-            if _clean_value(row.get("game_id")) is not None
-        ]
-        odds_map = _build_batch_odds_map(game_ids)
-        sportsbook_map = _build_sportsbook_map(upcoming)
-
-    response = UpcomingResponse(
+    upcoming = _upcoming_publishable_bets()
+    if not premium and not upcoming.empty:
+        upcoming = upcoming.drop_duplicates(subset=["game_id"])
+    odds_map = _build_batch_odds_map(upcoming["game_id"].unique().tolist()) if (
+        premium and not upcoming.empty
+    ) else {}
+    payload = UpcomingResponse(
         data=_serialize_bets(
             upcoming,
             premium=premium,
             odds_map=odds_map,
-            sportsbook_map=sportsbook_map,
             lock_unstarted=not premium,
         ),
         count=len(upcoming),
         is_premium=premium,
     )
-    return _model_dump(response)
+    return _model_dump(payload)
+
+
+def _upcoming_publishable_bets() -> pd.DataFrame:
+    upcoming = _publishable_bets_frame(_load_gated_publishable_bets())
+    if upcoming.empty or "commence_time" not in upcoming:
+        return pd.DataFrame()
+    now = pd.Timestamp.now(tz="UTC")
+    return upcoming[upcoming["commence_time"] > now].sort_values("commence_time")
+
+
+@router.get("/access", response_model=AccessResponse)
+def get_access(response: Response) -> AccessResponse:
+    """Expose checkout availability without revealing any pick details."""
+    response.headers["Cache-Control"] = "no-store"
+    settings = get_settings()
+    if not settings.paid_enrollment_enabled:
+        return AccessResponse(checkout_available=False)
+    try:
+        return AccessResponse(checkout_available=checkout_has_recent_delivery(settings.db_path))
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return AccessResponse(checkout_available=False)
+
+
+@router.get("/record")
+def get_published_record(
+    response: Response,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Return settled picks issued through the paid publication gate."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return published_record(get_settings().db_path, page=page, limit=limit)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Published record unavailable") from exc
 
 
 @router.get(
@@ -635,6 +555,7 @@ async def get_upcoming(
 )
 async def get_odds_for_game(
     game_id: str,
+    response: Response,
     model_type: str = "ensemble",
     user: Optional[dict[str, Any]] = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -645,6 +566,7 @@ async def get_odds_for_game(
             detail="Premium subscription required to view detailed odds.",
         )
 
+    response.headers["Cache-Control"] = "private, no-store"
     odds_data = _odds_records_from_df(get_game_odds(game_id))
     gated = _load_gated_publishable_bets()
     gated_rows = _publishable_bets_frame(gated)
@@ -656,11 +578,10 @@ async def get_odds_for_game(
         if "edge" in gated_rows.columns:
             gated_rows = gated_rows.sort_values("edge", ascending=False)
         best_bet = gated_rows.iloc[0]
-        side = _string_value(best_bet, "side")
         prediction_info = PredictionInfo(
             predicted_total_points=_float_value(best_bet, "predicted_total_points"),
             recommended_bet=_string_value(best_bet, "recommended_bet")
-            or _recommended_bet(side, _row_value(best_bet, "total_line")),
+            or _recommended_bet(best_bet),
             edge=_float_value(best_bet, "edge"),
             home_score=_float_value(best_bet, "home_score"),
             away_score=_float_value(best_bet, "away_score"),
@@ -669,5 +590,5 @@ async def get_odds_for_game(
             status=_string_value(best_bet, "status") or "Pending",
         )
 
-    response = GameOddsResponse(data=odds_data, count=len(odds_data), prediction=prediction_info)
-    return _model_dump(response)
+    payload = GameOddsResponse(data=odds_data, count=len(odds_data), prediction=prediction_info)
+    return _model_dump(payload)

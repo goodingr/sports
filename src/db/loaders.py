@@ -7,15 +7,17 @@ import logging
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from src.data.team_mappings import NCAAB_TEAM_NAMES, get_ncaab_team_code, normalize_team_code
 
-from .core import connect
+from .core import connect, store_odds_snapshot_game_starts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def _sorted_bookmakers(bookmakers: Sequence[Mapping[str, Any]]) -> list[Mapping[
     )
 
 
-def _parse_utc_datetime(value: Any) -> Optional[datetime]:
+def _parse_utc_datetime(value: Any, *, require_offset: bool = False) -> Optional[datetime]:
     if value in (None, ""):
         return None
     try:
@@ -64,7 +66,7 @@ def _parse_utc_datetime(value: Any) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
+        return None if require_offset else parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
 
 
@@ -201,7 +203,9 @@ def _ensure_games_neutral_column(conn) -> None:
     conn.execute("ALTER TABLE games ADD COLUMN is_neutral INTEGER DEFAULT 0")
 
 
-def _parse_datetime(date_str: Any, time_str: Any) -> Optional[str]:
+def _parse_datetime(
+    date_str: Any, time_str: Any, *, naive_tz: tzinfo = timezone.utc
+) -> Optional[str]:
     if pd.isna(date_str):
         return None
     if isinstance(date_str, str) and date_str:
@@ -212,10 +216,14 @@ def _parse_datetime(date_str: Any, time_str: Any) -> Optional[str]:
     time_part = "00:00"
     if isinstance(time_str, str) and time_str:
         time_part = time_str
+    else:
+        naive_tz = timezone.utc
 
     try:
         dt = datetime.fromisoformat(f"{date_part}T{time_part}")
-        return dt.replace(tzinfo=timezone.utc).isoformat()
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=naive_tz)
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return None
 
@@ -361,6 +369,9 @@ def load_schedules(
         LOGGER.info("No schedules to load")
         return
 
+    # nflverse gametime uses Eastern time even for games played in other zones.
+    nflverse_schedule = league.upper() == "NFL" and source_version == "nfl_data_py"
+    kickoff_tz = ZoneInfo("America/New_York") if nflverse_schedule else timezone.utc
     with connect() as conn:
         sport_id = _ensure_sport(conn, name=sport_name, league=league, default_market=default_market)
         team_cache: Dict[str, int] = {}
@@ -403,8 +414,12 @@ def load_schedules(
             elif league.upper() == "LIGUE1" and not game_id.startswith("LIGUE1_"):
                 game_id = f"LIGUE1_{game_id}"
 
-            start_time = _parse_datetime(row.get("gameday"), row.get("gametime"))
-            season = _season_from_datetime(start_time, int(row.get("season")) if not pd.isna(row.get("season")) else None)
+            start_time = _parse_datetime(row.get("gameday"), row.get("gametime"), naive_tz=kickoff_tz)
+            source_season = int(row["season"]) if not pd.isna(row.get("season")) else None
+            if nflverse_schedule and source_season is not None:
+                season = source_season
+            else:
+                season = _season_from_datetime(start_time, source_season)
 
             gsis = row.get("gsis")
             if gsis is not None and not pd.isna(gsis):
@@ -432,6 +447,13 @@ def load_schedules(
             else:
                 LOGGER.debug("Creating schedule game %s for %s vs %s", game_id, home_raw, away_raw)
 
+            if conn.execute(
+                "SELECT 1 FROM games WHERE game_id = ? AND LOWER(status) = 'voided'",
+                (game_id,),
+            ).fetchone():
+                LOGGER.debug("Skipping schedule update for voided game %s", game_id)
+                continue
+
             conn.execute(
                 """
                 INSERT INTO games (
@@ -447,7 +469,12 @@ def load_schedules(
                     home_team_id = excluded.home_team_id,
                     away_team_id = excluded.away_team_id,
                     venue = excluded.venue,
-                    status = excluded.status,
+                    status = CASE
+                        WHEN games.status = 'voided' THEN games.status
+                        WHEN ? = 'espn_api' AND excluded.status = 'scheduled'
+                            AND games.status IN ('final', 'in_progress') THEN games.status
+                        ELSE excluded.status
+                    END,
                     gsis_id = COALESCE(excluded.gsis_id, games.gsis_id),
                     pfr_id = COALESCE(excluded.pfr_id, games.pfr_id)
                 """,
@@ -464,6 +491,7 @@ def load_schedules(
                     status,
                     gsis_id,
                     pfr_id,
+                    source_version,
                 ),
             )
 
@@ -481,6 +509,9 @@ def load_schedules(
                     spread_close = excluded.spread_close,
                     total_close = excluded.total_close,
                     source_version = excluded.source_version
+                WHERE excluded.source_version != 'espn_api'
+                    OR (excluded.home_score IS NOT NULL AND excluded.away_score IS NOT NULL)
+                    OR (game_results.home_score IS NULL AND game_results.away_score IS NULL)
                 """,
                 (
                     game_id,
@@ -1070,6 +1101,58 @@ SPORT_CONFIG = {
 SPORT_CONFIG_BY_LEAGUE = {config["league"].upper(): config for config in SPORT_CONFIG.values()}
 
 
+def _ensure_odds_api_schedule_clock(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_api_schedule_clock (
+            game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+            fetched_at_utc TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _advance_odds_api_schedule_clock(
+    conn: sqlite3.Connection,
+    game_id: str,
+    sport_key: str,
+    observed_at: datetime | None,
+) -> bool:
+    if observed_at is None:
+        return False
+    existing = conn.execute(
+        "SELECT 1 FROM odds_api_schedule_clock WHERE game_id = ?", (game_id,)
+    ).fetchone()
+    if existing is None:
+        # Ordinary archived batches are written directly under their sport directory.
+        # Quote-only closing polls use a separate directory (or had no raw path).
+        # Legacy events without odds rows have no per-fixture timestamp to recover.
+        legacy = conn.execute(
+            """
+            SELECT DISTINCT s.fetched_at_utc
+            FROM odds o JOIN odds_snapshots s USING (snapshot_id)
+            WHERE o.game_id = ? AND s.source = 'the-odds-api'
+              AND '/' || replace(s.raw_path, char(92), '/') GLOB ?
+            """,
+            (game_id, f"*/odds/{sport_key}/odds_????-??-??T??-??-??Z*.json"),
+        )
+        timestamps = [_parse_utc_datetime(row[0]) for row in legacy]
+        latest = max((timestamp for timestamp in timestamps if timestamp is not None), default=None)
+        if latest is not None:
+            conn.execute(
+                "INSERT INTO odds_api_schedule_clock VALUES (?, ?)",
+                (game_id, latest.isoformat(timespec="microseconds")),
+            )
+    return conn.execute(
+        """
+        INSERT INTO odds_api_schedule_clock VALUES (?, ?)
+        ON CONFLICT(game_id) DO UPDATE SET fetched_at_utc = excluded.fetched_at_utc
+        WHERE excluded.fetched_at_utc > odds_api_schedule_clock.fetched_at_utc
+        """,
+        (game_id, observed_at.isoformat(timespec="microseconds")),
+    ).rowcount == 1
+
+
 def load_odds_snapshot(
     payload: Dict[str, Any],
     raw_path: Optional[str] = None,
@@ -1081,56 +1164,136 @@ def load_odds_snapshot(
         LOGGER.info("No odds data to load")
         return
 
+    source = payload.get("source", "the-odds-api")
+    historical = source == "the-odds-api-history"
+    cfbd_archive = source == "cfbd_lines"
+    ordinary_odds_api = source == "the-odds-api"
     fetched_at = payload.get("fetched_at")
-    if fetched_at:
+    provider_fetched_at = (
+        _parse_utc_datetime(fetched_at, require_offset=True) if ordinary_odds_api else None
+    )
+    schedule_observed_at = provider_fetched_at or (
+        _parse_utc_datetime(fetched_at) if ordinary_odds_api else None
+    )
+    if ordinary_odds_api:
+        fetched_dt = schedule_observed_at or datetime.now(timezone.utc)
+    elif fetched_at:
         try:
             fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
         except ValueError:
+            if historical:
+                raise
             fetched_dt = datetime.now(timezone.utc)
     else:
+        if historical:
+            raise ValueError("Historical odds snapshot requires an as-of timestamp")
         fetched_dt = datetime.now(timezone.utc)
+    if historical and fetched_dt.utcoffset() is None:
+        raise ValueError("Historical odds snapshot requires a timezone-aware timestamp")
 
     snapshot_id = uuid.uuid4().hex
 
-    config = SPORT_CONFIG.get((sport_key or "americanfootball_nfl").lower(), SPORT_CONFIG["americanfootball_nfl"])
+    sport_key = (sport_key or "americanfootball_nfl").lower()
+    if cfbd_archive and sport_key != "americanfootball_ncaaf":
+        raise ValueError("CollegeFootballData lines require the college football sport")
+    config = SPORT_CONFIG.get(sport_key, SPORT_CONFIG["americanfootball_nfl"])
 
     with connect() as conn:
-        _ensure_game_results_total_close_lineage_columns(conn)
+        if (ordinary_odds_api or cfbd_archive) and not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        if ordinary_odds_api:
+            _ensure_odds_api_schedule_clock(conn)
+        if not cfbd_archive:
+            _ensure_game_results_total_close_lineage_columns(conn)
         sport_id = _ensure_sport(
             conn,
             name=config["sport_name"],
             league=config["league"],
             default_market=config["default_market"],
         )
-        source = payload.get("source", "the-odds-api")
+        if (historical or cfbd_archive) and conn.execute(
+            """
+            SELECT 1 FROM odds_snapshots
+            WHERE sport_id = ? AND source = ? AND fetched_at_utc = ? AND raw_path IS ?
+            """,
+            (sport_id, source, fetched_dt.isoformat(), raw_path),
+        ).fetchone():
+            return
         conn.execute(
             "INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path) VALUES (?, ?, ?, ?, ?)",
             (snapshot_id, fetched_dt.isoformat(), sport_id, source, raw_path),
         )
 
+        provider_starts: dict[str, str | None] = {}
+        event_counts = Counter(
+            event["id"] for event in results if isinstance(event.get("id"), str)
+        ) if ordinary_odds_api else Counter()
         for event in results:
             commence_time = event.get("commence_time")
+            observed_start = None
             try:
-                commence_iso = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+                raw_start = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+                commence_iso = raw_start.astimezone(timezone.utc).isoformat()
+                if raw_start.utcoffset() is not None:
+                    observed_start = commence_iso
             except Exception:  # noqa: BLE001
                 commence_iso = None
+            event_observed_at = schedule_observed_at if commence_iso is not None else None
 
             home_name = event.get("home_team", "")
             away_name = event.get("away_team", "")
             home_code = normalize_team_code(config["league"], home_name)
             away_code = normalize_team_code(config["league"], away_name)
 
-            home_team_id = _ensure_team(conn, sport_id, home_code, event.get("home_team"))
-            away_team_id = _ensure_team(conn, sport_id, away_code, event.get("away_team"))
+            if cfbd_archive:
+                # CFBD event IDs do not belong to the Odds API namespace.
+                if observed_start is None or event.get("sport_key") != sport_key:
+                    continue
+                matched = conn.execute(
+                    """
+                    SELECT g.game_id, g.home_team_id, g.away_team_id
+                    FROM games g
+                    JOIN teams ht ON ht.team_id = g.home_team_id AND ht.sport_id = g.sport_id
+                    JOIN teams at ON at.team_id = g.away_team_id AND at.sport_id = g.sport_id
+                    WHERE g.sport_id = ? AND ht.code = ? AND at.code = ?
+                      AND length(g.start_time_utc) > 10
+                      AND ABS(unixepoch(g.start_time_utc) - unixepoch(?)) <= 600
+                    LIMIT 2
+                    """,
+                    (sport_id, home_code, away_code, observed_start),
+                ).fetchall()
+                if len(matched) != 1:
+                    continue
+                game_id, home_team_id, away_team_id = matched[0]
+            else:
+                home_team_id = _ensure_team(conn, sport_id, home_code, event.get("home_team"))
+                away_team_id = _ensure_team(conn, sport_id, away_code, event.get("away_team"))
 
-            game_id = _find_game_by_details(
-                conn,
-                sport_id=sport_id,
-                home_team_id=home_team_id,
-                away_team_id=away_team_id,
-                start_iso=commence_iso,
-                odds_api_id=event.get("id"),
-            )
+            if historical:
+                matched = conn.execute(
+                    """
+                    SELECT game_id FROM games
+                    WHERE sport_id = ? AND home_team_id = ? AND away_team_id = ?
+                      AND status = 'final'
+                      AND ABS(unixepoch(start_time_utc) - unixepoch(?)) <= 600
+                      AND unixepoch(?) < MIN(unixepoch(start_time_utc), unixepoch(?))
+                    LIMIT 2
+                    """,
+                    (sport_id, home_team_id, away_team_id, commence_iso,
+                     fetched_dt.isoformat(), commence_iso),
+                ).fetchall()
+                if len(matched) != 1:
+                    continue
+                game_id = matched[0][0]
+            elif not cfbd_archive:
+                game_id = _find_game_by_details(
+                    conn,
+                    sport_id=sport_id,
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    start_iso=commence_iso,
+                    odds_api_id=event.get("id"),
+                )
 
             if not game_id:
                 # 1. Generate Canonical Internal ID
@@ -1143,7 +1306,10 @@ def load_odds_snapshot(
                     game_id = existing_canonical[0]
                     LOGGER.debug("Matched existing canonical game %s by Internal ID", game_id)
                     # Update Odds API ID if missing
-                    conn.execute("UPDATE games SET odds_api_id = ? WHERE game_id = ? AND odds_api_id IS NULL", (event.get("id"), game_id))
+                    if not ordinary_odds_api or _advance_odds_api_schedule_clock(
+                        conn, game_id, sport_key, event_observed_at
+                    ):
+                        conn.execute("UPDATE games SET odds_api_id = ? WHERE game_id = ? AND odds_api_id IS NULL", (event.get("id"), game_id))
                 else:
                     # 3. Create NEW Game with Canonical ID
                     game_id = internal_id
@@ -1173,18 +1339,47 @@ def load_odds_snapshot(
                             event.get("id"),
                         ),
                     )
-            else:
+                    if ordinary_odds_api:
+                        _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
+            elif not (historical or cfbd_archive) and (
+                not ordinary_odds_api
+                or _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
+            ):
                 conn.execute(
                     """
                     UPDATE games
                     SET odds_api_id = COALESCE(?, odds_api_id),
                         start_time_utc = COALESCE(?, start_time_utc),
-                        status = CASE WHEN status = 'final' THEN status ELSE 'scheduled' END
+                        status = CASE WHEN status IN ('final', 'voided') THEN status ELSE 'scheduled' END
                     WHERE game_id = ?
                     """,
                     (event.get("id"), commence_iso, game_id),
                 )
             
+            if ordinary_odds_api:
+                event_id = event.get("id")
+                identity_matches = (
+                    game_id not in provider_starts
+                    and provider_fetched_at is not None
+                    and observed_start is not None
+                    and isinstance(event_id, str) and bool(event_id) and event_counts[event_id] == 1
+                    and event.get("sport_key") == sport_key
+                    and conn.execute(
+                        """
+                        SELECT 1 FROM games g
+                        WHERE g.game_id = ? AND g.home_team_id = ? AND g.away_team_id = ?
+                          AND g.odds_api_id = ?
+                          AND NOT EXISTS (
+                              SELECT 1 FROM games other
+                              WHERE other.sport_id = g.sport_id AND other.odds_api_id = g.odds_api_id
+                                AND other.game_id <> g.game_id
+                          )
+                        """,
+                        (game_id, home_team_id, away_team_id, event_id),
+                    ).fetchone() is not None
+                )
+                provider_starts[game_id] = observed_start if identity_matches else None
+
             # Extract moneylines from first bookmaker to update game_results
             # We'll collect all outcomes first, then determine home/away based on the outcome_key logic
             home_ml_close = None
@@ -1272,8 +1467,8 @@ def load_odds_snapshot(
                             ),
                         )
             
-            # Update game_results with moneylines from outcomes (after processing all bookmakers)
-            if outcomes_by_key or total_close_value is not None:
+            # Keep archived lines separate from the result's closing fields.
+            if not (historical or cfbd_archive) and (outcomes_by_key or total_close_value is not None):
                 home_ml = outcomes_by_key.get("home")
                 away_ml = outcomes_by_key.get("away")
                 total_close_norm = _safe_float(total_close_value)
@@ -1361,6 +1556,9 @@ def load_odds_snapshot(
             else:
                 LOGGER.debug("Game %s: no outcome data captured for odds snapshot", game_id)
 
+        store_odds_snapshot_game_starts(
+            conn, snapshot_id, {game_id: start for game_id, start in provider_starts.items() if start}
+        )
         LOGGER.info("Stored odds snapshot %s with %d events", snapshot_id, len(results))
 
 

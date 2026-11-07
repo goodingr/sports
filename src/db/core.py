@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
@@ -21,6 +22,20 @@ SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 #     `database is locked` when another commit is in flight.
 #   - foreign_keys=ON enforces the REFERENCES declared in schema.sql.
 _BUSY_TIMEOUT_MS = 5000
+
+PREDICTION_METADATA_COLUMNS = {
+    "predicted_total_points": "REAL",
+    "selected_totals_snapshot_id": "TEXT",
+    "selected_totals_book_id": "INTEGER",
+    "selected_totals_book": "TEXT",
+    "selected_totals_fetched_at": "TEXT",
+    "selected_h2h_snapshot_id": "TEXT",
+    "selected_h2h_book_id": "INTEGER",
+    "selected_h2h_book": "TEXT",
+    "selected_h2h_fetched_at": "TEXT",
+    "moneyline_model_sha256": "TEXT",
+    "totals_model_sha256": "TEXT",
+}
 
 
 def resolve_db_path(db_path: Optional[Path] = None) -> Path:
@@ -82,6 +97,38 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
 
 
+def ensure_prediction_metadata_columns(conn: sqlite3.Connection) -> None:
+    """Migrate prediction metadata without assigning lineage to existing rows."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    existing = _column_names(conn, "predictions")
+    for column, ddl in PREDICTION_METADATA_COLUMNS.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE predictions ADD COLUMN {column} {ddl}")
+
+
+def store_odds_snapshot_game_starts(
+    conn: sqlite3.Connection, snapshot_id: str, starts: Mapping[str, str]
+) -> None:
+    """Retain provider kickoff observations in the same transaction as the quotes."""
+    if not starts:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_snapshot_game_starts (
+            snapshot_id TEXT NOT NULL REFERENCES odds_snapshots(snapshot_id) ON DELETE CASCADE,
+            game_id TEXT NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+            observed_start_utc TEXT NOT NULL,
+            PRIMARY KEY (snapshot_id, game_id)
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO odds_snapshot_game_starts VALUES (?, ?, ?)",
+        [(snapshot_id, game_id, start) for game_id, start in starts.items()],
+    )
+
+
 def _dedupe_current_predictions(conn: sqlite3.Connection) -> None:
     if "predictions" not in {
         row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -109,7 +156,7 @@ def _dedupe_current_predictions(conn: sqlite3.Connection) -> None:
 
 def _apply_lightweight_migrations(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "models", "league", "TEXT")
-    _ensure_column(conn, "predictions", "predicted_total_points", "REAL")
+    ensure_prediction_metadata_columns(conn)
     _ensure_column(conn, "injury_reports", "player_id", "TEXT")
     _ensure_column(conn, "game_results", "total_close_snapshot_id", "TEXT")
     _ensure_column(conn, "game_results", "total_close_snapshot_time_utc", "TEXT")
@@ -136,6 +183,8 @@ __all__ = [
     "connect",
     "initialize",
     "resolve_db_path",
+    "ensure_prediction_metadata_columns",
+    "PREDICTION_METADATA_COLUMNS",
     "vacuum",
     "online_backup",
 ]

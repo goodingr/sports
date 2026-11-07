@@ -2,6 +2,9 @@ import Stripe from "stripe";
 import { clerkClient } from "@clerk/nextjs/server";
 
 export const PREMIUM_KEY = "is_premium" as const;
+export const CHECKOUT_CURRENCY = "usd" as const;
+
+const MONTHLY_PRICE_CENTS = 2900;
 
 const ACTIVE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
     "active",
@@ -20,8 +23,53 @@ export function getStripeSecret(): string {
     return requireEnv("STRIPE_SECRET_KEY");
 }
 
-export function getStripePriceId(): string {
-    return requireEnv("STRIPE_PRICE_ID");
+export type StripeScope = { account: string; livemode: boolean; priceId: string };
+
+function isStripeAccountId(value: unknown): value is string {
+    return typeof value === "string" && /^acct_[A-Za-z0-9_]+$/.test(value);
+}
+
+export function configuredStripeScope(): StripeScope | null {
+    const account = process.env.STRIPE_ACCOUNT_ID;
+    const priceId = process.env.STRIPE_PRICE_ID;
+    const key = /^(?:sk|rk)_(test|live)_[A-Za-z0-9_]+$/.exec(process.env.STRIPE_SECRET_KEY ?? "");
+    if (!isStripeAccountId(account) || !priceId || !/^price_[A-Za-z0-9_]+$/.test(priceId) || !key) return null;
+    return { account, priceId, livemode: key[1] === "live" };
+}
+
+export async function getVerifiedStripeAccount(stripe: Stripe, scope: StripeScope): Promise<Stripe.Account> {
+    const account = await stripe.accounts.retrieve();
+    if (account.id !== scope.account) throw new Error("Stripe account differs from billing configuration");
+    return account;
+}
+
+export async function getVerifiedCheckoutPrice(
+    stripe: Stripe, scope: StripeScope,
+): Promise<Pick<Stripe.Price, "id" | "livemode"> | null> {
+    const { priceId } = scope;
+    const price = await stripe.prices.retrieve(priceId, { expand: ["product"] });
+    const { product, recurring, unit_amount_decimal: decimal } = price;
+    if (
+        price.id !== priceId
+        || price.livemode !== scope.livemode
+        || price.active !== true
+        || !product || typeof product === "string" || !("active" in product) || product.active !== true
+        || price.currency !== CHECKOUT_CURRENCY
+        || price.unit_amount !== MONTHLY_PRICE_CENTS
+        || (decimal != null && !/^2900(?:\.0+)?$/.test(decimal))
+        || price.type !== "recurring"
+        || price.billing_scheme !== "per_unit"
+        || price.custom_unit_amount != null
+        || price.transform_quantity != null
+        || recurring?.interval !== "month"
+        || recurring.interval_count !== 1
+        || recurring.usage_type !== "licensed"
+        || recurring.meter != null
+        || (recurring.trial_period_days != null && recurring.trial_period_days !== 0)
+    ) {
+        return null;
+    }
+    return { id: priceId, livemode: price.livemode };
 }
 
 export function getStripeWebhookSecret(): string {
@@ -64,11 +112,75 @@ export function isPremiumStatus(status: string | null | undefined): boolean {
     return ACTIVE_STATUSES.has(status as Stripe.Subscription.Status);
 }
 
+function isStripeCustomerId(value: unknown): value is string {
+    return typeof value === "string" && /^cus_[A-Za-z0-9_]+$/.test(value);
+}
+
+export function isBillingTimestamp(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function hasScopedProof(metadata: Record<string, unknown>, scope: StripeScope): boolean {
+    const customerId = scopedCustomerId(metadata, scope);
+    const entitlement = metadata.stripe_entitlement;
+    if (!customerId || !entitlement || typeof entitlement !== "object" || Array.isArray(entitlement)) return false;
+    const proof = entitlement as Record<string, unknown>;
+    return proof.customer_id === customerId && proof.account_id === scope.account
+        && proof.livemode === scope.livemode && proof.price_id === scope.priceId;
+}
+
+export function hasScopedPremium(metadata: Record<string, unknown>, scope: StripeScope | null): boolean {
+    const periodEnd = metadata.subscription_current_period_end;
+    return !!scope && metadata.is_premium === true && isBillingTimestamp(periodEnd)
+        && periodEnd > Date.now() / 1000 && hasScopedProof(metadata, scope);
+}
+
+export function scopedCustomerId(metadata: Record<string, unknown>, scope: StripeScope | null): string | null {
+    const customerId = metadata.stripe_customer_id;
+    return scope && metadata.stripe_customer_account_id === scope.account
+        && metadata.stripe_customer_livemode === scope.livemode
+        && isStripeCustomerId(customerId) ? customerId : null;
+}
+
+export function customerBinding(metadata: Record<string, unknown>, scope: StripeScope) {
+    const id = metadata.stripe_customer_id;
+    if (id == null) return null;
+    if (!isStripeCustomerId(id)) throw new Error("Stored Stripe customer reference is invalid");
+    const { stripe_customer_account_id: account, stripe_customer_livemode: livemode } = metadata;
+    if (account == null && livemode == null) return { id, scoped: false };
+    if (!isStripeAccountId(account) || typeof livemode !== "boolean") {
+        throw new Error("Stored Stripe customer has incomplete scope");
+    }
+    return account === scope.account && livemode === scope.livemode ? { id, scoped: true } : null;
+}
+
+export function customerBindingMetadata(customerId: string, scope: StripeScope) {
+    return {
+        stripe_customer_id: customerId,
+        stripe_customer_account_id: scope.account,
+        stripe_customer_livemode: scope.livemode,
+    };
+}
+
+export function ownsStripeCustomer(
+    customer: Stripe.Customer | Stripe.DeletedCustomer, userId: string, livemode: boolean,
+): customer is Stripe.Customer {
+    if (customer.deleted || customer.livemode !== livemode || !isStripeCustomerId(customer.id)) return false;
+    const owners = [customer.metadata.userId, customer.metadata.clerkUserId].filter(Boolean);
+    return owners.length > 0 && owners.every((owner) => owner === userId);
+}
+
+export function isMissingStripeCustomer(error: unknown): boolean {
+    return error instanceof Stripe.errors.StripeInvalidRequestError
+        && error.code === "resource_missing" && error.statusCode === 404;
+}
+
 export interface PremiumSnapshot {
     is_premium: boolean;
     subscription_status: string | null;
     stripe_customer_id: string | null;
     subscription_current_period_end: number | null;
+    subscription_cancel_at_period_end: boolean;
 }
 
 function customerIdOf(sub: Stripe.Subscription): string | null {
@@ -76,23 +188,31 @@ function customerIdOf(sub: Stripe.Subscription): string | null {
     return typeof sub.customer === "string" ? sub.customer : sub.customer.id;
 }
 
-function periodEndOf(sub: Stripe.Subscription): number | null {
-    // In Stripe API 2025+, current_period_end lives on subscription items.
-    const item = sub.items?.data?.[0] as
-        | (Stripe.SubscriptionItem & { current_period_end?: number })
-        | undefined;
-    if (item?.current_period_end) return item.current_period_end;
-    // Fallback for older API versions where it sat on the subscription itself.
-    const legacy = (sub as unknown as { current_period_end?: number }).current_period_end;
-    return typeof legacy === "number" ? legacy : null;
+export function subscriptionItemForPrice(sub: Stripe.Subscription, priceId: string): Stripe.SubscriptionItem | undefined {
+    const items = sub.items?.data.filter(({ price }) => price?.id === priceId);
+    const item = sub.items?.has_more !== true && items?.length === 1 ? items[0] : undefined;
+    return item && /^si_[A-Za-z0-9_]+$/.test(item.id) ? item : undefined;
 }
 
-export function snapshotFromSubscription(sub: Stripe.Subscription): PremiumSnapshot {
+function periodEndOf(sub: Stripe.Subscription, item: Stripe.SubscriptionItem | undefined, paidThrough: number | null): number | null {
+    const periodEnd = item?.current_period_end;
+    if (!isBillingTimestamp(periodEnd)) return null;
+    const cancelAt = sub.cancel_at ?? periodEnd;
+    const verifiedEnd = sub.status === "trialing" ? sub.trial_end : paidThrough;
+    if (!isBillingTimestamp(cancelAt) || !isBillingTimestamp(verifiedEnd)) return null;
+    return Math.min(periodEnd, cancelAt, verifiedEnd);
+}
+
+export function snapshotFromSubscription(
+    sub: Stripe.Subscription, item: Stripe.SubscriptionItem | undefined, paidThrough: number | null,
+): PremiumSnapshot {
+    const periodEnd = periodEndOf(sub, item, paidThrough);
     return {
-        is_premium: isPremiumStatus(sub.status),
+        is_premium: isPremiumStatus(sub.status) && periodEnd !== null && periodEnd > Date.now() / 1000,
         subscription_status: sub.status,
         stripe_customer_id: customerIdOf(sub),
-        subscription_current_period_end: periodEndOf(sub),
+        subscription_current_period_end: periodEnd,
+        subscription_cancel_at_period_end: sub.cancel_at_period_end || sub.cancel_at != null,
     };
 }
 
@@ -105,44 +225,13 @@ export function revokedSnapshot(
         subscription_status: status,
         stripe_customer_id: customerId,
         subscription_current_period_end: null,
+        subscription_cancel_at_period_end: false,
     };
 }
 
 /**
- * Find the Clerk userId that owns a Stripe customer. Looks first at the
- * customer's metadata (which we set during checkout), and falls back to
- * scanning Clerk users by stored stripe_customer_id.
- */
-export async function findUserIdForCustomer(
-    customerId: string,
-): Promise<string | null> {
-    const stripe = getStripe();
-    const customer = await stripe.customers.retrieve(customerId);
-    if (customer && !("deleted" in customer && customer.deleted)) {
-        const meta = (customer as Stripe.Customer).metadata ?? {};
-        if (meta.userId) return meta.userId;
-        if (meta.clerkUserId) return meta.clerkUserId;
-    }
-    return null;
-}
-
-/**
- * Look up the userId associated with a webhook event. We prefer subscription
- * metadata (set during checkout) and fall back to the Stripe customer record.
- */
-export async function resolveUserId(
-    sub: Stripe.Subscription | null,
-    customerId: string | null,
-): Promise<string | null> {
-    const fromSub = sub?.metadata?.userId;
-    if (fromSub) return fromSub;
-    if (customerId) return findUserIdForCustomer(customerId);
-    return null;
-}
-
-/**
- * Apply a premium snapshot to a Clerk user. Idempotent: a no-op if the stored
- * state already matches and the same Stripe event id was previously processed.
+ * Apply a current premium snapshot for the customer already bound to the user.
+ * Repeated events skip writes when the stored billing state already matches.
  *
  * Returns true when state changed (or the event was applied for the first time).
  */
@@ -150,35 +239,38 @@ export async function applySnapshot(
     userId: string,
     snapshot: PremiumSnapshot,
     eventId: string,
+    scope: StripeScope,
 ): Promise<boolean> {
     const clerk = await getClerk();
     const user = await clerk.users.getUser(userId);
     const priv = (user.privateMetadata ?? {}) as Record<string, unknown>;
-    if (priv.stripe_last_event_id === eventId) {
-        return false; // replay
-    }
     const pub = (user.publicMetadata ?? {}) as Record<string, unknown>;
-    const nextPublic: Record<string, unknown> = {
-        ...pub,
-        [PREMIUM_KEY]: snapshot.is_premium,
-        subscription_status: snapshot.subscription_status,
+    const { stripe_customer_id, ...entitlement } = snapshot;
+    const binding = customerBinding(pub, scope);
+    if (!stripe_customer_id || binding?.id !== stripe_customer_id) return false;
+    const proof = snapshot.is_premium ? {
+        customer_id: stripe_customer_id, account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId,
+    } : null;
+    const nextPublic = {
+        ...entitlement, isPremium: null,
+        ...(!binding.scoped && {
+            stripe_customer_account_id: scope.account,
+            stripe_customer_livemode: scope.livemode,
+        }),
     };
-    if (snapshot.stripe_customer_id) {
-        nextPublic.stripe_customer_id = snapshot.stripe_customer_id;
-    }
-    if (snapshot.subscription_current_period_end !== null) {
-        nextPublic.subscription_current_period_end =
-            snapshot.subscription_current_period_end;
-    } else {
-        delete nextPublic.subscription_current_period_end;
+    const matchesStored = (proof ? hasScopedProof(pub, scope) : pub.stripe_entitlement == null)
+        && Object.entries(nextPublic).every(([key, value]) =>
+            value === null ? pub[key] == null : pub[key] === value,
+        );
+    if (priv.stripe_last_event_id === eventId && matchesStored) {
+        return false;
     }
     const nextPrivate: Record<string, unknown> = {
-        ...priv,
         stripe_last_event_id: eventId,
         stripe_last_event_at: Math.floor(Date.now() / 1000),
     };
     await clerk.users.updateUserMetadata(userId, {
-        publicMetadata: nextPublic,
+        publicMetadata: { ...nextPublic, stripe_entitlement: proof },
         privateMetadata: nextPrivate,
     });
     return true;
@@ -188,13 +280,10 @@ export async function applySnapshot(
  * Look up the Stripe customer id stored on a Clerk user. Returns null when
  * the user has never run checkout (no customer record exists yet).
  */
-export async function getStoredCustomerId(userId: string): Promise<string | null> {
+export async function getStoredCustomerId(userId: string, scope: StripeScope): Promise<string | null> {
     const clerk = await getClerk();
     const user = await clerk.users.getUser(userId);
-    const id = (user.publicMetadata as Record<string, unknown> | undefined)?.[
-        "stripe_customer_id"
-    ];
-    return typeof id === "string" && id.length > 0 ? id : null;
+    return customerBinding(user.publicMetadata ?? {}, scope)?.id ?? null;
 }
 
 /**
@@ -202,41 +291,13 @@ export async function getStoredCustomerId(userId: string): Promise<string | null
  * cancel their subscription. Returns the redirect URL.
  */
 export async function createBillingPortalSession(
+    stripe: Stripe,
     customerId: string,
     returnUrl: string,
 ): Promise<string> {
-    const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
         return_url: returnUrl,
     });
     return session.url;
-}
-
-/**
- * Get or create a Stripe customer for a Clerk user. Persists the resulting
- * customer id on Clerk so we always reuse it on subsequent checkouts.
- */
-export async function getOrCreateCustomer(
-    userId: string,
-    email: string,
-): Promise<string> {
-    const stripe = getStripe();
-    const clerk = await getClerk();
-    const user = await clerk.users.getUser(userId);
-    const existing = (user.publicMetadata as Record<string, unknown> | undefined)?.[
-        "stripe_customer_id"
-    ];
-    if (typeof existing === "string" && existing.length > 0) {
-        return existing;
-    }
-    const customer = await stripe.customers.create({
-        email,
-        metadata: { userId },
-    });
-    const pub = (user.publicMetadata ?? {}) as Record<string, unknown>;
-    await clerk.users.updateUserMetadata(userId, {
-        publicMetadata: { ...pub, stripe_customer_id: customer.id },
-    });
-    return customer.id;
 }

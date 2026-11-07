@@ -1,17 +1,26 @@
 """Fetch recent scores from The Odds API and update the database."""
 
 import argparse
+import json
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 
-import json
-from src.data.config import OddsAPISettings, OddsAPIKeyManager, RAW_DATA_DIR
+from src.data.config import RAW_DATA_DIR, OddsAPIKeyManager, OddsAPISettings
+from src.data.score_backfill import _SCORE_START_TOLERANCE
+from src.data.team_mappings import NBA_ALIASES
 from src.db.core import connect
+from src.db.loaders import _parse_utc_datetime
 from src.predict.config import LEAGUE_SPORT_KEYS, SUPPORTED_LEAGUES
+
+_NBA_SCORE_SOURCE = "the-odds-api-scores"
+_NBA_TEAM_CODES = {**NBA_ALIASES, **{code.lower(): code for code in NBA_ALIASES.values()}}
+_NBA_CANCELLED = {"canceled", "cancelled", "no_contest", "voided"}
+
 
 def _get_sport_key(league: str) -> str:
     try:
@@ -31,7 +40,7 @@ def fetch_scores(league: str, days_from: int = 3, dotenv_path: Optional[Path] = 
 
     sport_key = _get_sport_key(league)
     url = f"{settings.base_url}/sports/{sport_key}/scores/"
-    params = {
+    params: dict[str, str | int] = {
         "apiKey": settings.api_key,
         "daysFrom": min(max(1, days_from), 3), # API limit is usually 3 days for free/standard
         "dateFormat": "iso"
@@ -46,15 +55,19 @@ def fetch_scores(league: str, days_from: int = 3, dotenv_path: Optional[Path] = 
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
-            if isinstance(exc, requests.HTTPError) and response.status_code == 401:
-                LOGGER.warning("Odds API returned 401 Unauthorized with key ending in ...%s", params["apiKey"][-4:])
+            status = exc.response.status_code if exc.response is not None else None
+            if status == 401:
+                LOGGER.warning("Odds API returned 401 Unauthorized while fetching %s scores", league)
                 if attempt < max_attempts - 1:
                     LOGGER.info("Rotating API key and retrying...")
                     OddsAPIKeyManager.rotate_key()
                     continue
             
             # Non-401 error or exhausted retries
-            LOGGER.warning("Failed to fetch %s scores from The Odds API: %s", league, exc)
+            LOGGER.warning(
+                "Failed to fetch %s scores from The Odds API (%s, status=%s)",
+                league, type(exc).__name__, status,
+            )
             return []
     return []
 
@@ -67,10 +80,197 @@ def write_score_snapshot(data: List[Dict], league: str) -> None:
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     LOGGER.info("Saved raw scores to %s", output_path)
 
+
+def _nba_final_scores(event: dict, names: tuple[str, str]) -> tuple[int, int] | None:
+    scores = event.get("scores")
+    if not isinstance(scores, list) or len(scores) != 2:
+        return None
+    values = {
+        item["name"]: item.get("score")
+        for item in scores
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    if values.keys() != set(names):
+        return None
+    parsed = []
+    for name in names:
+        value = values[name]
+        if type(value) is int:
+            parsed.append(value)
+        elif isinstance(value, str) and value.isdecimal():
+            try:
+                parsed.append(int(value))
+            except ValueError:
+                return None
+        else:
+            return None
+    home, away = parsed
+    return (home, away) if 0 <= home < 2**63 and 0 <= away < 2**63 and home != away else None
+
+
+def _update_nba_scores(scores_data: List[Dict]) -> int:
+    received_by = datetime.now(timezone.utc)
+    event_counts = Counter(
+        event["id"]
+        for event in scores_data
+        if isinstance(event, dict) and isinstance(event.get("id"), str)
+    )
+    updated = 0
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nba_odds_api_score_state (
+                game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+                provider_event_id TEXT NOT NULL,
+                home_team_id INTEGER NOT NULL,
+                away_team_id INTEGER NOT NULL,
+                last_update_utc TEXT NOT NULL,
+                completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+                home_score INTEGER,
+                away_score INTEGER,
+                applied INTEGER NOT NULL CHECK (applied IN (0, 1))
+            )
+            """
+        )
+        for event in scores_data:
+            if not isinstance(event, dict) or event.get("sport_key") != _get_sport_key("NBA"):
+                continue
+            event_id, completed = event.get("id"), event.get("completed")
+            home, away = event.get("home_team"), event.get("away_team")
+            if (
+                not isinstance(event_id, str)
+                or not event_id.strip()
+                or event_counts[event_id] != 1
+                or type(completed) is not bool
+                or not isinstance(home, str)
+                or not isinstance(away, str)
+            ):
+                continue
+            names = home, away
+            home_code, away_code = (_NBA_TEAM_CODES.get(name.strip().lower()) for name in names)
+            if not home_code or not away_code or home_code == away_code:
+                continue
+            try:
+                observed = _parse_utc_datetime(event.get("last_update"), require_offset=True)
+                kickoff = (
+                    _parse_utc_datetime(event.get("commence_time"), require_offset=True)
+                    if completed
+                    else None
+                )
+            except OverflowError:
+                continue
+            if (
+                observed is None
+                or observed > received_by
+                or (completed and (kickoff is None or observed <= kickoff))
+            ):
+                continue
+            stamp = observed.isoformat(timespec="microseconds")
+            scores = _nba_final_scores(event, names) if completed else (None, None)
+            if scores is None:
+                continue
+            matches = conn.execute(
+                """
+                SELECT g.game_id, g.home_team_id, g.away_team_id, g.status, g.start_time_utc,
+                       h.code AS home_code, a.code AS away_code,
+                       r.home_score, r.away_score, r.source_version
+                FROM games g
+                JOIN sports s ON s.sport_id = g.sport_id
+                LEFT JOIN teams h ON h.team_id = g.home_team_id AND h.sport_id = g.sport_id
+                LEFT JOIN teams a ON a.team_id = g.away_team_id AND a.sport_id = g.sport_id
+                LEFT JOIN game_results r ON r.game_id = g.game_id
+                WHERE s.league = 'NBA' AND g.odds_api_id = ?
+                LIMIT 2
+                """,
+                (event_id,),
+            ).fetchall()
+            if len(matches) != 1:
+                continue
+            game = matches[0]
+            status = (game["status"] or "").lower()
+            if status in _NBA_CANCELLED or (game["home_code"], game["away_code"]) != (
+                home_code,
+                away_code,
+            ):
+                continue
+            if kickoff is not None:
+                try:
+                    current_start = _parse_utc_datetime(game["start_time_utc"])
+                except OverflowError:
+                    continue
+                if (
+                    current_start is None
+                    or abs(kickoff - current_start) > _SCORE_START_TOLERANCE
+                    or observed <= current_start
+                ):
+                    continue
+            game_id = game["game_id"]
+            previous = conn.execute(
+                "SELECT * FROM nba_odds_api_score_state WHERE game_id = ?", (game_id,)
+            ).fetchone()
+            identity = event_id, game["home_team_id"], game["away_team_id"]
+            if previous is not None and (
+                stamp <= previous["last_update_utc"]
+                or identity
+                != (
+                    previous["provider_event_id"],
+                    previous["home_team_id"],
+                    previous["away_team_id"],
+                )
+            ):
+                continue
+            current_scores = game["home_score"], game["away_score"]
+            owns_result = (
+                previous is not None
+                and previous["applied"]
+                and game["source_version"] == _NBA_SCORE_SOURCE
+                and current_scores == (previous["home_score"], previous["away_score"])
+            )
+            # Observing a legacy score again does not establish who wrote it.
+            applied = owns_result or (completed and current_scores == (None, None))
+            if applied and (completed or previous["completed"]):
+                new_status = "final" if completed else "in_progress"
+                if scores != current_scores or new_status != status or not owns_result:
+                    conn.execute(
+                        """
+                        INSERT INTO game_results (game_id, home_score, away_score, source_version)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(game_id) DO UPDATE SET
+                            home_score = excluded.home_score,
+                            away_score = excluded.away_score,
+                            source_version = excluded.source_version
+                        """,
+                        (game_id, *scores, _NBA_SCORE_SOURCE),
+                    )
+                    conn.execute(
+                        "UPDATE games SET status = ? WHERE game_id = ?", (new_status, game_id)
+                    )
+                    updated += 1
+            conn.execute(
+                """
+                INSERT INTO nba_odds_api_score_state (
+                    game_id, provider_event_id, home_team_id, away_team_id, last_update_utc,
+                    completed, home_score, away_score, applied
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    last_update_utc = excluded.last_update_utc,
+                    completed = excluded.completed,
+                    home_score = excluded.home_score,
+                    away_score = excluded.away_score,
+                    applied = excluded.applied
+                """,
+                (game_id, *identity, stamp, completed, *scores, applied),
+            )
+    return updated
+
+
 def update_database(scores_data: List[Dict], league: str) -> int:
     """Update game results in the database."""
     if not scores_data:
         return 0
+    if league.upper() == "NBA":
+        return _update_nba_scores(scores_data)
         
     updated_count = 0
     
@@ -130,13 +330,15 @@ def update_database(scores_data: List[Dict], league: str) -> int:
             
             # First, check if we have this game by odds_api_id
             cursor = conn.execute(
-                "SELECT game_id FROM games WHERE odds_api_id = ?", 
+                "SELECT game_id, status FROM games WHERE odds_api_id = ?",
                 (event_id,)
             )
             row = cursor.fetchone()
             
             game_id = None
             if row:
+                if str(row["status"] or "").lower() == "voided":
+                    continue
                 game_id = row[0]
             else:
                 # Fallback: Match by teams and date?
@@ -147,16 +349,20 @@ def update_database(scores_data: List[Dict], league: str) -> int:
                 
             if game_id:
                 # Upsert into game_results
-                conn.execute(
+                cursor = conn.execute(
                     """
                     INSERT INTO game_results (game_id, home_score, away_score)
-                    VALUES (?, ?, ?)
+                    SELECT game_id, ?, ?
+                    FROM games
+                    WHERE game_id = ? AND LOWER(COALESCE(status, 'scheduled')) != 'voided'
                     ON CONFLICT(game_id) DO UPDATE SET
                         home_score = excluded.home_score,
                         away_score = excluded.away_score
                     """,
-                    (game_id, home_score, away_score)
+                    (home_score, away_score, game_id)
                 )
+                if cursor.rowcount == 0:
+                    continue
                 
                 # Update status
                 new_status = 'final' if is_completed else 'in_progress'
@@ -215,7 +421,7 @@ def main():
     leagues = args.leagues or SUPPORTED_LEAGUES
     # Handle comma-separated strings if passed as a single argument
     if len(leagues) == 1 and "," in leagues[0]:
-        leagues = [l.strip() for l in leagues[0].split(",")]
+        leagues = [league.strip() for league in leagues[0].split(",")]
         
     run(
         leagues,

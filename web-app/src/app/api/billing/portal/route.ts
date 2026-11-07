@@ -1,29 +1,18 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
 import {
+    configuredStripeScope,
     createBillingPortalSession,
     getAppUrl,
     getStoredCustomerId,
     getStripe,
+    getVerifiedStripeAccount,
+    ownsStripeCustomer,
 } from "@/lib/billing";
 
 export async function POST() {
-    try {
-        // Force-load the Stripe client so misconfigured envs fail fast and
-        // we return a clear 500 instead of a confusing portal error.
-        getStripe();
-    } catch (error) {
-        console.error("[PORTAL_CONFIG_ERROR]", error);
-        return new NextResponse("Billing not configured", { status: 500 });
-    }
-
-    let appUrl: string;
-    try {
-        appUrl = getAppUrl();
-    } catch (error) {
-        console.error("[PORTAL_CONFIG_ERROR]", error);
-        return new NextResponse("Billing not configured", { status: 500 });
-    }
+    if (isPilotOnly()) return pilotBillingUnavailable();
 
     try {
         const { userId } = await auth();
@@ -31,14 +20,22 @@ export async function POST() {
             return new NextResponse("Unauthorized", { status: 401 });
         }
 
-        const customerId = await getStoredCustomerId(userId);
+        const scope = configuredStripeScope();
+        if (!scope) return new NextResponse("Billing not configured", { status: 500 });
+        const customerId = await getStoredCustomerId(userId, scope);
         if (!customerId) {
             return new NextResponse("No subscription found", { status: 404 });
         }
-
+        const stripe = getStripe();
+        await getVerifiedStripeAccount(stripe, scope);
+        const customer = await stripe.customers.retrieve(customerId);
+        if (customer.id !== customerId || !ownsStripeCustomer(customer, userId, scope.livemode)) {
+            return new NextResponse("No subscription found", { status: 404 });
+        }
         const url = await createBillingPortalSession(
+            stripe,
             customerId,
-            `${appUrl}/account`,
+            `${getAppUrl()}/account`,
         );
         return NextResponse.json({ url });
     } catch (error) {

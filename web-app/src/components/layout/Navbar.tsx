@@ -8,6 +8,7 @@ import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
 
 const navLinks = [
     { href: '/', label: 'Home' },
+    { href: '/record', label: 'Pick Record' },
     { href: '/blog', label: 'Blog' },
     { href: '/pricing', label: 'Pricing' },
 ];
@@ -29,7 +30,7 @@ export function Navbar() {
                     <span>Sports Analytics</span>
                 </Link>
 
-                <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
+                <div className="hidden md:flex items-center gap-5 lg:gap-8 text-sm font-medium text-muted-foreground">
                     {navLinks.map((l) => (
                         <Link
                             key={l.href}

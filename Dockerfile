@@ -46,12 +46,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin"
+    PATH="/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Runtime libs only — keep the image small.
 # - libgomp1: lightgbm/xgboost
 # - tini: PID 1 + signal forwarding
 # - cron: worker scheduler
+# - procps: worker healthcheck process detection
 # - curl, ca-certificates: healthchecks + S3 backups
 # - awscli (via pip, see below): external object-storage backups
 RUN apt-get update \
@@ -60,6 +61,7 @@ RUN apt-get update \
         curl \
         cron \
         libgomp1 \
+        procps \
         tini \
         tzdata \
  && rm -rf /var/lib/apt/lists/*
@@ -88,10 +90,10 @@ COPY pyproject.toml poetry.lock README.md ./
 # filesystem's exec bit (matters on Windows hosts).
 RUN find ./scripts -type f -name "*.sh" -exec chmod +x {} \;
 
-# Runtime data lives under /app/data, /app/models, /app/logs, /app/backups.
+# Runtime data lives under /app/data, /app/models, /app/logs, /app/reports, /app/backups.
 # Compose mounts persistent volumes here. Pre-create them so the image works
 # even if a volume is missing (e.g. local one-shot runs).
-RUN mkdir -p /app/data /app/models /app/logs /app/backups \
+RUN mkdir -p /app/data /app/models /app/logs /app/reports /app/backups \
  && chown -R app:app /app
 
 USER app
