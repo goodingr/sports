@@ -536,6 +536,8 @@ slate, with an original observation at most two days old. They use it only to
 screen for a due missing fixture and then fetch a fresh official schedule.
 The fresh schedule and the zero-credit provider probe control whether the
 collector can use the day's paid slot for the wider window.
+The daily collection pipeline saves the next Eastern day's official audit
+after the paid gate check. That step uses one request to the public NBA site.
 
 The fallback requires the exact ordered matchup and compatible kickoff clocks.
 It excludes a known fixture if an exact official or zero-credit match puts
