@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 import time
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -18,6 +20,7 @@ from src.predict.config import SUPPORTED_LEAGUES
 LOGGER = logging.getLogger(__name__)
 
 ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports"
+_SCORE_START_TOLERANCE = timedelta(minutes=10)
 LEAGUE_PATH_MAP = {
     "NHL": "hockey/nhl",
     "NBA": "basketball/nba",
@@ -114,107 +117,119 @@ def parse_espn_event(event: Dict, league: str) -> Optional[Dict]:
     }
 
 
+def _score_fixture(
+    conn: sqlite3.Connection, game: Dict, league: str, team_names: str,
+) -> sqlite3.Row | None:
+    start = _parse_start_time(game.get("date"), require_offset=True)
+    teams = game.get("home_team"), game.get("away_team")
+    if start is None or not all(isinstance(team, str) and team for team in teams) or teams[0] == teams[1]:
+        return None
+    event_id = game["espn_id"]
+    # SQLite narrows the scan. Python checks exact UTC times, including legacy formats SQLite cannot read.
+    candidates = conn.execute(
+        f"""
+        SELECT g.game_id, g.status, g.espn_id, g.start_time_utc,
+               ht.code AS home_code, at.code AS away_code, {team_names}
+        FROM games g
+        JOIN sports s ON s.sport_id = g.sport_id
+        LEFT JOIN teams ht ON ht.team_id = g.home_team_id AND ht.sport_id = g.sport_id
+        LEFT JOIN teams at ON at.team_id = g.away_team_id AND at.sport_id = g.sport_id
+        WHERE s.league = ? AND (
+            g.espn_id = ?
+            OR abs(julianday(g.start_time_utc) - julianday(?)) < 1.0 / 24
+            OR (g.start_time_utc IS NOT NULL AND julianday(g.start_time_utc) IS NULL)
+        )
+        """,
+        (league, event_id, start.isoformat()),
+    ).fetchall()
+    exact = [row for row in candidates if row["espn_id"] == event_id]
+    if len(exact) > 1:
+        return None
+    matches = []
+    for row in exact or candidates:
+        candidate_start = _parse_start_time(row["start_time_utc"])
+        if candidate_start is None or abs(candidate_start - start) > _SCORE_START_TOLERANCE:
+            continue
+        if all(
+            row[f"{side}_code"] == team
+            or normalize_team_code(league, row[f"{side}_name"] or row[f"{side}_code"]) == team
+            for side, team in zip(("home", "away"), teams)
+        ):
+            matches.append(row)
+    if len(matches) != 1 or (not exact and matches[0]["espn_id"] not in (None, "")):
+        return None
+    return matches[0]
+
+
 def update_scores_in_db(games: List[Dict], league: str, *, only_missing: bool = False) -> int:
     if not games:
         return 0
 
+    league = league.upper()
     updated = 0
     unmatched: List[Dict] = []
+    by_event = {}
+    conflicting = set()
+    for game in games:
+        event_id = game.get("espn_id")
+        if isinstance(event_id, str) and event_id.strip():
+            if by_event.setdefault(event_id, game) != game:
+                conflicting.add(event_id)
+        else:
+            unmatched.append(game)
+
     with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         team_columns = {row["name"] for row in conn.execute("PRAGMA table_info(teams)").fetchall()}
-        team_name_select = (
-            "ht.name AS home_name,\n                        at.name AS away_name,"
+        team_names = (
+            "ht.name AS home_name, at.name AS away_name"
             if "name" in team_columns
-            else "NULL AS home_name,\n                        NULL AS away_name,"
+            else "NULL AS home_name, NULL AS away_name"
         )
-        for game in games:
-            row = conn.execute(
-                """
-                SELECT g.game_id, g.status
-                FROM games g
-                JOIN teams ht ON g.home_team_id = ht.team_id
-                JOIN teams at ON g.away_team_id = at.team_id
-                JOIN sports s ON g.sport_id = s.sport_id
-                WHERE s.league = ?
-                  AND ht.code = ?
-                  AND at.code = ?
-                  AND ABS(julianday(g.start_time_utc) - julianday(?)) < 1.0
-                ORDER BY ABS(julianday(g.start_time_utc) - julianday(?))
-                LIMIT 1
-                """,
-                (league.upper(), game["home_team"], game["away_team"], game["date"], game["date"]),
-            ).fetchone()
-            if not row:
-                candidates = conn.execute(
-                    f"""
-                    SELECT
-                        g.game_id,
-                        g.status,
-                        ht.code AS home_code,
-                        at.code AS away_code,
-                        {team_name_select}
-                        g.start_time_utc
-                    FROM games g
-                    JOIN teams ht ON g.home_team_id = ht.team_id
-                    JOIN teams at ON g.away_team_id = at.team_id
-                    JOIN sports s ON g.sport_id = s.sport_id
-                    WHERE s.league = ?
-                      AND ABS(julianday(g.start_time_utc) - julianday(?)) < 1.0
-                    ORDER BY ABS(julianday(g.start_time_utc) - julianday(?))
-                    """,
-                    (league.upper(), game["date"], game["date"]),
-                ).fetchall()
-                for candidate in candidates:
-                    candidate_home = normalize_team_code(
-                        league,
-                        candidate["home_name"] or candidate["home_code"],
-                    )
-                    candidate_away = normalize_team_code(
-                        league,
-                        candidate["away_name"] or candidate["away_code"],
-                    )
-                    if (
-                        candidate_home == game["home_team"]
-                        and candidate_away == game["away_team"]
-                    ):
-                        row = candidate
-                        break
-            if not row:
+        matched = []
+        for event_id, game in by_event.items():
+            row = None if event_id in conflicting else _score_fixture(conn, game, league, team_names)
+            if row is None:
+                unmatched.append(game)
+            else:
+                matched.append((game, row))
+        # Resolve the whole batch before writing so two source IDs cannot race to bind one row.
+        fixtures = Counter(row["game_id"] for _, row in matched)
+        for game, row in matched:
+            game_id = row["game_id"]
+            if fixtures[game_id] != 1:
                 unmatched.append(game)
                 continue
             if str(row["status"] or "").lower() == "voided":
                 continue
 
-            game_id = row[0]
             cursor = conn.execute(
                 """
                 INSERT INTO game_results (game_id, home_score, away_score, source_version)
                 SELECT game_id, ?, ?, 'espn_scoreboard'
                 FROM games
                 WHERE game_id = ? AND LOWER(COALESCE(status, 'scheduled')) != 'voided'
+                  AND (espn_id IS NULL OR espn_id IN ('', ?))
                 ON CONFLICT(game_id) DO UPDATE SET
                     home_score = excluded.home_score,
                     away_score = excluded.away_score,
                     source_version = excluded.source_version
                 WHERE NOT ? OR game_results.home_score IS NULL OR game_results.away_score IS NULL
                 """,
-                (game["home_score"], game["away_score"], game_id, only_missing),
+                (game["home_score"], game["away_score"], game_id, game["espn_id"], only_missing),
             )
             if cursor.rowcount == 0:
                 continue
             conn.execute(
-                "UPDATE games SET status = 'final', espn_id = COALESCE(?, espn_id) WHERE game_id = ?",
-                (game.get("espn_id"), game_id),
+                "UPDATE games SET status = 'final', espn_id = COALESCE(NULLIF(espn_id, ''), ?) WHERE game_id = ?",
+                (game["espn_id"], game_id),
             )
             updated += 1
 
     if unmatched:
-        # Recent unresolved scores are the operationally interesting case — these
-        # are completed ESPN games whose teams parsed cleanly but did not match
-        # any games row by code+date. Surface them at WARNING with a small sample
-        # so the cause (e.g. missing schedule row, code drift) is investigable.
+        # Surface unresolved or conflicting fixtures for operator review.
         sample = ", ".join(
-            f"{g['away_team']}@{g['home_team']} {g.get('date')}" for g in unmatched[:3]
+            f"{g.get('away_team')}@{g.get('home_team')} {g.get('date')}" for g in unmatched[:3]
         )
         LOGGER.warning(
             "%s: %d ESPN scoreboard game(s) had no matching games row (sample: %s)",
@@ -256,14 +271,16 @@ def backfill_scores(
     return total_updated
 
 
-def _parse_start_time(value: str) -> Optional[datetime]:
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
+def _parse_start_time(value: object, *, require_offset: bool = False) -> Optional[datetime]:
+    if not isinstance(value, str) or len(value.strip()) <= 10:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return None if require_offset else parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
 def stale_score_targets(

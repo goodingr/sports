@@ -13,6 +13,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from src.data import score_backfill
+from src.db.core import connect, initialize
+from src.predict.published_ledger import publish_release, published_record
 
 SCHEMA = """
 CREATE TABLE sports (
@@ -72,7 +74,12 @@ def db_with_one_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return db_path
 
 
-def test_update_scores_in_db_matches_by_team_codes_and_date(db_with_one_game: Path) -> None:
+@pytest.mark.parametrize("unbound_id", [None, ""])
+def test_update_scores_in_db_matches_by_team_codes_and_date(
+    db_with_one_game: Path, unbound_id: str | None,
+) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET espn_id = ?", (unbound_id,))
     parsed = [
         {
             "league": "NBA",
@@ -116,6 +123,128 @@ def test_score_backfill_preserves_voided_game(db_with_one_game: Path) -> None:
     with sqlite3.connect(db_with_one_game) as conn:
         assert conn.execute("SELECT status FROM games").fetchone()[0] == "voided"
         assert conn.execute("SELECT count(*) FROM game_results").fetchone()[0] == 0
+
+
+def _score_event(**overrides):
+    return {
+        "home_team": "LAL", "away_team": "BOS", "home_score": 115, "away_score": 110,
+        "date": "2026-04-27T01:40:00Z", "espn_id": "espn-fixture", **overrides,
+    }
+
+
+def test_exact_espn_id_wins_over_a_closer_unbound_candidate(db_with_one_game: Path) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET espn_id = 'espn-fixture', start_time_utc = '2026-04-27T01:49:00Z'")
+        conn.execute("INSERT INTO games VALUES ('unbound', 1, '2026-04-27T01:40:00Z', 10, 11, 'scheduled', NULL)")
+
+    assert score_backfill.update_scores_in_db([_score_event()], "NBA") == 1
+    with connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT game_id FROM game_results").fetchone()[0] == "NBA_20260427_LAL_BOS"
+
+
+def test_conflicting_exact_espn_id_does_not_fall_back_to_an_unbound_row(db_with_one_game: Path) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET espn_id = 'espn-fixture', home_team_id = 11, away_team_id = 10")
+        conn.execute("INSERT INTO games VALUES ('unbound', 1, '2026-04-27T01:40:00Z', 10, 11, 'scheduled', NULL)")
+
+    assert score_backfill.update_scores_in_db([_score_event()], "NBA") == 0
+    with connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT count(*) FROM game_results").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("alias_id", [None, "espn-fixture"])
+def test_ambiguous_warehouse_fixture_is_never_selected(db_with_one_game: Path, alias_id) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET espn_id = ?", (alias_id,))
+        conn.execute(
+            "INSERT INTO games VALUES ('alias', 1, '2026-04-27T01:41:00Z', 10, 11, 'scheduled', ?)",
+            (alias_id,),
+        )
+
+    assert score_backfill.update_scores_in_db([_score_event()], "NBA") == 0
+    with connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT count(*) FROM game_results").fetchone()[0] == 0
+
+
+def test_two_provider_ids_cannot_claim_one_unbound_fixture(db_with_one_game: Path) -> None:
+    assert score_backfill.update_scores_in_db(
+        [_score_event(), _score_event(espn_id="other", home_score=101)], "NBA",
+    ) == 0
+    with connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT espn_id FROM games").fetchone()[0] is None
+
+
+def test_conflicting_espn_id_cannot_replace_existing_binding(db_with_one_game: Path) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET espn_id = 'original'")
+    assert score_backfill.update_scores_in_db([_score_event()], "NBA") == 0
+    with connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT espn_id, status FROM games").fetchone()[:] == ("original", "scheduled")
+
+
+@pytest.mark.parametrize(
+    ("game_start", "event_start", "updates"),
+    [
+        ("2026-04-27 01:50:00", "2026-04-26T21:40:00-04:00", 1),
+        ("2026-04-27T01:50:00.000001Z", "2026-04-27T01:40:00Z", 0),
+        ("2026-04-27", "2026-04-27T00:00:00Z", 0),
+        ("2026-04-27T01:40:00Z", "2026-04-27T01:40:00", 0),
+    ],
+)
+def test_short_exact_time_window_supports_legacy_utc_starts(
+    db_with_one_game: Path, game_start: str, event_start: str, updates: int,
+) -> None:
+    with connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET start_time_utc = ?", (game_start,))
+    assert score_backfill.update_scores_in_db([_score_event(date=event_start)], "NBA") == updates
+
+
+def test_later_fixture_cannot_grade_an_issued_pick(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "issued.db"
+    initialize(path)
+    start = datetime(2026, 4, 27, 1, 40, tzinfo=timezone.utc)
+    published_at = start - timedelta(hours=2)
+    with connect(path) as conn:
+        conn.execute("INSERT INTO sports (sport_id, name, league, default_market) VALUES (1,'NBA','NBA','totals')")
+        conn.execute("INSERT INTO teams (team_id, sport_id, code, name) VALUES (1,1,'LAL','Lakers'),(2,1,'BOS','Celtics')")
+        conn.execute(
+            """
+            INSERT INTO games (game_id, sport_id, home_team_id, away_team_id, start_time_utc, espn_id)
+            VALUES ('issued', 1, 1, 2, ?, 'espn-original')
+            """,
+            (start.isoformat(),),
+        )
+        conn.execute("INSERT INTO books (book_id, name) VALUES (1,'DraftKings')")
+        conn.execute("INSERT INTO odds_snapshots VALUES ('quote',?,1,'the-odds-api',NULL)", (published_at.isoformat(),))
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            VALUES ('quote','issued',1,'totals','Over',100,220), ('quote','issued',1,'totals','Under',100,220)
+            """
+        )
+    release = publish_release(
+        {
+            "generated_at": published_at.isoformat(), "passing_approved_rule_ids": ["fixture"],
+            "bets": [{
+                "rule_id": "fixture", "game_id": "issued", "market": "totals",
+                "start_time_utc": start.isoformat(), "predicted_at": published_at.isoformat(),
+                "side": "over", "total_line": 220.0, "moneyline": 100, "model_probability": 0.6,
+                "quote_snapshot_id": "quote", "quote_book_id": 1, "quality_summary": {"passes_launch_gate": True},
+            }],
+        },
+        path, commit_at=published_at,
+    )
+    assert release["bet_count"] == 1
+
+    monkeypatch.setattr(score_backfill, "connect", lambda: connect(path))
+    later_score = _score_event(date=(start + timedelta(hours=18)).isoformat(), espn_id="espn-later")
+    assert score_backfill.update_scores_in_db([later_score], "NBA", only_missing=True) == 0
+    review = start + timedelta(hours=23)
+    publish_release({"generated_at": review.isoformat(), "bets": []}, path, commit_at=review)
+    record = published_record(path)
+    assert (record["pending_picks"], record["wins"], record["profit_units"], record["roi_percent"]) == (1, 0, 0, None)
+    with connect(path) as conn:
+        assert conn.execute("SELECT espn_id FROM games").fetchone()[0] == "espn-original"
 
 
 def test_stale_score_resolution_preserves_existing_and_concurrent_finals(
@@ -162,7 +291,7 @@ def test_stale_score_resolution_preserves_existing_and_concurrent_finals(
         ]
         return {"events": [
             {
-                "id": f"espn-{index}",
+                "id": ("old-espn", "espn-1", "other-espn")[index],
                 "date": tip.isoformat(),
                 "status": {"type": {"completed": True, "state": "post"}},
                 "competitions": [{"competitors": [
