@@ -618,3 +618,244 @@ def test_saturday_slate_preserves_late_closes_under_daily_cap(
     else:
         assert attempts == [(-15, 1), (15, 2), (45, 1), (75, 1)]
         assert covered == set(starts) - {"event-5"}
+
+
+_DEN_TICK = datetime(2026, 11, 7, 21, 45, 2, tzinfo=timezone.utc)
+_DEN_START = datetime(2026, 11, 7, 22, 10, tzinfo=timezone.utc)
+_DEN_ID = "e76682ca6c25a37b0a53cec226b91aab"
+_ENTRY_SNAPSHOT = "a492cacc-cdf0-4bf3-993a-8fe741c6c45b"
+
+
+def _den_event(start, line):
+    event = _provider_event(_DEN_ID, start)
+    event["home_team"] = "Indiana Pacers"
+    event["away_team"] = "Denver Nuggets"
+    for outcome in event["bookmakers"][0]["markets"][0]["outcomes"]:
+        outcome["point"] = line
+    return event
+
+
+@pytest.fixture
+def den_entry(warehouse, monkeypatch):
+    fetched = _DEN_TICK - timedelta(minutes=10) + timedelta(seconds=1)
+    captured = fetched + timedelta(seconds=2)
+    monkeypatch.setattr(
+        FrozenDateTime, "now", classmethod(lambda cls, tz=None: _DEN_TICK.astimezone(tz))
+    )
+    directory = warehouse.parent / "data/raw/odds/basketball_nba/paper_entry" / _ENTRY_SNAPSHOT
+    directory.mkdir(parents=True)
+    raw = directory / "odds_2026-11-07T21-35-03Z.json"
+    payload = {
+        "source": "the-odds-api",
+        "fetched_at": fetched.isoformat(),
+        "request": {
+            "url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds",
+            "params": {"eventIds": _DEN_ID, "bookmakers": "draftkings", "markets": "h2h,totals"},
+        },
+        "results": [_den_event(_DEN_START, 228.5)],
+    }
+    raw.write_text(json.dumps(payload), encoding="utf-8")
+    with connect(warehouse) as conn:
+        conn.execute("UPDATE teams SET code = 'IND', name = 'Indiana Pacers' WHERE team_id = 1")
+        conn.execute("UPDATE teams SET code = 'DEN', name = 'Denver Nuggets' WHERE team_id = 2")
+        conn.execute(
+            "UPDATE games SET start_time_utc = ?, odds_api_id = ?",
+            (_DEN_START.isoformat(), _DEN_ID),
+        )
+        conn.execute(
+            """
+            UPDATE paper_decisions SET start_time_utc = ?, captured_at = ?, predicted_at = ?,
+                snapshot_id = ?, odds_fetched_at = ?, line = 228.5
+            """,
+            (
+                _DEN_START.isoformat(),
+                captured.isoformat(),
+                captured.isoformat(),
+                _ENTRY_SNAPSHOT,
+                fetched.isoformat(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES (?, ?, 1, 'the-odds-api', ?)",
+            (_ENTRY_SNAPSHOT, fetched.isoformat(), str(raw)),
+        )
+        conn.execute(
+            """
+            CREATE TABLE paper_entry_quote_starts (
+                snapshot_id TEXT NOT NULL, game_id TEXT NOT NULL, earliest_start_utc TEXT NOT NULL,
+                PRIMARY KEY (snapshot_id, game_id)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO paper_entry_quote_starts VALUES (?, 'game', ?)",
+            (_ENTRY_SNAPSHOT, _DEN_START.isoformat()),
+        )
+    return warehouse, raw, payload, captured
+
+
+def test_last_scheduled_tick_collects_only_exact_den_entry_and_preserves_the_new_close(
+    den_entry, monkeypatch
+):
+    warehouse, _, _, captured = den_entry
+    with connect(warehouse) as conn:
+        conn.execute(
+            """
+            INSERT INTO games (game_id, sport_id, start_time_utc, home_team_id, away_team_id, odds_api_id)
+            VALUES ('unrelated', 1, ?, 1, 2, 'unrelated-event')
+            """,
+            (_DEN_START.isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_decisions VALUES (
+                'trial', 'unrelated', 1, 2, ?, ?, ?, 'the-odds-api', 'old', ?, 1, 'DraftKings',
+                'under', 225.5, -110, -110, 0.75, 0.50, 0.25
+            )
+            """,
+            (
+                _DEN_START.isoformat(),
+                captured.isoformat(),
+                captured.isoformat(),
+                captured.isoformat(),
+            ),
+        )
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url.rsplit("/", 1)[1], kwargs["params"]))
+        return FakeResponse("201", [_den_event(_DEN_START, 227.5)])
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True, batch_scheduled=True) == {
+        "status": "collected",
+        "due_events": 1,
+        "events_loaded": 1,
+    }
+    assert [endpoint for endpoint, _ in calls] == ["events", "odds"]
+    assert calls[1][1]["eventIds"] == _DEN_ID
+    with connect(warehouse) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_close_requests").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM odds WHERE game_id='game'").fetchone()[0] == 2
+        assert (
+            conn.execute("SELECT count(*) FROM odds WHERE game_id='unrelated'").fetchone()[0] == 0
+        )
+        assert _DEN_ID not in paper_close_poll._due_events(conn, _DEN_TICK + timedelta(seconds=1))
+        assert (
+            paper_close_poll._plan(conn, _DEN_TICK + timedelta(minutes=15), batch_scheduled=True)[0]
+            == "no_close_due"
+        )
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "manual",
+        "next_tick",
+        "broad",
+        "other_recent",
+        "duplicate_snapshot",
+        "other_decision",
+        "missing_proof",
+        "stale_body",
+        "duplicate_event",
+        "wrong_pair",
+        "earlier_body_clock",
+        "charged_close",
+        "utc_cap",
+    ],
+)
+def test_last_tick_exception_rejects_unproven_entry_or_preserves_other_guards(
+    den_entry, monkeypatch, problem
+):
+    warehouse, raw, payload, _ = den_entry
+    with connect(warehouse) as conn:
+        if problem == "next_tick":
+            start = _DEN_START + timedelta(seconds=1)
+            conn.execute("UPDATE games SET start_time_utc = ?", (start.isoformat(),))
+            conn.execute("UPDATE paper_decisions SET start_time_utc = ?", (start.isoformat(),))
+            conn.execute(
+                "UPDATE paper_entry_quote_starts SET earliest_start_utc = ?", (start.isoformat(),)
+            )
+            payload["results"] = [_den_event(start, 228.5)]
+        elif problem == "broad":
+            broad = raw.parents[2] / raw.name
+            broad.write_bytes(raw.read_bytes())
+            conn.execute("UPDATE odds_snapshots SET raw_path = ?", (str(broad),))
+        elif problem in {"other_recent", "duplicate_snapshot"}:
+            conn.execute(
+                """
+                INSERT INTO odds_snapshots
+                SELECT 'other', ?, sport_id, source, ? FROM odds_snapshots WHERE snapshot_id = ?
+                """,
+                (
+                    payload["fetched_at"]
+                    if problem == "duplicate_snapshot"
+                    else (_DEN_TICK - timedelta(seconds=30)).isoformat(),
+                    str(raw) if problem == "duplicate_snapshot" else None,
+                    _ENTRY_SNAPSHOT,
+                ),
+            )
+        elif problem == "other_decision":
+            conn.execute("UPDATE paper_decisions SET snapshot_id = 'another-entry'")
+        elif problem == "missing_proof":
+            conn.execute("DELETE FROM paper_entry_quote_starts")
+        elif problem == "stale_body":
+            payload["fetched_at"] = (_DEN_TICK - timedelta(minutes=11)).isoformat()
+        elif problem == "duplicate_event":
+            payload["results"].append(payload["results"][0])
+        elif problem == "wrong_pair":
+            payload["results"] = [_den_event(_DEN_START, 229.5)]
+        elif problem == "earlier_body_clock":
+            payload["results"] = [_den_event(_DEN_START - timedelta(minutes=1), 228.5)]
+        elif problem in {"charged_close", "utc_cap"}:
+            conn.execute("CREATE TABLE paper_close_requests (requested_at TEXT PRIMARY KEY)")
+            offsets = [1] if problem == "charged_close" else [30, 50, 70]
+            conn.executemany(
+                "INSERT INTO paper_close_requests VALUES (?)",
+                [((_DEN_TICK - timedelta(minutes=offset)).isoformat(),) for offset in offsets],
+            )
+    raw.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(requests, "get", _unexpected_request)
+    assert paper_close_poll.poll_closes(collect=True, batch_scheduled=problem != "manual") == {
+        "status": "daily_cap" if problem == "utc_cap" else "cooldown",
+        "due_events": 1,
+    }
+
+
+def test_last_tick_still_requires_a_credit_above_reserve(den_entry, monkeypatch):
+    warehouse, _, _, _ = den_entry
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(url.rsplit("/", 1)[1])
+        return FakeResponse("200")
+
+    monkeypatch.setattr(requests, "get", get)
+    assert (
+        paper_close_poll.poll_closes(collect=True, batch_scheduled=True)["status"]
+        == "quota_reserve"
+    )
+    assert calls == ["events"]
+    with connect(warehouse) as conn:
+        assert not paper_close_poll._has_table(conn, "paper_close_requests")
+
+
+def test_last_tick_rechecks_charged_cooldown_after_the_free_probe(den_entry, monkeypatch):
+    warehouse, _, _, _ = den_entry
+    calls = []
+
+    def get(url, **kwargs):
+        assert url.endswith("/events")
+        calls.append("events")
+        with connect(warehouse) as conn:
+            conn.execute("CREATE TABLE paper_close_requests (requested_at TEXT PRIMARY KEY)")
+            conn.execute("INSERT INTO paper_close_requests VALUES (?)", (_DEN_TICK.isoformat(),))
+        return FakeResponse("201")
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True, batch_scheduled=True) == {
+        "status": "cooldown",
+        "due_events": 1,
+    }
+    assert calls == ["events"]

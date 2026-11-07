@@ -23,6 +23,7 @@ from src.db.loaders import _american_to_decimal, _implied_probability
 from src.predict.paper_settlement import (
     _MIN_LEAD,
     _START_TOLERANCE,
+    _archived_quote_start,
     _close_for_decision,
     _utc_timestamp,
     _valid_american_odds,
@@ -35,8 +36,9 @@ _BOOK = "draftkings"
 _BASE_URL = f"https://api.the-odds-api.com/v4/sports/{_SPORT}"
 _MIN_TO_START = timedelta(minutes=10)
 _MAX_TO_START = timedelta(minutes=60)
-# Wait one 15-minute scheduled interval plus up to three minutes of delay.
-_BATCH_LEAD = _MIN_TO_START + timedelta(minutes=18)
+_SCHEDULE_INTERVAL_MINUTES = 15
+# Wait one scheduled interval plus up to three minutes of delay.
+_BATCH_LEAD = _MIN_TO_START + timedelta(minutes=_SCHEDULE_INTERVAL_MINUTES + 3)
 _COOLDOWN = timedelta(minutes=15)
 _MAX_DAILY_REQUESTS = 3
 _CREDIT_RESERVE = 200
@@ -53,6 +55,12 @@ class _ClosingFixture:
     latest_start: datetime
 
 
+@dataclass(frozen=True)
+class _EntrySnapshot:
+    snapshot_id: str
+    fetched_at: datetime
+
+
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     return (
         conn.execute(
@@ -62,7 +70,82 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     )
 
 
-def _due_events(conn: sqlite3.Connection, now: datetime) -> dict[str, _ClosingFixture]:
+def _recent_entry_snapshot(
+    conn: sqlite3.Connection, snapshot: sqlite3.Row
+) -> _EntrySnapshot | None:
+    if not _has_table(conn, "paper_entry_quote_starts"):
+        return None
+    snapshot_id = snapshot["snapshot_id"]
+    fetched = _utc_timestamp(snapshot["fetched_at_utc"])
+    raw_path = snapshot["raw_path"]
+    if fetched is None or not isinstance(raw_path, str):
+        return None
+    parts = raw_path.replace("\\", "/").split("/")
+    if (
+        ".." in parts
+        or parts[-6:-1] != ["raw", "odds", _SPORT, "paper_entry", snapshot_id]
+        or not parts[-1].startswith("odds_")
+        or not parts[-1].endswith(".json")
+    ):
+        return None
+    return _EntrySnapshot(snapshot_id, fetched)
+
+
+def _decision_matches_entry(
+    conn: sqlite3.Connection, decision: sqlite3.Row, fixture: _ClosingFixture, entry: _EntrySnapshot
+) -> bool:
+    if (
+        decision["snapshot_id"] != entry.snapshot_id
+        or _utc_timestamp(decision["odds_fetched_at"]) != entry.fetched_at
+    ):
+        return False
+    captured_start = _utc_timestamp(decision["start_time_utc"])
+    proofs = conn.execute(
+        """
+        SELECT earliest_start_utc FROM paper_entry_quote_starts
+        WHERE snapshot_id = ? AND game_id = ? LIMIT 2
+        """,
+        (entry.snapshot_id, fixture.game_id),
+    ).fetchall()
+    if (
+        captured_start is None
+        or len(proofs) != 1
+        or _utc_timestamp(proofs[0]["earliest_start_utc"]) != captured_start
+    ):
+        return False
+    if decision["side"] not in {"over", "under"}:
+        return False
+    price, opposite = decision["price"], decision["opposite_price"]
+    if decision["side"] == "under":
+        price, opposite = opposite, price
+    start = _archived_quote_start(
+        conn,
+        {
+            "snapshot_id": entry.snapshot_id,
+            "game_id": fixture.game_id,
+            "sport_id": fixture.sport_id,
+            "line": decision["line"],
+            "over_price": price,
+            "under_price": opposite,
+        },
+        entry.fetched_at,
+    )
+    if start is None or start < captured_start:
+        return False
+    starts = (start, fixture.start, fixture.latest_start)
+    return max(starts) - min(starts) <= _START_TOLERANCE and entry.fetched_at < min(starts)
+
+
+def _due_events(
+    conn: sqlite3.Connection, now: datetime, *, entry: _EntrySnapshot | None = None
+) -> dict[str, _ClosingFixture]:
+    # At equality the next tick would have no time to plan and reserve a request.
+    minute = now.minute // _SCHEDULE_INTERVAL_MINUTES * _SCHEDULE_INTERVAL_MINUTES
+    last_start = (
+        now.replace(minute=minute, second=0, microsecond=0)
+        + timedelta(minutes=_SCHEDULE_INTERVAL_MINUTES)
+        + _MIN_TO_START
+    )
     pending = conn.execute(
         """
         SELECT d.*, g.start_time_utc AS current_start, g.sport_id, g.odds_api_id
@@ -101,22 +184,27 @@ def _due_events(conn: sqlite3.Connection, now: datetime) -> dict[str, _ClosingFi
             or captured_at >= now
         ):
             continue
+        if entry is not None and (start > last_start or captured_at < entry.fetched_at):
+            continue
         if _close_for_decision(conn, decision, captured_at, start) is not None:
+            continue
+        fixture = _ClosingFixture(
+            game_id=decision["game_id"],
+            sport_id=decision["sport_id"],
+            home_team_id=decision["home_team_id"],
+            away_team_id=decision["away_team_id"],
+            book_id=decision["book_id"],
+            start=start,
+            latest_start=max(captured_start, current_start),
+        )
+        if entry is not None and not _decision_matches_entry(conn, decision, fixture, entry):
             continue
         event_id = decision["odds_api_id"]
         previous = events.get(event_id)
         if previous and previous.book_id != decision["book_id"]:
             ambiguous.add(event_id)
         if previous is None or start < previous.start:
-            events[event_id] = _ClosingFixture(
-                game_id=decision["game_id"],
-                sport_id=decision["sport_id"],
-                home_team_id=decision["home_team_id"],
-                away_team_id=decision["away_team_id"],
-                book_id=decision["book_id"],
-                start=start,
-                latest_start=max(captured_start, current_start),
-            )
+            events[event_id] = fixture
     return {event_id: fixture for event_id, fixture in events.items() if event_id not in ambiguous}
 
 
@@ -144,16 +232,22 @@ def _plan(
             return "cooldown", events
     recent = conn.execute(
         """
-        SELECT 1
+        SELECT o.snapshot_id, o.fetched_at_utc, o.raw_path
         FROM odds_snapshots o JOIN sports s ON s.sport_id = o.sport_id
         WHERE s.league = 'NBA' AND o.source = ?
           AND julianday(o.fetched_at_utc) > julianday(?)
           AND julianday(o.fetched_at_utc) <= julianday(?)
-        LIMIT 1
+        LIMIT 2
         """,
         (_SOURCE, (now - _COOLDOWN).isoformat(), now.isoformat()),
-    ).fetchone()
+    ).fetchall()
     if recent:
+        if batch_scheduled and len(recent) == 1:
+            entry = _recent_entry_snapshot(conn, recent[0])
+            if entry is not None:
+                last_chances = _due_events(conn, now, entry=entry)
+                if last_chances:
+                    return "due", last_chances
         return "cooldown", events
     if batch_scheduled and min(fixture.start for fixture in events.values()) - now > _BATCH_LEAD:
         return "waiting_for_batch", events
