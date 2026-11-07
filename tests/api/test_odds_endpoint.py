@@ -96,8 +96,8 @@ def test_game_odds_fails_closed_for_non_premium(api_client, monkeypatch):
     assert "data" not in response.json()
 
 
-def test_premium_user_can_access_detailed_odds(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_user_can_access_detailed_odds(api_client, monkeypatch, scoped_premium_user):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_game_odds", lambda game_id: _odds_rows())
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _prediction_rows())
     monkeypatch.setattr(
@@ -116,7 +116,9 @@ def test_premium_user_can_access_detailed_odds(api_client, monkeypatch):
     assert body["prediction"]["edge"] == 0.19
 
 
-def test_upcoming_odds_keep_each_snapshot_and_its_provider_kickoff(api_client, monkeypatch, tmp_path):
+def test_upcoming_odds_keep_each_snapshot_and_its_provider_kickoff(
+    api_client, monkeypatch, tmp_path, scoped_premium_user
+):
     db_path = tmp_path / "odds.db"
     monkeypatch.setenv("SPORTS_DB_PATH", str(db_path))
     initialize(db_path)
@@ -150,7 +152,7 @@ def test_upcoming_odds_keep_each_snapshot_and_its_provider_kickoff(api_client, m
                    ('snapshot-offset', 'premium-game', 1, 'totals', 'Under', 100, 224.5)
             """
         )
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {("premium-game", "totals", "over"): pick})
 
     response = api_client.get("/api/bets/upcoming")
@@ -171,8 +173,10 @@ def test_upcoming_odds_keep_each_snapshot_and_its_provider_kickoff(api_client, m
     assert all("observed_start_utc" not in row for row in restored.json()["data"][0]["odds_data"])
 
 
-def test_premium_game_odds_omit_prediction_when_no_rule_passes(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_game_odds_omit_prediction_when_no_rule_passes(
+    api_client, monkeypatch, scoped_premium_user
+):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_game_odds", lambda game_id: _odds_rows())
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _prediction_rows())
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
@@ -187,8 +191,10 @@ def test_premium_game_odds_omit_prediction_when_no_rule_passes(api_client, monke
     assert "predicted_total_points" not in body["prediction"]
 
 
-def test_premium_game_odds_omit_prediction_for_non_gated_game(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_game_odds_omit_prediction_for_non_gated_game(
+    api_client, monkeypatch, scoped_premium_user
+):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_game_odds", lambda game_id: _odds_rows())
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _prediction_rows())
     monkeypatch.setattr(

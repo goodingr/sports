@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import time
 from threading import RLock
 from typing import Any, Optional
@@ -254,7 +255,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict[str, A
 
 
 def is_user_premium(user: Optional[dict[str, Any]]) -> bool:
-    """Check Clerk server-controlled public metadata for premium entitlement."""
+    """Require a Clerk entitlement bound to the current Stripe billing scope."""
 
     if not user:
         return False
@@ -262,7 +263,28 @@ def is_user_premium(user: Optional[dict[str, Any]]) -> bool:
     metadata = user.get("public_metadata")
     if metadata is None:
         metadata = user.get("publicMetadata")
-    if not isinstance(metadata, dict):
+    if not isinstance(metadata, dict) or metadata.get("is_premium") is not True:
         return False
 
-    return metadata.get("is_premium") is True
+    settings = get_settings()
+    account, price, livemode = (
+        settings.stripe_account_id,
+        settings.stripe_price_id,
+        settings.stripe_livemode,
+    )
+    if not account or not price or type(livemode) is not bool:
+        return False
+
+    customer = metadata.get("stripe_customer_id")
+    entitlement = metadata.get("stripe_entitlement")
+    return (
+        isinstance(customer, str)
+        and re.fullmatch(r"cus_[A-Za-z0-9_]+", customer) is not None
+        and metadata.get("stripe_customer_account_id") == account
+        and metadata.get("stripe_customer_livemode") is livemode
+        and isinstance(entitlement, dict)
+        and entitlement.get("customer_id") == customer
+        and entitlement.get("account_id") == account
+        and entitlement.get("livemode") is livemode
+        and entitlement.get("price_id") == price
+    )

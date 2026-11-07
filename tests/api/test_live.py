@@ -7,6 +7,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
+from src.api import auth
 from src.api.auth import get_current_user
 from src.api.main import app
 from src.api.routes import bets
@@ -222,10 +223,11 @@ def test_completed_history_public_response_does_not_leak_prediction_fields(api_c
 
 
 @pytest.mark.parametrize("premium", [True, False])
-def test_upcoming_returns_empty_when_no_approved_rule_passes(api_client, monkeypatch, premium):
-    app.dependency_overrides[get_current_user] = lambda: {
-        "public_metadata": {"is_premium": premium}
-    }
+def test_upcoming_returns_empty_when_no_approved_rule_passes(
+    api_client, monkeypatch, premium, scoped_premium_user
+):
+    scoped_premium_user["public_metadata"]["is_premium"] = premium
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
 
@@ -238,8 +240,8 @@ def test_upcoming_returns_empty_when_no_approved_rule_passes(api_client, monkeyp
     assert body["data"] == []
 
 
-def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch, scoped_premium_user):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(
         bets,
@@ -262,8 +264,10 @@ def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch)
     assert bet["recommended_bet"] == "Over 222.5"
 
 
-def test_premium_upcoming_uses_gated_release_without_raw_predictions(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_upcoming_uses_gated_release_without_raw_predictions(
+    api_client, monkeypatch, scoped_premium_user
+):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(
         bets, "get_totals_data", lambda **kwargs: pytest.fail("raw predictions must not enter the paid feed")
     )
@@ -295,8 +299,8 @@ def test_premium_upcoming_uses_gated_release_without_raw_predictions(api_client,
     assert odds_game_ids == ["some-other-game"]
 
 
-def test_premium_history_excludes_unsettled_games(api_client, monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
+def test_premium_history_excludes_unsettled_games(api_client, monkeypatch, scoped_premium_user):
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
     monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
     monkeypatch.setattr(bets, "_load_gated_publishable_bets", lambda: {})
     monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
@@ -308,6 +312,73 @@ def test_premium_history_excludes_unsettled_games(api_client, monkeypatch):
     game_ids = [item["game_id"] for item in body["data"]]
     assert "live-game" not in game_ids
     assert "completed-game" in game_ids
+
+
+@pytest.mark.parametrize(
+    ("public_changes", "entitlement_changes"),
+    [
+        ({"stripe_entitlement": None}, {}),
+        ({"stripe_entitlement": ["cus_current"]}, {}),
+        ({"stripe_customer_livemode": False}, {"livemode": False}),
+        ({"stripe_customer_account_id": "acct_old"}, {"account_id": "acct_old"}),
+        ({}, {"price_id": "price_old"}),
+        ({}, {"customer_id": "cus_not_canonical"}),
+        ({"stripe_customer_account_id": "acct_old"}, {}),
+        ({"stripe_customer_id": "malformed"}, {"customer_id": "malformed"}),
+        ({"is_premium": 1}, {}),
+        ({"stripe_customer_livemode": 1}, {}),
+        ({}, {"livemode": 1}),
+        ({"stripe_customer_livemode": "true"}, {"livemode": "true"}),
+    ],
+)
+def test_stale_stripe_entitlements_never_unlock_paid_routes(
+    api_client, monkeypatch, scoped_premium_user, public_changes, entitlement_changes
+):
+    metadata = scoped_premium_user["public_metadata"]
+    metadata["stripe_entitlement"].update(entitlement_changes)
+    metadata.update(public_changes)
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+
+    upcoming = api_client.get("/api/bets/upcoming")
+    assert upcoming.status_code == 200
+    body = upcoming.json()
+    assert body["is_premium"] is False
+    assert body["data"][0]["is_locked"] is True
+    _assert_no_locked_fields(body["data"][0])
+    assert api_client.get("/api/bets/game/future-game/odds").status_code == 403
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_matching_test_mode_is_only_honored_with_configured_scope(
+    api_client, monkeypatch, scoped_premium_user, configured
+):
+    metadata = scoped_premium_user["public_metadata"]
+    metadata["stripe_customer_livemode"] = False
+    metadata["stripe_entitlement"]["livemode"] = False
+    settings = (
+        APISettings(
+            stripe_account_id="acct_current", stripe_price_id="price_monthly", stripe_livemode=False
+        )
+        if configured else APISettings()
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    app.dependency_overrides[get_current_user] = lambda: {"publicMetadata": metadata}
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+
+    upcoming = api_client.get("/api/bets/upcoming")
+    assert upcoming.status_code == 200
+    assert upcoming.json()["is_premium"] is configured
+    assert api_client.get("/health").json() == {"status": "healthy"}
 
 
 def test_loader_returns_empty_without_a_committed_release(monkeypatch):
