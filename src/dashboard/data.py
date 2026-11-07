@@ -1038,13 +1038,15 @@ def get_recent_predictions(
         return pd.DataFrame()
 
     bets = _expand_predictions(df)
+    if bets.empty:
+        return pd.DataFrame()
     
     # Filter out finished games (only show games where won is None/NaN)
     bets = bets[bets["won"].isna()]
 
     # 1. Filter for upcoming games
     # Use the _ensure_utc helper to safely compare times
-    now = datetime.now(timezone.utc)
+    now = pd.Timestamp.now(tz="UTC")
     
     # Create a mask for future games
     # We need to handle the case where commence_time might be a string or datetime
@@ -1098,7 +1100,7 @@ def get_recent_predictions(
     if "commence_time" in bets.columns:
         bets = bets.sort_values("commence_time", ascending=True, na_position='last')
         # Now convert to display timezone AFTER sorting
-        bets["commence_time"] = _convert_to_display_timezone(bets["commence_time"])
+        bets["commence_time"] = bets["commence_time"].dt.tz_convert(DISPLAY_TIMEZONE)
     else:
         bets = bets.sort_values("predicted_at", ascending=True, na_position='last')
 
