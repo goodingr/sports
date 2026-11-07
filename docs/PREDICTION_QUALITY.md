@@ -304,6 +304,11 @@ provider kickoff and both DraftKings price pairs against the retained original
 receipt. The API hides an active quote if that proof is missing or conflicts
 with the warehouse. The issued record keeps the original line and price.
 
+After an NBA totals rule passes prospective approval, the live publisher
+scores from the approved model digest and the current paired quotes in its
+warehouse. An explicit `--now` evaluation reads retained predictions at the
+specified time.
+
 The original price and line remain fixed in the record. Changed prices or
 opposite signals cannot replace an issued selection. Provider aliases representing
 the same ordered teams and nearby start cannot create a second issued bet.
