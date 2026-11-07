@@ -42,6 +42,7 @@ _BATCH_LEAD = _MIN_TO_START + timedelta(minutes=_SCHEDULE_INTERVAL_MINUTES + 3)
 _COOLDOWN = timedelta(minutes=15)
 _MAX_DAILY_REQUESTS = 3
 _CREDIT_RESERVE = 200
+_CLOSE_REQUEST_CREDITS = 1
 
 
 @dataclass(frozen=True)
@@ -279,7 +280,8 @@ def _provider_get(
 
 
 def _budgeted_key(
-    *, request_credits: int = 1, on_free_events: Callable[[requests.Response], None] | None = None
+    *, request_credits: int = _CLOSE_REQUEST_CREDITS,
+    on_free_events: Callable[[requests.Response], None] | None = None,
 ) -> str | None:
     keys = OddsAPIKeyManager.get_available_keys()
     index = OddsAPIKeyManager.get_current_index()

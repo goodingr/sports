@@ -222,6 +222,12 @@ The entry and closing collectors can both succeed on the same day without
 collecting anything, so their exit codes cannot confirm the daily capture.
 Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
 
+The Paper Trials dashboard also shows the balance from the latest
+checksum-verified NBA discovery receipt. The observation covers one provider
+key and is marked stale after 80 minutes. A closing request needs at least 201
+credits and an early entry request needs 202 to preserve the 200-credit
+reserve. Collectors check current balances before spending.
+
 The daily Windows and Linux pipelines log `NBA quote timing` after the paid
 gate or its skip. The report measures paper attempts and recorded decisions
 linked to the fresh receipt, and gives the receipt age at the paid command

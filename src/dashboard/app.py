@@ -24,6 +24,7 @@ from src.predict.paper_report import build_paper_report
 
 from . import components
 from .capture_health import daily_capture_card
+from .paper_quota import discovery_quota_card
 from .schedule_audit import schedule_coverage_cards
 from .data import (
     DEFAULT_EDGE_THRESHOLD,
@@ -847,6 +848,8 @@ def _paper_layout(pathname: str) -> dbc.Container:
             html.H3("Daily NBA capture", className="mt-4"),
             html.P("Checks the most recent daily run after its grace period."),
             dcc.Loading(html.Div(id="paper-daily-capture")),
+            html.H3("NBA collection quota", className="mt-4"),
+            dcc.Loading(html.Div(id="paper-discovery-quota")),
             html.H3("Official NBA schedule coverage", className="mt-4"),
             html.P("Saved audits compare the official slate with retained odds-provider evidence."),
             dcc.Loading(html.Div(id="paper-schedule-coverage")),
@@ -1032,6 +1035,11 @@ def show_daily_capture(_n_clicks: Optional[int]):
     return daily_capture_card(
         resolve_db_path(), PROJECT_ROOT / DEFAULT_RULES, datetime.now(timezone.utc)
     )
+
+
+@app.callback(Output("paper-discovery-quota", "children"), Input("refresh-paper", "n_clicks"))
+def show_discovery_quota(_n_clicks: Optional[int]):
+    return discovery_quota_card(resolve_db_path(), datetime.now(timezone.utc))
 
 
 @app.callback(Output("paper-schedule-coverage", "children"), Input("refresh-paper", "n_clicks"))

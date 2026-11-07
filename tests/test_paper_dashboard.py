@@ -76,6 +76,79 @@ def _record_run(path, fixtures=(), *, status="evaluated"):
         )
 
 
+@pytest.fixture
+def discovery_receipt(ledger):
+    with sqlite3.connect(ledger) as conn:
+        conn.executescript("""
+            CREATE TABLE data_sources (source_id, source_key);
+            CREATE TABLE source_files (source_id, captured_at, storage_path, hash);
+            INSERT INTO data_sources VALUES (1, 'the-odds-api-nba-events'), (2, 'the-odds-api-nba-entry-probe');
+        """)
+    directory = ledger.parent / "raw/odds/basketball_nba/events"
+    directory.mkdir(parents=True)
+
+    def record(balance, observed, *, source_id=1):
+        file = directory / f"receipt-{len(list(directory.iterdir()))}.json"
+        source = "the-odds-api-nba-events" if source_id == 1 else "the-odds-api-nba-entry-probe"
+        contents = json.dumps({
+            "source": source,
+            "fetched_at": observed.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/events"},
+            "results": [],
+            "rate_limit_remaining": balance,
+            "request_credits": 0,
+        }).encode()
+        file.write_bytes(contents)
+        with sqlite3.connect(ledger) as conn:
+            conn.execute(
+                "INSERT INTO source_files VALUES (?, ?, ?, ?)",
+                (source_id, observed.isoformat(), file.relative_to(ledger.parent).as_posix(),
+                 hashlib.sha256(contents).hexdigest()),
+            )
+        return file
+
+    return record
+
+
+@pytest.mark.parametrize(("balance", "status", "color"), [
+    ("200", "below both thresholds", "danger"),
+    ("201", "below the early entry threshold", "warning"),
+    ("202", "2 credits above the reserve", "secondary"),
+])
+def test_discovery_quota_uses_the_registered_balance_and_collector_minimums(discovery_receipt, balance, status, color):
+    discovery_receipt(balance, NOW - timedelta(minutes=8))
+    discovery_receipt("999", NOW - timedelta(minutes=3), source_id=2)
+    discovery_receipt("998", NOW + timedelta(minutes=2))
+
+    card = dashboard.show_discovery_quota(None)
+    text = _text(card)
+    assert "NBA collection quota" in _text(dashboard.render_page("/paper"))
+    assert f"{balance} credits reported" in text
+    assert "Nov 06, 10:52:00 PM EST" in text
+    assert "Reserve 200 · Closing requires 201 · Early entry requires 202" in text
+    assert status in text
+    assert card.color == color
+
+
+def test_discovery_quota_reads_a_stale_restored_receipt_and_rejects_a_newer_corrupt_one(
+    ledger, discovery_receipt,
+):
+    assert "No NBA discovery receipt" in _text(dashboard.show_discovery_quota(None))
+    original = discovery_receipt("298", NOW - timedelta(minutes=81))
+    create_evidence_zip(ledger.parent / EVIDENCE_ZIP, [("raw", ledger.parent / "raw")])
+    latest = discovery_receipt("297", NOW - timedelta(minutes=1))
+    latest.write_bytes(b"tampered")
+    assert "unavailable or unverified" in _text(dashboard.show_discovery_quota(None))
+    with sqlite3.connect(ledger) as conn:
+        conn.execute("DELETE FROM source_files WHERE storage_path=?", (latest.relative_to(ledger.parent).as_posix(),))
+    original.unlink()
+
+    card = dashboard.show_discovery_quota(None)
+    assert "298 credits reported" in _text(card)
+    assert "more than 80 minutes old" in _text(card)
+    assert card.color == "warning"
+
+
 def test_trial_card_shows_distinct_coverage_and_attempt_reasons(ledger):
     _record_run(
         ledger,

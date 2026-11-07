@@ -130,6 +130,27 @@ def _official_fixtures(raw: bytes, day: date) -> tuple[int, list[_Fixture]]:
         ) from None
 
 
+def read_verified_nba_events_receipt(
+    stored_path: str, data_dir: Path, *, source: str, observed: datetime, checksum: str
+) -> dict[str, Any]:
+    """Read the exact zero-credit receipt registered for an NBA events request."""
+    raw = read_raw_evidence(stored_path, data_dir)
+    if hashlib.sha256(raw).hexdigest() != checksum:
+        raise ValueError("Archived NBA events receipt checksum did not match")
+    payload = json.loads(raw)
+    if (
+        not isinstance(payload, dict)
+        or payload.get("source") != source
+        or _utc(payload.get("fetched_at")) != observed
+        or payload["request"]["url"] != _URL
+        or type(payload.get("request_credits")) is not int
+        or payload["request_credits"] != 0
+        or not isinstance(payload.get("results"), list)
+    ):
+        raise ValueError("Invalid archived NBA events receipt")
+    return payload
+
+
 def _provider_evidence(
     conn: sqlite3.Connection, data_dir: Path, since: datetime, now: datetime
 ) -> tuple[dict[tuple[str, str], list[_ProviderEvent]], dict[str, int]]:
@@ -159,27 +180,22 @@ def _provider_evidence(
     for row in captures:
         coverage["archives_checked"] += 1
         try:
-            raw = read_raw_evidence(row["raw_path"], data_dir)
-            payload = json.loads(raw)
             observed = _utc(row["observed_at"])
-            source = row["source"]
-            is_events = source in event_sources
-            if (
-                observed is None
-                or not since <= observed <= now
-                or _utc(payload.get("fetched_at")) != observed
-                or payload["request"]["url"] != (_URL if is_events else _ODDS_URL)
-                or not isinstance(payload["results"], list)
-                or (
-                    is_events
-                    and (
-                        payload.get("source") != source
-                        or payload.get("request_credits") != 0
-                        or hashlib.sha256(raw).hexdigest() != row["hash"]
-                    )
-                )
-            ):
+            if observed is None or not since <= observed <= now:
                 raise ValueError
+            source = row["source"]
+            if source in event_sources:
+                payload = read_verified_nba_events_receipt(
+                    row["raw_path"], data_dir, source=source, observed=observed, checksum=row["hash"]
+                )
+            else:
+                payload = json.loads(read_raw_evidence(row["raw_path"], data_dir))
+                if (
+                    _utc(payload.get("fetched_at")) != observed
+                    or payload["request"]["url"] != _ODDS_URL
+                    or not isinstance(payload["results"], list)
+                ):
+                    raise ValueError
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             coverage["archives_unavailable_or_invalid"] += 1
             continue
