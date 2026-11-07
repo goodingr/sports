@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 if (process.env.NODE_ENV === 'production') {
@@ -5,6 +6,9 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 export async function auth() {
+    if (process.env.PLAYWRIGHT_PILOT === '1' && (await cookies()).get('playwright-pilot-session')?.value === 'active') {
+        return { userId: 'user_pilot_fixture' };
+    }
     return { userId: null };
 }
 

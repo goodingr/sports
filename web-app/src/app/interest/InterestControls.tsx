@@ -51,7 +51,7 @@ function failureMessage(failure: InterestFailure): string {
         return "Verify your primary email address before allowing follow-up.";
     }
     if (failure.status === 401) {
-        return "Your sign-in has expired. Refresh this page and sign in again.";
+        return "Your sign-in has expired.";
     }
     if (failure.status === 404) {
         return "The interest form is currently unavailable.";
@@ -68,9 +68,11 @@ function failureMessage(failure: InterestFailure): string {
 export function InterestControls({
     source,
     enrollmentClosed,
+    signInHref,
 }: {
     source: string;
     enrollmentClosed: boolean;
+    signInHref: string;
 }) {
     const { openUserProfile } = useClerk();
     const [interest, setInterest] = useState<InterestState | null>(null);
@@ -108,7 +110,9 @@ export function InterestControls({
                 setNotice(state.contactAllowed ? "Email follow-up is allowed." : "Email follow-up permission was withdrawn.");
             }
         } catch (cause) {
-            setFailure(failureFor(action, cause));
+            const nextFailure = failureFor(action, cause);
+            if (nextFailure.status === 401) setInterest(null);
+            setFailure(nextFailure);
         } finally {
             setPending(null);
         }
@@ -162,6 +166,11 @@ export function InterestControls({
             {failure && (
                 <div className="space-y-2">
                     <p role="alert" className="text-sm text-danger">{failureMessage(failure)}</p>
+                    {failure.status === 401 && (
+                        <a href={signInHref} className="text-sm font-semibold text-primary underline">
+                            Sign in again
+                        </a>
+                    )}
                     {failure.action === "view" && failure.status !== 401 && failure.status !== 404 && (
                         <button
                             type="button"

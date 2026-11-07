@@ -32,6 +32,7 @@ export default async function InterestPage({ searchParams }: InterestPageProps) 
     const [{ userId }, params] = await Promise.all([auth(), searchParams]);
     const source = normalizeSource(params.source);
     const returnUrl = encodeURIComponent("/interest?source=" + source);
+    const signInHref = "/login?redirect_url=" + returnUrl;
 
     return (
         <Container className="max-w-2xl py-12 sm:py-16">
@@ -75,11 +76,11 @@ export default async function InterestPage({ searchParams }: InterestPageProps) 
                 )}
 
                 {userId ? (
-                    <InterestControls key={source} source={source} enrollmentClosed={enrollmentClosed} />
+                    <InterestControls key={source} source={source} enrollmentClosed={enrollmentClosed} signInHref={signInHref} />
                 ) : (
                     <div className="flex flex-wrap items-center gap-4 text-sm font-semibold">
                         <Link
-                            href={"/login?redirect_url=" + returnUrl}
+                            href={signInHref}
                             className="rounded-lg bg-primary px-4 py-2 text-primary-foreground"
                         >
                             {enrollmentClosed ? "Sign in to manage interest" : "Sign in to record interest"}
