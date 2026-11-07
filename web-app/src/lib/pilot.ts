@@ -4,9 +4,25 @@ export function isPilotOnly(): boolean {
 
 const APP_ORIGIN = /^https?:\/\/[^/?#@\\\s]+\/?$/i;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
 
-function hasKeyPrefix(key: string | undefined, prefix: string): boolean {
+function hasKeyPrefix(key: string | undefined, prefix: string): key is string {
     return !!key && key.startsWith(prefix) && key.length > prefix.length && !/\s/.test(key);
+}
+
+function hasPublishableKey(key: string | undefined, mode: "live" | "test"): boolean {
+    const prefix = `pk_${mode}_`;
+    if (!hasKeyPrefix(key, prefix)) return false;
+    try {
+        // Clerk encodes its frontend API hostname followed by a dollar sign.
+        const decoded = atob(key.slice(prefix.length));
+        if (!decoded.endsWith("$")) return false;
+        const hostname = decoded.slice(0, -1);
+        const labels = hostname.split(".");
+        return hostname.length <= 253 && labels.length > 1 && labels.every((label) => DNS_LABEL.test(label));
+    } catch {
+        return false;
+    }
 }
 
 export function isInterestConfigurationReady(): boolean {
@@ -26,7 +42,7 @@ export function isInterestConfigurationReady(): boolean {
     }
 
     const keyMode = mode === "live" ? "live" : "test";
-    return hasKeyPrefix(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, `pk_${keyMode}_`)
+    return hasPublishableKey(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, keyMode)
         && hasKeyPrefix(process.env.CLERK_SECRET_KEY, `sk_${keyMode}_`);
 }
 

@@ -85,7 +85,13 @@ The pilot root forwards source tags to `/interest`. Check that `/?source=referra
 
 For a hosted Next.js service, build from `web-app` with `npm ci && npm run build`, then start with `npm run start`. Set `COMMERCIAL_PILOT_ONLY=true`, `COMMERCIAL_PILOT_CONTACT_EMAIL`, `NEXT_PUBLIC_APP_URL`, and the public Clerk key at build time. Provide the same settings at runtime, plus `COMMERCIAL_INTEREST_ENABLED=true`, `CLERK_SECRET_KEY`, and the `/login` and `/signup` Clerk routes.
 
-Production interest requests default to `COMMERCIAL_PILOT_MODE=live`. They require an explicit non-loopback HTTPS origin such as `https://pilot.example.com` and a `pk_live_` / `sk_live_` key pair. The pilot returns 503 for invalid configuration and the Compose health check requires a 200 from `/interest`. Verify sign-in using the intended production Clerk instance before recruitment.
+Production interest requests default to `COMMERCIAL_PILOT_MODE=live`. They require an explicit non-loopback HTTPS origin such as `https://pilot.example.com`, a `pk_live_` publishable key with a valid Clerk hostname encoding, and an `sk_live_` secret key. The pilot returns 503 when these checks fail. Compose requires an exact HTTP 200 from the signed-out `/interest` page to check that the web app is up. A passing check leaves the credential pairing and authenticated writes unverified.
+
+Before recruiting, use a dedicated operator-controlled account in the production Clerk instance intended for the paid app. Keep this account out of the screened roster and exclude it from reports.
+
+1. Open `/?source=referral` on the final public HTTPS domain in a fresh browser session. Sign in and confirm that Clerk returns to the $29 offer with `source=referral`.
+2. Record price interest without allowing email follow-up. Reload the offer and verify the recorded state. In the intended production Clerk account, verify `privateMetadata.commercialPriceInterest` has offer version `premium-29-usd-monthly-v1`, `source=referral`, `viewedAt` and `joinedAt` timestamps, and `contactConsent.active=false`.
+3. Withdraw interest. Reload to confirm the withdrawal and verify `withdrawnAt` is set in the same Clerk record and email permission is inactive. Resolve any failure before opening the pilot to participants.
 
 For a local rehearsal or restricted preview, explicitly set `COMMERCIAL_PILOT_MODE=preview` at runtime and use a test key pair. HTTPS works for a packaged TLS rehearsal. A direct loopback Next.js preview can also use an HTTP origin. Restrict host access and account registration for invitation-only previews. [Clerk production setup](https://clerk.com/docs/guides/development/deployment/production) · [Clerk environments](https://clerk.com/docs/guides/development/managing-environments) · [Clerk access settings](https://clerk.com/docs/guides/secure/restricting-access)
 

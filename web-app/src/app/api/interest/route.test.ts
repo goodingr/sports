@@ -15,6 +15,8 @@ import { POST } from "./route";
 
 const origin = "https://sports.example";
 const key = "commercialPriceInterest";
+const livePublishableKey = `pk_live_${btoa("clerk.separate-fixture.example.invalid$")}`;
+const testPublishableKey = `pk_test_${btoa("test-fixture.clerk.accounts.dev$")}`;
 const view = {
     offerVersion: "premium-29-usd-monthly-v1",
     viewedAt: "2026-11-06T23:00:00.000Z",
@@ -92,17 +94,22 @@ describe("price-interest API", () => {
     });
 
     it.each([
-        ["test keys in default live mode", undefined, origin, "pk_test_fixture", "sk_test_fixture"],
-        ["mixed key modes", undefined, origin, "pk_live_fixture", "sk_test_fixture"],
-        ["empty key suffix", undefined, origin, "pk_live_fixture", "sk_live_"],
-        ["missing configured origin", undefined, undefined, "pk_live_fixture", "sk_live_fixture"],
-        ["HTTP live origin", undefined, "http://sports.example", "pk_live_fixture", "sk_live_fixture"],
-        ["loopback HTTPS live origin", undefined, "https://localhost", "pk_live_fixture", "sk_live_fixture"],
-        ["origin with a path", undefined, `${origin}/interest`, "pk_live_fixture", "sk_live_fixture"],
-        ["origin with user info", undefined, "https://person@sports.example", "pk_live_fixture", "sk_live_fixture"],
-        ["unknown mode", "staging", origin, "pk_live_fixture", "sk_live_fixture"],
-        ["preview with live keys", "preview", origin, "pk_live_fixture", "sk_live_fixture"],
-        ["preview with public HTTP", "preview", "http://sports.example", "pk_test_fixture", "sk_test_fixture"],
+        ["test keys in default live mode", undefined, origin, testPublishableKey, "sk_test_fixture"],
+        ["mixed key modes", undefined, origin, livePublishableKey, "sk_test_fixture"],
+        ["empty key suffix", undefined, origin, livePublishableKey, "sk_live_"],
+        ["missing configured origin", undefined, undefined, livePublishableKey, "sk_live_fixture"],
+        ["HTTP live origin", undefined, "http://sports.example", livePublishableKey, "sk_live_fixture"],
+        ["loopback HTTPS live origin", undefined, "https://localhost", livePublishableKey, "sk_live_fixture"],
+        ["origin with a path", undefined, `${origin}/interest`, livePublishableKey, "sk_live_fixture"],
+        ["origin with user info", undefined, "https://person@sports.example", livePublishableKey, "sk_live_fixture"],
+        ["unknown mode", "staging", origin, livePublishableKey, "sk_live_fixture"],
+        ["preview with live keys", "preview", origin, livePublishableKey, "sk_live_fixture"],
+        ["preview with public HTTP", "preview", "http://sports.example", testPublishableKey, "sk_test_fixture"],
+        ["placeholder public key", undefined, origin, "pk_live_replace_me", "sk_live_fixture"],
+        ["missing frontend delimiter", undefined, origin, `pk_live_${btoa("clerk.example.invalid")}`, "sk_live_fixture"],
+        ["multiple frontend delimiters", undefined, origin, `pk_live_${btoa("clerk.example.invalid$$")}`, "sk_live_fixture"],
+        ["frontend key with a path", undefined, origin, `pk_live_${btoa("clerk.example.invalid/path$")}`, "sk_live_fixture"],
+        ["invalid preview frontend host", "preview", origin, `pk_test_${btoa("clerk.-example.invalid$")}`, "sk_test_fixture"],
     ])("rejects %s before any Clerk calls in production", async (_, mode, appUrl, publicKey, secretKey) => {
         vi.stubEnv("NODE_ENV", "production");
         vi.stubEnv("COMMERCIAL_PILOT_MODE", mode);
@@ -128,7 +135,7 @@ describe("price-interest API", () => {
         vi.stubEnv("NODE_ENV", "production");
         vi.stubEnv("COMMERCIAL_PILOT_MODE", mode);
         vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
-        vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", `pk_${keyMode}_fixture`);
+        vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", keyMode === "live" ? livePublishableKey : testPublishableKey);
         vi.stubEnv("CLERK_SECRET_KEY", `sk_${keyMode}_fixture`);
         updateUserMetadata.mockResolvedValue(clerkUser({
             ...view, joinedAt: view.viewedAt, contactConsent: { active: false },
