@@ -467,10 +467,11 @@ poetry run python -m src.data.ingest_nba_events
 poetry run python -m src.data.ingest_nba_events --collect --observe-paper
 ```
 
-On Windows, `scripts/install_paper_close_task.ps1 -Discover` previews the hourly
-`SportsPaperNBAEvents` task. Add `-Apply` to register it. It runs at ten minutes
-past the hour and expires at the capture deadline. It retains the known windows
-for the configured paper trial and writes `logs/paper_events_YYYYMMDD.log`.
+On Windows, `scripts/install_paper_close_task.ps1 -Discover` previews the
+`SportsPaperNBAEvents` task. Add `-Apply` to register it. It checks at 10, 25,
+40, and 55 minutes past the hour while limiting provider requests to one per
+rolling hour. It expires at the capture deadline, retains the known windows for
+the configured paper trial, and writes `logs/paper_events_YYYYMMDD.log`.
 
 Use the official schedule audit to measure games missing from the provider feed.
 It compares scheduled regular-season games on the NBA Eastern slate date with
@@ -486,6 +487,11 @@ poetry run python -m src.data.audit_nba_schedule --date 2026-11-08 --fetch
 For an offline replay, replace `--fetch` with `--fixture` pointing to saved NBA
 HTML or Next.js JSON, and provide its original observation time via
 `--fixture-observed-at`.
+
+Add `--save` to retain the audit for the internal `/paper` dashboard. Its
+coverage panel shows the latest saved reports for today and tomorrow in Eastern
+time. It shows the schedule and warehouse timestamps separately and marks
+observations over six hours old. The dashboard refresh reads those files.
 
 Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
 grades April 19 at midnight Eastern time and requires at least 150 graded

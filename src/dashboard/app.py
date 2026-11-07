@@ -16,12 +16,14 @@ import yaml
 from dash import Dash, Input, Output, State, dcc, html, ctx, no_update
 from dash.exceptions import PreventUpdate
 
+from src.data.audit_nba_schedule import AUDIT_REPORTS_DIR
 from src.data.config import PROJECT_ROOT
 from src.db.core import resolve_db_path
 from src.predict.paper_ledger import DEFAULT_RULES, load_trial
 from src.predict.paper_report import build_paper_report
 
 from . import components
+from .schedule_audit import schedule_coverage_cards
 from .data import (
     DEFAULT_EDGE_THRESHOLD,
     DEFAULT_STAKE,
@@ -841,6 +843,9 @@ def _paper_layout(pathname: str) -> dbc.Container:
             html.P("Tracks pregame decisions and settlements in the internal research ledger."),
             dbc.Button("Refresh trial evidence", id="refresh-paper", className="mb-3"),
             dcc.Loading(html.Div(id="paper-trials")),
+            html.H3("Official NBA schedule coverage", className="mt-4"),
+            html.P("Saved audits compare the official slate with retained odds-provider evidence."),
+            dcc.Loading(html.Div(id="paper-schedule-coverage")),
         ],
         fluid=True,
     )
@@ -1016,6 +1021,11 @@ def show_paper_trials(_n_clicks: Optional[int]):
             )
         )
     return cards
+
+
+@app.callback(Output("paper-schedule-coverage", "children"), Input("refresh-paper", "n_clicks"))
+def show_schedule_coverage(_n_clicks: Optional[int]):
+    return schedule_coverage_cards(AUDIT_REPORTS_DIR, datetime.now(timezone.utc))
 
 
 @app.callback(

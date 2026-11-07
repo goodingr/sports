@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from src.dashboard import app as dashboard
+from src.data.audit_nba_schedule import save_schedule_audit
 from src.predict.paper_ledger import SCHEMA_PATH, load_trial
 
 NOW = datetime(2026, 11, 7, 4, 0, tzinfo=timezone.utc)
@@ -171,3 +172,63 @@ def test_missing_or_invalid_config_leaves_the_ledger_usable(ledger, config_conte
     assert "No configured capture trial matches the ledger." in text
     assert "Retained registration Collecting" in text
     assert "Trial nba" in text
+
+
+def _schedule_report(*, audited_at=NOW, observed_at=NOW, linked=False):
+    day = NOW.astimezone(dashboard.DISPLAY_TIMEZONE).date() + timedelta(days=1)
+    return {
+        "report_version": 1,
+        "trial_id": "nba_test",
+        "eastern_date": day.isoformat(),
+        "warehouse_audited_at_utc": audited_at.isoformat(),
+        "official_source": {"observed_at_utc": observed_at.isoformat()},
+        "scheduled_regular_season_games": 1,
+        "provider_observed": int(linked),
+        "provider_linked": int(linked),
+        "warehouse_matched": int(linked),
+        "provider_evidence": {"archives_checked": 1, "archives_unavailable_or_invalid": 0},
+        "fixtures": [
+            {
+                "away": "DEN", "home": "IND", "early_entry": True,
+                "official_start_utc": (NOW + timedelta(hours=21)).isoformat(),
+                "warehouse_matched": linked, "provider_linked": linked,
+                "status": "linked" if linked else "missing_warehouse_fixture",
+                "deadline_passed": False,
+            },
+        ],
+    }
+
+
+def test_schedule_panel_reads_latest_saved_audit_and_explains_early_gaps(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard, "AUDIT_REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(dashboard, "datetime", FixedClock)
+    earlier = NOW - timedelta(hours=1)
+    old_path = save_schedule_audit(_schedule_report(audited_at=earlier, observed_at=earlier, linked=True), tmp_path)
+    latest_path = save_schedule_audit(_schedule_report(), tmp_path)
+    assert old_path.exists() and latest_path.exists() and old_path < latest_path
+
+    text = _text(dashboard.show_schedule_coverage(None))
+    assert "No saved audit for Nov 06" in text
+    assert "Verified provider links 0 of 1" in text
+    assert "Provider observed 0 of 1" in text
+    assert "Early starts without a verified link 1" in text
+    assert "DEN at IND" in text
+    assert "Missing warehouse fixture · Early start" in text
+    assert "Official schedule observed Nov 06, 11:00 PM EST" in text
+
+
+def test_schedule_panel_flags_old_or_unusable_audit(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard, "AUDIT_REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(dashboard, "datetime", FixedClock)
+    old = NOW - timedelta(hours=7)
+    report = _schedule_report(audited_at=old, observed_at=old)
+    report["provider_evidence"]["archives_unavailable_or_invalid"] = 1
+    path = save_schedule_audit(report, tmp_path)
+    text = _text(dashboard.show_schedule_coverage(None))
+    assert "Saved audit is more than six hours old" in text
+    assert "Provider archives unavailable or invalid · 1" in text
+
+    path.write_text("{}", encoding="utf-8")
+    text = _text(dashboard.show_schedule_coverage(None))
+    assert "Saved audit for Nov 07 is unavailable" in text
+    assert "Verified provider links" not in text

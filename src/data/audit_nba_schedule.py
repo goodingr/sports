@@ -12,13 +12,15 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import requests
 
 from scripts.backup_evidence import read_raw_evidence
-from src.data.config import load_env
+from src.data.config import PROJECT_ROOT, load_env
 from src.data.ingest_nba_events import _EVENT_ID, _SOURCE, _SPORT, _URL, _utc
 from src.data.team_mappings import NBA_ALIASES
 from src.db.core import resolve_db_path
@@ -28,6 +30,7 @@ from src.predict.paper_settlement import _START_TOLERANCE
 
 _EASTERN = ZoneInfo("America/New_York")
 _NBA_GAMES = "https://www.nba.com/games"
+AUDIT_REPORTS_DIR = PROJECT_ROOT / "reports" / "paper_schedule_audit"
 _ODDS_URL = f"https://api.the-odds-api.com/v4/sports/{_SPORT}/odds"
 _NBA_GAME_ID = re.compile(r"[0-9]{10}")
 _NEXT_DATA = re.compile(
@@ -372,6 +375,8 @@ def audit_schedule(
             conn, day, fixtures, provider, now, timedelta(minutes=trial.min_minutes_before_start)
         )
     return {
+        "report_version": 1,
+        "trial_id": trial.trial_id,
         "eastern_date": day.isoformat(),
         "warehouse_audited_at_utc": now.isoformat(),
         "official_source": {
@@ -404,6 +409,28 @@ def audit_schedule(
     }
 
 
+def save_schedule_audit(report: dict[str, Any], directory: Path = AUDIT_REPORTS_DIR) -> Path:
+    """Atomically retain a dated audit without overwriting other observations."""
+    day = date.fromisoformat(report["eastern_date"])
+    audited_at = _utc(report["warehouse_audited_at_utc"])
+    if audited_at is None:
+        raise ValueError("Audit time must include a time zone")
+    day_dir = directory / day.isoformat()
+    day_dir.mkdir(parents=True, exist_ok=True)
+    path = day_dir / f"{audited_at:%Y%m%dT%H%M%S%fZ}-{uuid4().hex}.json"
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=day_dir, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(report, stream, indent=2, allow_nan=False)
+            stream.write("\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -415,6 +442,7 @@ def main() -> None:
     parser.add_argument(
         "--fixture-observed-at", help="Original ISO 8601 observation time for a local fixture"
     )
+    parser.add_argument("--save", action="store_true", help="Save this audit for the paper dashboard")
     args = parser.parse_args()
     load_env()
     observed_at = _utc(args.fixture_observed_at)
@@ -427,6 +455,8 @@ def main() -> None:
             fixture_path=args.fixture,
             fixture_observed_at=observed_at,
         )
+        if args.save:
+            save_schedule_audit(result)
     except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
         parser.exit(1, f"{exc}\n")
     print(json.dumps(result, indent=2))

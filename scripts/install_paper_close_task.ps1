@@ -86,7 +86,8 @@ $metadata = ($metadataOutput -join [Environment]::NewLine) | ConvertFrom-Json -E
 $deadline = if ($Entry -or $Discover) { $metadata.review_at } else { $metadata.end_boundary }
 $expiresAt = [DateTimeOffset]::Parse($deadline).ToLocalTime()
 $offsetMinutes = if ($Discover) { 10 } elseif ($Entry) { 5 } else { 0 }
-$intervalMinutes = if ($Discover) { 60 } else { 15 }
+# The discovery collector enforces its hourly request limit in the warehouse.
+$intervalMinutes = 15
 $phaseTicks = [TimeSpan]::FromMinutes($offsetMinutes).Ticks
 $interval = [TimeSpan]::FromMinutes($intervalMinutes)
 $startsAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
