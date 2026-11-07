@@ -39,7 +39,7 @@ def fetch_scores(league: str, days_from: int = 3, dotenv_path: Optional[Path] = 
 
     sport_key = _get_sport_key(league)
     url = f"{settings.base_url}/sports/{sport_key}/scores/"
-    params = {
+    params: dict[str, str | int] = {
         "apiKey": settings.api_key,
         "daysFrom": min(max(1, days_from), 3), # API limit is usually 3 days for free/standard
         "dateFormat": "iso"
@@ -54,15 +54,19 @@ def fetch_scores(league: str, days_from: int = 3, dotenv_path: Optional[Path] = 
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
-            if isinstance(exc, requests.HTTPError) and response.status_code == 401:
-                LOGGER.warning("Odds API returned 401 Unauthorized with key ending in ...%s", params["apiKey"][-4:])
+            status = exc.response.status_code if exc.response is not None else None
+            if status == 401:
+                LOGGER.warning("Odds API returned 401 Unauthorized while fetching %s scores", league)
                 if attempt < max_attempts - 1:
                     LOGGER.info("Rotating API key and retrying...")
                     OddsAPIKeyManager.rotate_key()
                     continue
             
             # Non-401 error or exhausted retries
-            LOGGER.warning("Failed to fetch %s scores from The Odds API: %s", league, exc)
+            LOGGER.warning(
+                "Failed to fetch %s scores from The Odds API (%s, status=%s)",
+                league, type(exc).__name__, status,
+            )
             return []
     return []
 
@@ -87,16 +91,19 @@ def _nba_final_scores(event: dict, names: tuple[str, str]) -> tuple[int, int] | 
     }
     if values.keys() != set(names):
         return None
-    raw_home, raw_away = (values[name] for name in names)
-    if not all(
-        type(value) is int or isinstance(value, str) and value.isdecimal()
-        for value in (raw_home, raw_away)
-    ):
-        return None
-    try:
-        home, away = int(raw_home), int(raw_away)
-    except ValueError:
-        return None
+    parsed = []
+    for name in names:
+        value = values[name]
+        if type(value) is int:
+            parsed.append(value)
+        elif isinstance(value, str) and value.isdecimal():
+            try:
+                parsed.append(int(value))
+            except ValueError:
+                return None
+        else:
+            return None
+    home, away = parsed
     return (home, away) if 0 <= home < 2**63 and 0 <= away < 2**63 and home != away else None
 
 
@@ -129,15 +136,17 @@ def _update_nba_scores(scores_data: List[Dict]) -> int:
             if not isinstance(event, dict) or event.get("sport_key") != _get_sport_key("NBA"):
                 continue
             event_id, completed = event.get("id"), event.get("completed")
-            names = event.get("home_team"), event.get("away_team")
+            home, away = event.get("home_team"), event.get("away_team")
             if (
                 not isinstance(event_id, str)
                 or not event_id.strip()
                 or event_counts[event_id] != 1
                 or type(completed) is not bool
-                or not all(isinstance(name, str) for name in names)
+                or not isinstance(home, str)
+                or not isinstance(away, str)
             ):
                 continue
+            names = home, away
             home_code, away_code = (_NBA_TEAM_CODES.get(name.strip().lower()) for name in names)
             if not home_code or not away_code or home_code == away_code:
                 continue
@@ -400,7 +409,7 @@ def main():
     leagues = args.leagues or SUPPORTED_LEAGUES
     # Handle comma-separated strings if passed as a single argument
     if len(leagues) == 1 and "," in leagues[0]:
-        leagues = [l.strip() for l in leagues[0].split(",")]
+        leagues = [league.strip() for league in leagues[0].split(",")]
         
     run(
         leagues,

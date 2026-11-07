@@ -45,7 +45,7 @@ def fetch_espn_scoreboard(league: str, target_date: date, *, timeout: int = 30) 
     if not path:
         raise ValueError(f"Unsupported ESPN score league: {league}")
 
-    params = {"dates": target_date.strftime("%Y%m%d"), "limit": 1000}
+    params: dict[str, str | int] = {"dates": target_date.strftime("%Y%m%d"), "limit": 1000}
     if league_upper == "NCAAB":
         params["groups"] = 50
 

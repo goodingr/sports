@@ -3,11 +3,35 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import requests
 
 from src.data import ingest_scores, score_backfill
 from src.db.core import connect, initialize
 from src.predict.paper_ledger import SCHEMA_PATH as PAPER_SCHEMA_PATH
 from src.predict.paper_settlement import settle_open_trials, unreconciled_grades
+
+
+def test_score_fetch_logs_status_without_credentials(monkeypatch, caplog):
+    keys = ["first-test-credential", "second-test-credential"]
+    active = keys.copy()
+    manager = ingest_scores.OddsAPIKeyManager
+    monkeypatch.setattr(ingest_scores.OddsAPISettings, "from_env", lambda _: ingest_scores.OddsAPISettings(keys[0]))
+    monkeypatch.setattr(manager, "get_available_keys", lambda: keys)
+    monkeypatch.setattr(manager, "get_current_key", lambda: active[0])
+    monkeypatch.setattr(manager, "rotate_key", lambda: active.pop(0))
+
+    def get(url, *, params, timeout):
+        response = requests.Response()
+        response.status_code = 401 if params["apiKey"] == keys[0] else 503
+        response.url = f"{url}?apiKey={params['apiKey']}"
+        return response
+
+    monkeypatch.setattr(ingest_scores.requests, "get", get)
+
+    assert ingest_scores.fetch_scores("NBA") == []
+    assert "401 Unauthorized" in caplog.text
+    assert "status=503" in caplog.text
+    assert "credential" not in caplog.text
 
 
 @pytest.mark.parametrize("status, expected_updates", [("scheduled", 1), ("voided", 0)])
