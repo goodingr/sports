@@ -434,6 +434,8 @@ def _append_entry_quotes(
     snapshot_id: str,
     raw_path: Path,
     window: FallbackPlan | None = None,
+    *,
+    rejections: Counter[str] | None = None,
 ) -> tuple[dict[str, _ClosingFixture], dict[str, datetime]]:
     if window is not None and due:
         raise RuntimeError("An official NBA entry window cannot be combined with a targeted batch")
@@ -468,6 +470,13 @@ def _append_entry_quotes(
             and event["id"] in candidates
         ]
         counts = Counter(event["id"] for event in requested)
+        if rejections is not None:
+            rejections.update({
+                "missing_event": len(candidates) - len(counts),
+                "duplicate_event": sum(count > 1 for count in counts.values()),
+                "invalid_or_missing_pair": 0,
+                "fixture_or_clock_rejected": 0,
+            })
         for event in requested:
             event_id = event["id"]
             if counts[event_id] != 1:
@@ -477,13 +486,20 @@ def _append_entry_quotes(
             totals = _totals_pair(event)
             provider_start = _utc_timestamp(event.get("commence_time"))
             if totals is None or provider_start is None:
+                if rejections is not None:
+                    reason = "invalid_or_missing_pair" if totals is None else "fixture_or_clock_rejected"
+                    rejections[reason] += 1
                 continue
             if match is None:
                 if not _matches_fixture(conn, event, fixture, fetched_at):
+                    if rejections is not None:
+                        rejections["fixture_or_clock_rejected"] += 1
                     continue
                 game = _eligible_game(conn, fixture.game_id, trial.league)
                 current_start = _utc_timestamp(game["start_time_utc"]) if game is not None else None
                 if current_start is None:
+                    if rejections is not None:
+                        rejections["fixture_or_clock_rejected"] += 1
                     continue
                 earliest_start = min(fixture.start, provider_start, current_start)
                 latest_start = max(provider_start, current_start)
@@ -495,6 +511,9 @@ def _append_entry_quotes(
                 or earliest_start - fetched_at < minimum_lead
                 or latest_start - minimum_lead >= daily_capture
             ):
+                if rejections is not None:
+                    reason = "invalid_or_missing_pair" if moneyline is None else "fixture_or_clock_rejected"
+                    rejections[reason] += 1
                 continue
             if match is not None:
                 if not _valid_window_market_clocks(event, trial.book, fetched_at):
@@ -860,9 +879,25 @@ def poll_entry(
         raw_path = write_snapshot(archive, directory)
     except OSError as exc:
         raise RuntimeError("Could not archive the entry odds response") from exc
-    due, quoted = _append_entry_quotes(
-        path, trial, payload, due, fetched_at, snapshot_id, raw_path, window
-    )
+    rejections: Counter[str] | None = Counter() if window is None else None
+    attachment: dict[str, object] = {
+        "status": "attachment_failed",
+        "mode": "targeted" if window is None else "official_window",
+        "snapshot_id": snapshot_id,
+        "raw_path": str(raw_path),
+        "fetched_at_utc": fetched_at.isoformat(),
+    }
+    try:
+        due, quoted = _append_entry_quotes(
+            path, trial, payload, due, fetched_at, snapshot_id, raw_path, window,
+            rejections=rejections,
+        )
+        # The append has committed. Report only verified counts for window matches.
+        attachment.update(
+            status="attachment_complete", counts={"loaded": len(quoted), **(rejections or {})}
+        )
+    finally:
+        LOGGER.info("NBA entry quote attachment %s", json.dumps(attachment, sort_keys=True))
 
     recorded = (
         _capture(path, trial, engine, due, quoted, dict.fromkeys(quoted, snapshot_id)) if due else 0

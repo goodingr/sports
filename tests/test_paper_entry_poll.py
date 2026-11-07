@@ -1,6 +1,8 @@
 """Exercise the morning NBA collector with a frozen clock and no live requests."""
 
 import json
+import logging
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +18,12 @@ from src.predict.paper_close_poll import OddsAPIKeyManager
 from src.predict.storage import load_games_from_database
 
 NOW = datetime(2026, 11, 7, 21, tzinfo=timezone.utc)
+
+
+def _attachment_trace(caplog):
+    prefix = "NBA entry quote attachment "
+    [line] = [record.message for record in caplog.records if record.message.startswith(prefix)]
+    return json.loads(line.removeprefix(prefix))
 
 
 def _unexpected(*args, **kwargs):
@@ -203,7 +211,7 @@ def test_read_only_trigger_limits_and_evening_boundary(warehouse):
         assert not paper_entry_poll._has_table(conn, "paper_entry_requests")
 
 
-def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeypatch):
+def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeypatch, caplog):
     path, raw, events, _, predictions = warehouse
     events[0]["commence_time"] = (NOW + timedelta(minutes=69)).isoformat()
     _seed_quotes(events[2:])  # The model double returns this valid evening prediction too.
@@ -226,6 +234,7 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
 
     monkeypatch.setattr(paper_entry_poll, "_budgeted_key", budget)
     monkeypatch.setattr(paper_entry_poll, "_provider_get", provider)
+    caplog.set_level(logging.INFO, logger=paper_entry_poll.__name__)
     assert paper_entry_poll.poll_entry(collect=True) == {
         "status": "collected",
         "due_events": 2,
@@ -280,6 +289,18 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
     raw_json = archived.read_text(encoding="utf-8")
     assert "test-key" not in raw_json
     assert json.loads(raw_json)["results"] == events
+    assert _attachment_trace(caplog) == {
+        "status": "attachment_complete",
+        "mode": "targeted",
+        "snapshot_id": snapshot["snapshot_id"],
+        "raw_path": str(archived),
+        "fetched_at_utc": NOW.isoformat(),
+        "counts": {
+            "loaded": 2, "missing_event": 0, "duplicate_event": 0,
+            "invalid_or_missing_pair": 0, "fixture_or_clock_rejected": 0,
+        },
+    }
+    assert "test-key" not in caplog.text
 
 
 @pytest.mark.parametrize("probe_cost", ["0", "1", None])
@@ -640,7 +661,7 @@ def test_failed_paid_request_consumes_eastern_date_cap(warehouse, monkeypatch):
         )
 
 
-def test_malformed_and_duplicate_event_stay_in_raw_archive_only(warehouse, monkeypatch):
+def test_malformed_and_duplicate_event_stay_in_raw_archive_only(warehouse, monkeypatch, caplog):
     path, raw, events, _, predictions = warehouse
     events[1]["bookmakers"][0]["markets"][0]["outcomes"].pop()
     payload = [events[0], events[0], events[1], events[2]]
@@ -648,6 +669,7 @@ def test_malformed_and_duplicate_event_stay_in_raw_archive_only(warehouse, monke
     monkeypatch.setattr(
         paper_entry_poll, "_provider_get", lambda endpoint, params: _response(payload)
     )
+    caplog.set_level(logging.INFO, logger=paper_entry_poll.__name__)
     result = paper_entry_poll.poll_entry(collect=True)
     assert result["status"] == "no_entry_quotes"
     assert result["events_loaded"] == 0
@@ -658,9 +680,17 @@ def test_malformed_and_duplicate_event_stay_in_raw_archive_only(warehouse, monke
         assert conn.execute("SELECT count(*) FROM paper_decisions").fetchone()[0] == 0
     [archived] = raw.rglob("odds_*.json")
     assert json.loads(archived.read_text(encoding="utf-8"))["results"] == payload
+    trace = _attachment_trace(caplog)
+    assert trace["raw_path"] == str(archived)
+    assert trace["snapshot_id"] == archived.parent.name
+    assert trace["counts"] == {
+        "loaded": 0, "missing_event": 0, "duplicate_event": 1,
+        "invalid_or_missing_pair": 1, "fixture_or_clock_rejected": 0,
+    }
 
 
-def test_partial_batch_drops_quote_inside_provider_lead(warehouse, monkeypatch):
+@pytest.mark.parametrize("returned", [True, False])
+def test_partial_batch_keeps_rejection_reason(warehouse, monkeypatch, caplog, returned):
     path, _, events, _, predictions = warehouse
     with connect(path) as conn:
         conn.execute(
@@ -668,10 +698,12 @@ def test_partial_batch_drops_quote_inside_provider_lead(warehouse, monkeypatch):
             ((NOW + timedelta(minutes=20)).isoformat(),),
         )
     events[1]["commence_time"] = (NOW + timedelta(minutes=14)).isoformat()
+    payload = events if returned else [events[0], events[2]]
     monkeypatch.setattr(paper_entry_poll, "_budgeted_key", lambda **kwargs: "test-key")
     monkeypatch.setattr(
-        paper_entry_poll, "_provider_get", lambda endpoint, params: _response(events)
+        paper_entry_poll, "_provider_get", lambda endpoint, params: _response(payload)
     )
+    caplog.set_level(logging.INFO, logger=paper_entry_poll.__name__)
     result = paper_entry_poll.poll_entry(collect=True)
     assert (result["due_events"], result["events_loaded"], result["decisions_recorded"]) == (
         2,
@@ -679,6 +711,10 @@ def test_partial_batch_drops_quote_inside_provider_lead(warehouse, monkeypatch):
         1,
     )
     assert predictions == [{"early-one"}]
+    assert _attachment_trace(caplog)["counts"] == {
+        "loaded": 1, "missing_event": int(not returned), "duplicate_event": 0,
+        "invalid_or_missing_pair": 0, "fixture_or_clock_rejected": int(returned),
+    }
     with connect(path) as conn:
         assert [row[0] for row in conn.execute("SELECT DISTINCT game_id FROM odds")] == [
             "early-one"
@@ -687,6 +723,32 @@ def test_partial_batch_drops_quote_inside_provider_lead(warehouse, monkeypatch):
             "early-one": "recorded",
             "early-two": "prediction_missing",
         }
+
+
+def test_attachment_write_failure_logs_original_receipt_and_propagates(warehouse, monkeypatch, caplog):
+    path, raw, events, _, predictions = warehouse
+    with connect(path) as conn:
+        conn.execute("""
+            CREATE TRIGGER reject_entry_odds BEFORE INSERT ON odds
+            BEGIN SELECT RAISE(ABORT, 'synthetic odds write failure'); END
+        """)
+    monkeypatch.setattr(paper_entry_poll, "_budgeted_key", lambda **kwargs: "test-key")
+    monkeypatch.setattr(paper_entry_poll, "_provider_get", lambda endpoint, params: _response(events))
+    caplog.set_level(logging.INFO, logger=paper_entry_poll.__name__)
+
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic odds write failure"):
+        paper_entry_poll.poll_entry(collect=True)
+
+    trace = _attachment_trace(caplog)
+    [archived] = raw.rglob("odds_*.json")
+    assert trace["status"] == "attachment_failed"
+    assert trace["raw_path"] == str(archived)
+    assert trace["snapshot_id"] == archived.parent.name
+    assert "counts" not in trace
+    assert not predictions
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM odds_snapshots").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
 
 
 def test_changed_rules_are_rejected_in_preview_before_model_or_provider(warehouse):
