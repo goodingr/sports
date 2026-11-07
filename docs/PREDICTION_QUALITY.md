@@ -1,9 +1,9 @@
 # Prediction Quality Gates
 
-Paid picks are blocked until a predeclared betting rule passes the quality report.
-The current quality workflow is intentionally conservative: rules in
-`config/published_rules.yml` are candidates until enough out-of-sample evidence
-exists.
+Paid picks require an approved rule backed by a completed prospective paper
+trial. Candidate quality reports support research and selection of future trials.
+The publisher evaluates the frozen paper review against the current launch
+thresholds and its exact model and execution contract.
 
 ## Run The Report
 
@@ -269,19 +269,21 @@ and the historical quality summary that justified publishing the rule.
 
 ## Promotion Workflow
 
-Promotion requires a locked candidate with a pinned model SHA-256 and a passing
-report for its current rule and launch thresholds. The qualifying source is
-`existing_predictions`, and its sample begins at the recorded lock time.
+Promotion reads the registered prospective trial and its frozen review directly
+from the warehouse. A completed passing review must satisfy the current launch
+thresholds. Approval carries the pinned model SHA-256, book, source, edge,
+quote age, decision window, and model-input provenance requirements into live
+publication.
 
 ```powershell
-poetry run python -m src.predict.publishable_bets promote `
-  --rule-id nba_totals_candidate `
-  --rules config/published_rules.yml `
-  --quality-report reports/prediction_quality/latest_quality_report.json
+poetry run python -m src.predict.publishable_bets promote-paper `
+  --trial-id nba_totals_random_forest_draftkings_v1 `
+  --rules config/published_rules.yml
 ```
 
-If the candidate does not pass, the command exits non-zero and does not edit the
-rules file. Approved rules that later fail the gate produce no paid bets; add
+An incomplete or failing review exits non-zero before changing the rules file.
+Historical report files cannot promote a rule. Approved rules that later fail
+the current thresholds produce no paid bets; add
 `disabled: true` or set `status: disabled` in `config/published_rules.yml` to
 turn one off intentionally.
 
@@ -311,6 +313,10 @@ The public `/record` page and `GET /api/bets/record` endpoint use this issued
 ledger. The model-results history remains separate. To revoke the active release
 while preserving previously issued picks, run
 `poetry run python -m src.predict.publishable_bets revoke`.
+
+If an official result is withdrawn or becomes invalid, its current settlement
+returns to pending and leaves the public return calculations. The original
+grade and the retraction remain in the audit history.
 
 ## Prospective NBA Paper Trial
 

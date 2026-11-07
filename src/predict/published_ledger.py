@@ -14,6 +14,7 @@ from src.db.core import connect, resolve_db_path
 from src.models.prediction_quality import (
     american_profit,
     expected_value,
+    no_vig_pair,
     settle_moneyline_side,
     settle_total_side,
 )
@@ -28,6 +29,20 @@ def _utc(value: str) -> datetime:
     if timestamp.utcoffset() is None:
         raise ValueError("Published picks require timezone-aware timestamps")
     return timestamp.astimezone(timezone.utc)
+
+
+def _withdraw_settlement(conn: sqlite3.Connection, row: sqlite3.Row, now: datetime) -> None:
+    if row["previous_outcome"] is None:
+        return
+    conn.execute("DELETE FROM published_settlements WHERE pick_id = ?", (row["pick_id"],))
+    conn.execute(
+        """
+        INSERT INTO published_settlement_history (
+            pick_id, settled_at, outcome, profit_units, home_score, away_score, reason
+        ) VALUES (?, ?, 'pending', 0, ?, ?, 'result_withdrawn')
+        """,
+        (row["pick_id"], now.isoformat(), row["home_score"], row["away_score"]),
+    )
 
 
 def _settle(conn: sqlite3.Connection, now: datetime) -> None:
@@ -62,11 +77,13 @@ def _settle(conn: sqlite3.Connection, now: datetime) -> None:
         if reason:
             outcome, profit = "void", 0.0
         elif status != "final" or now < max(start, _utc(row["start_time_utc"])):
+            _withdraw_settlement(conn, row, now)
             continue
         elif (
             not all(isinstance(score, int) and score >= 0 for score in (home, away))
             or (row["league"] in {"NBA", "NHL", "NCAAB"} and home == away)
         ):
+            _withdraw_settlement(conn, row, now)
             continue
         else:
             if row["market"] == "totals":
@@ -155,11 +172,19 @@ def _verified_quote(
     if len(rows) != 2 or {row["outcome"] for row in rows} != expected:
         return None
     quote = rows[0]
+    contract = pick.get("execution_contract") or {}
+    max_age = min(15, contract.get("max_quote_age_minutes", 15))
     try:
         fetched = _utc(quote["fetched_at_utc"])
         predicted = _utc(pick["predicted_at"])
-        if not fetched <= predicted <= now or now - fetched > timedelta(minutes=15):
+        if not fetched <= predicted <= now or now - fetched > timedelta(minutes=max_age):
             return None
+        if contract:
+            lead = _utc(pick["start_time_utc"]) - now
+            if not timedelta(minutes=contract["min_minutes_before_start"]) <= lead <= timedelta(
+                hours=contract["max_hours_before_start"]
+            ):
+                return None
     except (ValueError, TypeError, KeyError):
         return None
     for row in rows:
@@ -171,8 +196,41 @@ def _verified_quote(
             or (row["outcome"] == pick["side"] and row["price_american"] != pick["moneyline"])
         ):
             return None
+    if contract:
+        if quote["book"].lower() != contract["book"] or quote["source"] != contract["odds_source"]:
+            return None
+        prices = {row["outcome"]: row["price_american"] for row in rows}
+        first, second = ("over", "under") if market == "totals" else ("home", "away")
+        fair = dict(zip((first, second), no_vig_pair(prices[first], prices[second])))
+        if pick["model_probability"] - fair[pick["side"]] < contract["min_edge"]:
+            return None
+        if contract.get("same_snapshot_moneyline_inputs"):
+            if (
+                pick.get("input_h2h_snapshot_id") != pick["quote_snapshot_id"]
+                or pick.get("input_h2h_book_id") != pick["quote_book_id"]
+            ):
+                return None
+            inputs = conn.execute(
+                """
+                SELECT lower(outcome) AS outcome, price_american FROM odds
+                WHERE game_id = ? AND snapshot_id = ? AND book_id = ? AND market = 'h2h'
+                """,
+                (pick["game_id"], pick["quote_snapshot_id"], pick["quote_book_id"]),
+            ).fetchall()
+            expected_inputs = {"home": pick.get("input_home_moneyline"), "away": pick.get("input_away_moneyline")}
+            if (
+                not all(isinstance(price, (int, float)) and math.isfinite(price) and abs(price) >= 100
+                        for price in expected_inputs.values())
+                or len(inputs) != 2
+                or {row["outcome"]: row["price_american"] for row in inputs} != expected_inputs
+            ):
+                return None
+    decision_close = _utc(pick["start_time_utc"]) - timedelta(
+        minutes=contract.get("min_minutes_before_start", 0)
+    )
     return {
         "book": quote["book"], "quote_fetched_at": fetched.isoformat(),
+        "quote_expires_at": min(fetched + timedelta(minutes=max_age), decision_close).isoformat(),
         "quote_source": quote["source"], "quote_outcomes": sorted(expected),
     }
 
@@ -241,8 +299,10 @@ def publish_release(
                     active.append({
                         **original,
                         **{field: pick[field] for field in (
-                            "quote_snapshot_id", "quote_book_id", "quote_fetched_at", "predicted_at"
-                        )},
+                            "quote_snapshot_id", "quote_book_id", "quote_fetched_at",
+                            "quote_expires_at", "predicted_at", "input_h2h_snapshot_id",
+                            "input_h2h_book_id", "input_home_moneyline", "input_away_moneyline",
+                        ) if field in pick},
                     })
                 continue
             published = {**pick, "published_at": now.isoformat()}

@@ -127,6 +127,7 @@ class PublicBet(BaseModel):
 
 class PremiumBet(PublicBet):
     market: str | None = None
+    quote_expires_at: datetime | None = None
     predicted_total_points: float | None = None
     edge: float | None = None
     side: str | None = None
@@ -330,6 +331,7 @@ def _premium_bet(
     return PremiumBet(
         **base.model_dump(),
         market=_string_value(row, "market"),
+        quote_expires_at=_row_value(row, "quote_expires_at"),
         predicted_total_points=_float_value(row, "predicted_total_points"),
         edge=_float_value(row, "edge"),
         side=side,

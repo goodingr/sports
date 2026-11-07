@@ -20,13 +20,13 @@ from src.models.prediction_quality import (
     DEFAULT_RELEASE_LEAGUES,
     _json_default,
     _quality_gate_from_config,
-    build_quality_report,
     configured_rules,
     filter_bets_for_rule,
     load_rules,
     no_vig_pair,
     rule_is_disabled,
 )
+from src.predict.paper_approval import paper_reviews, paper_rule_result, promote_paper_trial
 from src.predict.published_ledger import publish_release
 
 LOGGER = logging.getLogger(__name__)
@@ -237,11 +237,7 @@ def _expand_current_totals(predictions: pd.DataFrame) -> pd.DataFrame:
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_market_prob"]
         implied_column = f"{side}_implied_prob"
         side_df["implied_prob"] = side_df["no_vig_market_prob"].fillna(side_df[implied_column])
-        side_df["edge"] = side_df[f"{side}_edge"]
-        missing_edge = side_df["edge"].isna()
-        side_df.loc[missing_edge, "edge"] = (
-            side_df.loc[missing_edge, "predicted_prob"] - side_df.loc[missing_edge, "implied_prob"]
-        )
+        side_df["edge"] = side_df["predicted_prob"] - side_df["no_vig_market_prob"]
         rows.append(side_df)
     return pd.concat(rows, ignore_index=True)
 
@@ -276,11 +272,7 @@ def _expand_current_moneyline(predictions: pd.DataFrame) -> pd.DataFrame:
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_market_prob"]
         implied_column = f"{side}_implied_prob"
         side_df["implied_prob"] = side_df["no_vig_market_prob"].fillna(side_df[implied_column])
-        side_df["edge"] = side_df[f"{side}_edge"]
-        missing_edge = side_df["edge"].isna()
-        side_df.loc[missing_edge, "edge"] = (
-            side_df.loc[missing_edge, "predicted_prob"] - side_df.loc[missing_edge, "implied_prob"]
-        )
+        side_df["edge"] = side_df["predicted_prob"] - side_df["no_vig_market_prob"]
         rows.append(side_df)
     return pd.concat(rows, ignore_index=True)
 
@@ -317,6 +309,10 @@ def _serialize_bet(
         "predicted_at": row.get("predicted_at"),
         "quote_snapshot_id": row.get("quote_snapshot_id"),
         "quote_book_id": _safe_float(row.get("quote_book_id")),
+        "input_h2h_snapshot_id": row.get("selected_h2h_snapshot_id"),
+        "input_h2h_book_id": _safe_float(row.get("selected_h2h_book_id")),
+        "input_home_moneyline": _safe_float(row.get("home_moneyline")),
+        "input_away_moneyline": _safe_float(row.get("away_moneyline")),
         "home_team": row.get("home_team"),
         "away_team": row.get("away_team"),
         "side": row.get("side"),
@@ -329,6 +325,13 @@ def _serialize_bet(
         "model_probability": _safe_float(row.get("predicted_prob")),
         "market_probability": _safe_float(market_probability),
         "quality_summary": _quality_summary(quality_result),
+        "execution_contract": {
+            field: rule[field] for field in (
+                "book", "odds_source", "max_quote_age_minutes", "min_minutes_before_start",
+                "max_hours_before_start", "min_edge",
+                "same_snapshot_moneyline_inputs",
+            ) if field in rule
+        },
     }
     for field in BENCHMARK_METADATA_FIELDS:
         value = row.get(field, rule.get(field))
@@ -435,24 +438,27 @@ def publishable_bets(
         rule for rule in rules if rule.get("status") == "approved" and not rule_is_disabled(rule)
     ]
 
-    report = build_quality_report(
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
-    )
-    _write_json(quality_output_path, report)
-
-    result_by_id = {
-        str(result.get("rule_id")): result
-        for result in report.get("rule_results", [])
-        if result.get("rule_id") is not None
-    }
+    observed = _normalize_now(now)
+    reviews = paper_reviews(db_path, observed.to_pydatetime()) if approved_rules else {}
+    gate = _quality_gate_from_config(rules_config)
+    results = [
+        paper_rule_result(rule, reviews.get(str(rule.get("paper_trial_id"))), gate)
+        for rule in approved_rules
+    ]
+    result_by_id = {str(result["rule_id"]): result for result in results}
     passing_rules = [
         rule
         for rule in approved_rules
         if result_by_id.get(str(rule.get("id")), {}).get("passes_launch_gate") is True
     ]
+    report = {
+        "generated_at": observed.isoformat(), "db_path": str(db_path),
+        "rules_path": str(rules_path), "launch_gate": gate.__dict__, "rule_results": results,
+        "passing_approved_rule_ids": [str(rule["id"]) for rule in passing_rules],
+        "publishable_profitable_list_exists": bool(passing_rules),
+        "evidence_source": "prospective_paper",
+    }
+    _write_json(quality_output_path, report)
 
     status: dict[str, Any] = {
         "generated_at": _normalize_now(now).isoformat(),
@@ -518,24 +524,6 @@ def publishable_bets(
     return released
 
 
-def _load_or_build_report(
-    *,
-    quality_report_path: Optional[Path],
-    db_path: Path,
-    rules_path: Path,
-    leagues: Optional[Iterable[str]],
-    benchmark_prediction_paths: Optional[Iterable[Path]],
-) -> dict[str, Any]:
-    if quality_report_path and quality_report_path.exists():
-        return json.loads(quality_report_path.read_text(encoding="utf-8"))
-    return build_quality_report(
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
-    )
-
-
 def promote_candidate_rule(
     *,
     rule_id: str,
@@ -545,66 +533,17 @@ def promote_candidate_rule(
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
     benchmark_prediction_paths: Optional[Iterable[Path]] = None,
 ) -> dict[str, Any]:
-    """Promote a candidate rule into approved_rules only if it passes a strict source."""
+    """Retain the command while directing promotion to frozen trial evidence."""
     config = load_rules(rules_path)
-    candidate_rules = config.get("candidate_rules", []) or []
-    locked_candidate_rules = config.get("locked_candidate_rules", []) or []
-    approved_rules = config.get("approved_rules", []) or []
-    candidate = next(
-        (
-            rule
-            for rule in configured_rules(config)
-            if str(rule.get("id")) == rule_id
-            and rule.get("status") in {"candidate", "locked_candidate"}
-            and not rule_is_disabled(rule)
-        ),
-        None,
-    )
+    candidate = next((rule for rule in configured_rules(config) if str(rule.get("id")) == rule_id), None)
     if candidate is None:
         raise ValueError(f"Candidate rule not found: {rule_id}")
     if candidate.get("status") != "locked_candidate" or not candidate.get("locked_at"):
         raise RuntimeError("Lock the candidate before collecting forward evidence for promotion.")
-    if not re.fullmatch(r"[0-9a-f]{64}", str(candidate.get("model_sha256", ""))):
-        raise RuntimeError("A promotable rule must pin the model artifact by SHA-256.")
-
-    report = _load_or_build_report(
-        quality_report_path=quality_report_path,
-        db_path=db_path,
-        rules_path=rules_path,
-        leagues=leagues,
-        benchmark_prediction_paths=benchmark_prediction_paths,
+    raise RuntimeError(
+        "Promotion requires a completed prospective paper trial. "
+        "Use promote-paper --trial-id with its registered trial ID."
     )
-    if report.get("launch_gate") != _quality_gate_from_config(config).__dict__:
-        raise RuntimeError("Quality report does not use the current launch gate. Regenerate it.")
-    passing_sources: list[str] = []
-    for source in report.get("evaluation_sources", []):
-        if source.get("source_id") != "existing_predictions":
-            continue
-        for result in source.get("rule_results", []):
-            if result.get("rule") == candidate and result.get("passes_launch_gate") is True:
-                passing_sources.append(str(source.get("source_id")))
-    if not passing_sources:
-        raise RuntimeError(f"Candidate rule {rule_id} does not pass the launch gate")
-
-    promoted = {**candidate, "status": "approved"}
-    promoted.pop("disabled", None)
-    approved_without_duplicate = [rule for rule in approved_rules if str(rule.get("id")) != rule_id]
-    candidate_without_promoted = [
-        rule for rule in candidate_rules if str(rule.get("id")) != rule_id
-    ]
-    locked_without_promoted = [
-        rule for rule in locked_candidate_rules if str(rule.get("id")) != rule_id
-    ]
-    config["approved_rules"] = [*approved_without_duplicate, promoted]
-    config["candidate_rules"] = candidate_without_promoted
-    config["locked_candidate_rules"] = locked_without_promoted
-    rules_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    return {
-        "rule_id": rule_id,
-        "promoted": True,
-        "passing_sources": passing_sources,
-        "rules_path": str(rules_path),
-    }
 
 
 def _candidate_from_lock_report(report: dict[str, Any], rule_id: str) -> Optional[dict[str, Any]]:
@@ -728,6 +667,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+    paper = subparsers.add_parser("promote-paper", help="Approve a completed prospective trial.")
+    paper.add_argument("--trial-id", required=True)
+    paper.add_argument("--db", type=Path)
+    paper.add_argument("--rules", type=Path, default=Path("config/published_rules.yml"))
+    paper.add_argument("--log-level", default="INFO")
 
     lock = subparsers.add_parser("lock", help="Lock a benchmark-recommended candidate.")
     lock.add_argument("--rule-id", required=True)
@@ -749,7 +693,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"publish", "promote", "lock", "revoke"}:
+    if not raw_args or raw_args[0] not in {"publish", "promote", "promote-paper", "lock", "revoke"}:
         raw_args = ["publish", *raw_args]
 
     parser = _build_parser()
@@ -759,6 +703,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "revoke":
         result = revoke_release(resolve_db_path(args.db), args.output, reason=args.reason)
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
+    if args.command == "promote-paper":
+        try:
+            result = promote_paper_trial(
+                args.trial_id, resolve_db_path(args.db), args.rules,
+                _quality_gate_from_config(load_rules(args.rules)),
+            )
+        except (RuntimeError, ValueError, OSError, sqlite3.Error) as exc:
+            LOGGER.error("%s", exc)
+            return 1
         print(json.dumps(result, indent=2, default=_json_default))
         return 0
 

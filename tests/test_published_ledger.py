@@ -139,6 +139,30 @@ def test_score_corrections_update_returns_and_keep_prior_grading(warehouse):
         ).fetchall() == [("win",), ("loss",)]
 
 
+def test_withdrawn_final_results_return_to_pending_with_the_prior_grade_retained(warehouse):
+    path, start = warehouse
+    publish_release(release(start), path)
+    closed = {"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = 'final'")
+        conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',115,110)")
+    publish_release(closed, path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = 'in_progress'")
+        conn.execute("UPDATE game_results SET home_score = NULL, away_score = NULL")
+    publish_release(closed, path)
+    publish_release(closed, path)
+
+    record = published_record(path)
+    assert record["total"] == record["wins"] == record["profit_units"] == 0
+    assert record["pending_picks"] == 1
+    assert record["grading_corrections"] == 1
+    with sqlite3.connect(path) as conn:
+        assert conn.execute(
+            "SELECT outcome FROM published_settlement_history ORDER BY revision_id"
+        ).fetchall() == [("win",), ("pending",)]
+
+
 def test_quote_provenance_and_half_point_line_required(warehouse):
     path, start = warehouse
     missing = release(start)
