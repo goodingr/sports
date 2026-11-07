@@ -163,7 +163,9 @@ describe("snapshotFromSubscription", () => {
 describe("applySnapshot", () => {
     it("writes is_premium under public_metadata.is_premium", async () => {
         const users: Record<string, StoredUser> = {
-            user_clerk_1: { id: "user_clerk_1", publicMetadata: {}, privateMetadata: {} },
+            user_clerk_1: {
+                id: "user_clerk_1", publicMetadata: { stripe_customer_id: "cus_abc" }, privateMetadata: {},
+            },
         };
         setClerkForTests(makeFakeClerk(users) as never);
         const changed = await applySnapshot(
@@ -241,6 +243,18 @@ describe("applySnapshot", () => {
 
         expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_retry')).toBe(true);
         expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+    });
+
+    it('skips a write when the stored canonical customer differs from the verified snapshot', async () => {
+        const prior = { stripe_customer_id: 'cus_replacement', is_premium: true };
+        const users = {
+            user_clerk_1: { id: 'user_clerk_1', publicMetadata: { ...prior }, privateMetadata: {} },
+        };
+        setClerkForTests(makeFakeClerk(users) as never);
+
+        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_old')).toBe(false);
+        expect(users.user_clerk_1.publicMetadata).toEqual(prior);
+        expect(users.user_clerk_1.privateMetadata).toEqual({});
     });
 });
 

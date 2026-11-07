@@ -107,9 +107,10 @@ function customerIdOf(sub: Stripe.Subscription): string | null {
     return typeof sub.customer === "string" ? sub.customer : sub.customer.id;
 }
 
-function periodEndOf(sub: Stripe.Subscription): number | null {
+function periodEndOf(sub: Stripe.Subscription, priceId?: string): number | null {
     // In Stripe API 2025+, current_period_end lives on subscription items.
-    const item = sub.items?.data?.[0] as
+    const items = sub.items?.data;
+    const item = (priceId ? items?.find(({ price }) => price.id === priceId) : items?.[0]) as
         | (Stripe.SubscriptionItem & { current_period_end?: number })
         | undefined;
     // Fallback for older API versions where it sat on the subscription itself.
@@ -119,12 +120,12 @@ function periodEndOf(sub: Stripe.Subscription): number | null {
     return sub.cancel_at ? Math.min(periodEnd, sub.cancel_at) : periodEnd;
 }
 
-export function snapshotFromSubscription(sub: Stripe.Subscription): PremiumSnapshot {
+export function snapshotFromSubscription(sub: Stripe.Subscription, priceId?: string): PremiumSnapshot {
     return {
         is_premium: isPremiumStatus(sub.status),
         subscription_status: sub.status,
         stripe_customer_id: customerIdOf(sub),
-        subscription_current_period_end: periodEndOf(sub),
+        subscription_current_period_end: periodEndOf(sub, priceId),
         subscription_cancel_at_period_end: sub.cancel_at_period_end || sub.cancel_at != null,
     };
 }
@@ -143,38 +144,8 @@ export function revokedSnapshot(
 }
 
 /**
- * Find the Clerk userId stored on the Stripe customer during checkout.
- */
-export async function findUserIdForCustomer(
-    customerId: string,
-): Promise<string | null> {
-    const stripe = getStripe();
-    const customer = await stripe.customers.retrieve(customerId);
-    if (customer && !("deleted" in customer && customer.deleted)) {
-        const meta = (customer as Stripe.Customer).metadata ?? {};
-        if (meta.userId) return meta.userId;
-        if (meta.clerkUserId) return meta.clerkUserId;
-    }
-    return null;
-}
-
-/**
- * Look up the userId associated with a webhook event. We prefer subscription
- * metadata (set during checkout) and fall back to the Stripe customer record.
- */
-export async function resolveUserId(
-    sub: Stripe.Subscription | null,
-    customerId: string | null,
-): Promise<string | null> {
-    const fromSub = sub?.metadata?.userId;
-    if (fromSub) return fromSub;
-    if (customerId) return findUserIdForCustomer(customerId);
-    return null;
-}
-
-/**
- * Apply a current premium snapshot. Repeated events skip writes only when the
- * stored billing state still matches the current Stripe state.
+ * Apply a current premium snapshot for the customer already bound to the user.
+ * Repeated events skip writes when the stored billing state already matches.
  *
  * Returns true when state changed (or the event was applied for the first time).
  */
@@ -187,7 +158,9 @@ export async function applySnapshot(
     const user = await clerk.users.getUser(userId);
     const priv = (user.privateMetadata ?? {}) as Record<string, unknown>;
     const pub = (user.publicMetadata ?? {}) as Record<string, unknown>;
-    const nextPublic: Record<string, unknown> = { ...snapshot, isPremium: null };
+    const { stripe_customer_id, ...entitlement } = snapshot;
+    if (!stripe_customer_id || pub.stripe_customer_id !== stripe_customer_id) return false;
+    const nextPublic: Record<string, unknown> = { ...entitlement, isPremium: null };
     const matchesStored = Object.entries(nextPublic).every(([key, value]) =>
         value === null ? pub[key] == null : pub[key] === value,
     );

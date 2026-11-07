@@ -27,23 +27,32 @@ type StoredUser = {
 };
 
 const WEBHOOK_SECRET = "whsec_test_secret";
+const PRICE_ID = "price_test";
+
+function makeCustomer(overrides: Partial<Stripe.Customer> = {}): Stripe.Customer {
+    return {
+        id: "cus_test", livemode: false, metadata: { userId: "user_clerk_1" }, ...overrides,
+    } as Stripe.Customer;
+}
 
 function makeStripeWithMocks(opts: {
     subscriptions?: Record<string, Stripe.Subscription>;
-    customers?: Record<string, Stripe.Customer>;
+    customers?: Record<string, Stripe.Customer | Stripe.DeletedCustomer>;
 }): Stripe {
     const real = new Stripe("sk_test_dummy", { typescript: true });
     const subs = opts.subscriptions ?? {};
-    const customers = opts.customers ?? {};
+    const customers = opts.customers ?? { cus_test: makeCustomer() };
     Object.assign(real, {
         subscriptions: {
             retrieve: async (id: string) => {
                 if (!subs[id]) throw new Error(`subscription not found: ${id}`);
                 return subs[id];
             },
-            list: (params: { customer: string; status: string; limit: number }) => ({
+            list: (params: { customer: string; price: string; status: string; limit: number }) => ({
                 async *[Symbol.asyncIterator]() {
                     expect(params.status).toBe('all');
+                    expect(params.price).toBe(PRICE_ID);
+                    // Return all test subscriptions to also exercise the app's item validation.
                     for (const sub of Object.values(subs)) {
                         if (sub.customer === params.customer) yield sub;
                     }
@@ -83,9 +92,10 @@ function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.
         created: 1_790_000_000,
         status: "active",
         customer: "cus_test",
+        livemode: false,
         metadata: { userId: "user_clerk_1" },
         items: {
-            data: [{ id: "si_1", current_period_end: 1_800_000_000 } as never],
+            data: [{ id: "si_1", current_period_end: 1_800_000_000, price: { id: PRICE_ID } }],
         },
         ...overrides,
     } as unknown as Stripe.Subscription;
@@ -93,7 +103,9 @@ function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.
 
 function makeUsers(): Record<string, StoredUser> {
     return {
-        user_clerk_1: { id: "user_clerk_1", publicMetadata: {}, privateMetadata: {} },
+        user_clerk_1: {
+            id: "user_clerk_1", publicMetadata: { stripe_customer_id: "cus_test" }, privateMetadata: {},
+        },
     };
 }
 
@@ -213,6 +225,7 @@ describe("POST /api/webhooks/stripe", () => {
     it("revokes premium when subscription becomes past_due", async () => {
         const users = makeUsers();
         users.user_clerk_1.publicMetadata = {
+            ...users.user_clerk_1.publicMetadata,
             [PREMIUM_KEY]: true,
             subscription_status: "active",
         };
@@ -238,6 +251,7 @@ describe("POST /api/webhooks/stripe", () => {
     it("revokes premium on invoice.payment_failed (re-fetch shows past_due)", async () => {
         const users = makeUsers();
         users.user_clerk_1.publicMetadata = {
+            ...users.user_clerk_1.publicMetadata,
             [PREMIUM_KEY]: true,
             subscription_status: "active",
         };
@@ -336,6 +350,128 @@ describe("POST /api/webhooks/stripe", () => {
         expect(users.user_clerk_1.publicMetadata.is_premium).toBe(true);
     });
 
+    it('does not let an unrelated active price replace a canceled paid plan', async () => {
+        const users = makeUsers();
+        users.user_clerk_1.publicMetadata.is_premium = true;
+        setClerkForTests(makeFakeClerk(users) as never);
+        const canceled = makeSubscription({ status: 'canceled' });
+        const unrelated = makeSubscription({ id: 'sub_other', created: 1_790_000_001, metadata: {} });
+        unrelated.items.data[0].price.id = 'price_other';
+        const stripe = makeStripeWithMocks({ subscriptions: { sub_test: canceled, sub_other: unrelated } });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_other_price', type: 'customer.subscription.created', data: { object: unrelated },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+        expect(users.user_clerk_1.publicMetadata.subscription_status).toBe('canceled');
+    });
+
+    it.each(['active', 'canceled'] as const)(
+        'ignores an old %s subscription event for a different Stripe customer', async (status) => {
+            const users = makeUsers();
+            const priorMetadata = { stripe_customer_id: 'cus_test', is_premium: status === 'canceled' };
+            users.user_clerk_1.publicMetadata = { ...priorMetadata };
+            setClerkForTests(makeFakeClerk(users) as never);
+            const old = makeSubscription({ customer: 'cus_old', status });
+            const stripe = makeStripeWithMocks({
+                customers: { cus_old: makeCustomer({ id: 'cus_old' }) },
+                subscriptions: { sub_test: old },
+            });
+            setStripeForTests(stripe);
+
+            const response = await POST(signedRequest(stripe, {
+                id: 'evt_old_customer', type: 'customer.subscription.updated', data: { object: old },
+            }));
+
+            expect(response.status).toBe(200);
+            expect(users.user_clerk_1.publicMetadata).toEqual(priorMetadata);
+            expect(users.user_clerk_1.privateMetadata).toEqual({});
+        },
+    );
+
+    it('uses the canonical customer’s legacy owner tag and the exact price item’s period', async () => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const sub = makeSubscription({ metadata: {} });
+        const ownItem = sub.items.data[0];
+        sub.items.data.unshift({
+            ...ownItem, id: 'si_unrelated', price: { ...ownItem.price, id: 'price_other' },
+            current_period_end: ownItem.current_period_end + 10_000,
+        });
+        const stripe = makeStripeWithMocks({
+            customers: { cus_test: makeCustomer({ metadata: { clerkUserId: 'user_clerk_1' } }) },
+            subscriptions: { sub_test: sub },
+        });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_legacy_owner', type: 'customer.subscription.updated', data: { object: sub },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(true);
+        expect(users.user_clerk_1.publicMetadata.subscription_current_period_end).toBe(ownItem.current_period_end);
+    });
+
+    it('does not adopt a customer from a webhook when checkout never established a canonical binding', async () => {
+        const users = makeUsers();
+        users.user_clerk_1.publicMetadata = {};
+        setClerkForTests(makeFakeClerk(users) as never);
+        const sub = makeSubscription();
+        const stripe = makeStripeWithMocks({ subscriptions: { sub_test: sub } });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_unbound', type: 'customer.subscription.created', data: { object: sub },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata).toEqual({});
+    });
+
+    it.each<[string, Partial<Stripe.Customer>]>([
+        ['owner', { metadata: { userId: 'user_other' } }],
+        ['mode', { livemode: true }],
+    ])('ignores a subscription whose %s disagrees with the provider customer', async (_, overrides) => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const sub = makeSubscription();
+        const stripe = makeStripeWithMocks({
+            customers: { cus_test: makeCustomer(overrides) },
+            subscriptions: { sub_test: sub },
+        });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_wrong_owner', type: 'customer.subscription.created', data: { object: sub },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata).toEqual({ stripe_customer_id: 'cus_test' });
+    });
+
+    it('revokes the known canonical customer after Stripe deletes it', async () => {
+        const users = makeUsers();
+        users.user_clerk_1.publicMetadata.is_premium = true;
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({ customers: {
+            cus_test: { id: 'cus_test', object: 'customer', deleted: true },
+        } });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_deleted_customer', type: 'customer.subscription.deleted',
+            data: { object: makeSubscription({ status: 'canceled' }) },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+        expect(users.user_clerk_1.publicMetadata.stripe_customer_id).toBe('cus_test');
+    });
+
     it.each(['sub_test', makeSubscription()])('handles current invoice parent subscription %s', async (subscription) => {
         const users = makeUsers();
         setClerkForTests(makeFakeClerk(users) as never);
@@ -355,7 +491,7 @@ describe("POST /api/webhooks/stripe", () => {
 
     it('restores access when a successful invoice follows payment recovery', async () => {
         const users = makeUsers();
-        users.user_clerk_1.publicMetadata = { is_premium: false, subscription_status: 'unpaid' };
+        Object.assign(users.user_clerk_1.publicMetadata, { is_premium: false, subscription_status: 'unpaid' });
         setClerkForTests(makeFakeClerk(users) as never);
         const stripe = makeStripeWithMocks({ subscriptions: { sub_test: makeSubscription() } });
         setStripeForTests(stripe);
@@ -411,7 +547,7 @@ describe("POST /api/webhooks/stripe", () => {
 
     it('asks Stripe to retry when current subscription state cannot be loaded', async () => {
         const users = makeUsers();
-        users.user_clerk_1.publicMetadata = { is_premium: false };
+        users.user_clerk_1.publicMetadata.is_premium = false;
         setClerkForTests(makeFakeClerk(users) as never);
         const stripe = makeStripeWithMocks({});
         Object.assign(stripe.subscriptions, {
