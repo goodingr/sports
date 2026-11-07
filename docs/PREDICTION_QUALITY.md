@@ -298,6 +298,9 @@ The observed quote must be an intact pair from the same book and provider
 snapshot, must match the predicted line and price, and must be at most 15 minutes
 old when issued. Untraced legacy rows cannot be issued. Quarter-point totals
 are excluded because the current grader supports integer and half-point totals.
+Paid NBA totals use the earliest verified warehouse or provider tipoff for
+the same minimum lead as the paper trial. The original provider tipoff is
+retained with the issued quote and the API rechecks the lead when serving it.
 
 The original price and line remain fixed in the record. Changed prices or
 opposite signals cannot replace an issued selection. Provider aliases representing
