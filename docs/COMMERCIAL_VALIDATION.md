@@ -85,6 +85,11 @@ The pilot root forwards source tags to `/interest`. Check that `/?source=referra
 
 For a hosted Next.js service, build from `web-app` with `npm ci && npm run build`, then start with `npm run start`. Set `COMMERCIAL_PILOT_ONLY=true`, `COMMERCIAL_PILOT_CONTACT_EMAIL`, `NEXT_PUBLIC_APP_URL`, and the public Clerk key at build time. Provide the same settings at runtime, plus `COMMERCIAL_INTEREST_ENABLED=true`, `CLERK_SECRET_KEY`, and the `/login` and `/signup` Clerk routes.
 
+If the hosted process binds to loopback behind a TLS proxy, use
+`npm run start -- --hostname localhost`. A literal loopback address can cause
+Next.js to send an internal Clerk rewrite over TLS to its own HTTP port.
+[Next.js loopback rewrite issue](https://github.com/vercel/next.js/issues/94745)
+
 Production interest requests default to `COMMERCIAL_PILOT_MODE=live`. They require an explicit non-loopback HTTPS origin such as `https://pilot.example.com`, a `pk_live_` publishable key with a valid Clerk hostname encoding, and an `sk_live_` secret key. The pilot returns 503 when these checks fail. Compose requires an exact HTTP 200 from the signed-out `/interest` page to check that the web app is up. A passing check leaves the credential pairing and authenticated writes unverified.
 
 Before recruiting, use a dedicated operator-controlled account in the production Clerk instance intended for the paid app. Keep this account out of the screened roster and exclude it from reports.
