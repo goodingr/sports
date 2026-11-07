@@ -1,10 +1,12 @@
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from src.db.core import SCHEMA_PATH
+from src.predict import paper_settlement
 from src.predict.paper_settlement import settle_open_trials, unreconciled_grades
 from src.predict.paper_settlement_history import grades_as_of
 
@@ -31,6 +33,8 @@ def ledger():
         );
         INSERT INTO sports (sport_id, name, league, default_market) VALUES (1, 'Basketball', 'NBA', 'totals');
         INSERT INTO books (book_id, name) VALUES (1, 'DraftKings'), (2, 'Other');
+        INSERT INTO teams (team_id, sport_id, code, name)
+        VALUES (1, 1, 'SAS', 'San Antonio Spurs'), (2, 1, 'SAC', 'Sacramento Kings');
         """
     )
     try:
@@ -73,11 +77,16 @@ def _quote(
     source="the-odds-api",
     market="totals",
     lines=(222, 222),
+    provider_start=START,
+    raw_path=None,
 ):
     fetched = START + offset
     conn.execute(
-        "INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source) VALUES (?, ?, 1, ?)",
-        (snapshot, fetched.isoformat(), source),
+        """
+        INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path)
+        VALUES (?, ?, 1, ?, ?)
+        """,
+        (snapshot, fetched.isoformat(), source, raw_path),
     )
     conn.executemany(
         """
@@ -89,6 +98,11 @@ def _quote(
             for (side, price), line in zip((("Over", -108), ("Under", -112)), lines)
         ],
     )
+    if provider_start is not None:
+        conn.execute(
+            "INSERT INTO odds_snapshot_game_starts VALUES (?, ?, ?)",
+            (snapshot, game, provider_start.isoformat()),
+        )
 
 
 def test_grades_original_price_and_keeps_latest_verified_close(ledger):
@@ -126,6 +140,147 @@ def test_grades_original_price_and_keeps_latest_verified_close(ledger):
     assert grades_as_of(ledger, "pilot", START + timedelta(hours=3))["game"]["outcome"] == "win"
     assert grades_as_of(ledger, "pilot", START + timedelta(days=1))["game"]["outcome"] == "loss"
     assert unreconciled_grades(ledger, "pilot", START + timedelta(days=2)) == 0
+
+
+def test_never_uses_a_close_after_its_own_provider_tipoff(ledger):
+    _decision(ledger, "game")
+    provider_start = START - timedelta(minutes=1)
+    _quote(ledger, "game", "post_tipoff", timedelta(seconds=-27), provider_start=provider_start)
+    _quote(
+        ledger, "game", "at_provider_tipoff", timedelta(minutes=-1), provider_start=provider_start
+    )
+    _quote(ledger, "game", "older_valid", timedelta(minutes=-12), provider_start=provider_start)
+
+    assert settle_open_trials(ledger, START + timedelta(hours=3)) == 1
+    assert (
+        ledger.execute("SELECT close_snapshot_id FROM paper_settlements").fetchone()[0]
+        == "older_valid"
+    )
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"),
+    [(timedelta(minutes=-100), "boundary"), (timedelta(minutes=-100, microseconds=-1), None)],
+)
+def test_close_window_and_clock_agreement_use_all_three_start_times(ledger, offset, expected):
+    _decision(ledger, "game")
+    _quote(ledger, "game", "boundary", offset, provider_start=START - timedelta(minutes=10))
+    _quote(
+        ledger,
+        "game",
+        "all_starts_too_far_apart",
+        timedelta(minutes=-20),
+        provider_start=START + timedelta(minutes=9),
+    )
+    ledger.execute(
+        "UPDATE games SET start_time_utc = ? WHERE game_id = 'game'",
+        ((START - timedelta(minutes=2)).isoformat(),),
+    )
+
+    assert settle_open_trials(ledger, START + timedelta(hours=3)) == 1
+    assert (
+        ledger.execute("SELECT close_snapshot_id FROM paper_settlements").fetchone()[0] == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("variant", "expected"),
+    [
+        ("missing_table", "legacy"),
+        ("missing_row", "legacy"),
+        ("external_db_raw_at_repo", "legacy"),
+        ("wrong_source", None),
+        ("wrong_url", None),
+        ("wrong_fetch", None),
+        ("wrong_teams", None),
+        ("duplicate_event", None),
+        ("duplicate_provider_id", None),
+        ("wrong_price", None),
+        ("missing_receipt", None),
+        ("normalized_post_tipoff", None),
+    ],
+)
+def test_legacy_close_requires_matching_archived_receipt(
+    ledger, tmp_path, monkeypatch, variant, expected
+):
+    _decision(ledger, "game")
+    ledger.execute("UPDATE games SET odds_api_id = 'provider-game' WHERE game_id = 'game'")
+    if variant == "missing_table":
+        ledger.execute("DROP TABLE odds_snapshot_game_starts")
+    if variant == "duplicate_provider_id":
+        _decision(ledger, "duplicate")
+        ledger.execute("UPDATE games SET odds_api_id = 'provider-game' WHERE game_id = 'duplicate'")
+    archive_root = tmp_path / "data" / "raw"
+    monkeypatch.setattr(paper_settlement, "RAW_DATA_DIR", archive_root)
+    raw = archive_root / "odds" / "basketball_nba" / "odds_legacy.json"
+    raw.parent.mkdir(parents=True)
+    fetched = START - timedelta(minutes=5)
+    _quote(
+        ledger,
+        "game",
+        "legacy",
+        fetched - START,
+        provider_start=fetched if variant == "normalized_post_tipoff" else None,
+        raw_path=r"Z:\old_checkout\data\raw\odds\basketball_nba\odds_legacy.json",
+    )
+    event = {
+        "id": "provider-game",
+        "sport_key": "basketball_nba",
+        "home_team": "Sacramento Kings" if variant == "wrong_teams" else "San Antonio Spurs",
+        "away_team": "Sacramento Kings",
+        "commence_time": START.isoformat(),
+        "bookmakers": [
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {
+                                "name": "Over",
+                                "point": 222,
+                                "price": -109 if variant == "wrong_price" else -108,
+                            },
+                            {"name": "Under", "point": 222, "price": -112},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    payload = {
+        "fetched_at": (
+            fetched + timedelta(seconds=1) if variant == "wrong_fetch" else fetched
+        ).isoformat(),
+        "request": {
+            "url": (
+                "https://example.com/v4/sports/basketball_nba/odds"
+                if variant == "wrong_url"
+                else "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+            )
+        },
+        "results": [event, event] if variant == "duplicate_event" else [event],
+    }
+    if variant == "wrong_source":
+        payload["source"] = "the-odds-api-history"
+    if variant != "missing_receipt":
+        raw.write_text(json.dumps(payload), encoding="utf-8")
+
+    grade_query = "SELECT * FROM paper_settlements WHERE game_id = 'game'"
+    if variant == "external_db_raw_at_repo":
+        external = tmp_path / "warehouse" / "betting.db"
+        external.parent.mkdir()
+        ledger.commit()
+        with closing(sqlite3.connect(external)) as outside:
+            outside.row_factory = sqlite3.Row
+            ledger.backup(outside)
+            settle_open_trials(outside, START + timedelta(hours=3))
+            grade = outside.execute(grade_query).fetchone()
+    else:
+        settle_open_trials(ledger, START + timedelta(hours=3))
+        grade = ledger.execute(grade_query).fetchone()
+    assert grade["outcome"] == "win"
+    assert grade["close_snapshot_id"] == expected
 
 
 def test_push_loss_void_and_pending_are_distinct(ledger):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
@@ -104,6 +105,28 @@ def ensure_prediction_metadata_columns(conn: sqlite3.Connection) -> None:
     for column, ddl in PREDICTION_METADATA_COLUMNS.items():
         if column not in existing:
             conn.execute(f"ALTER TABLE predictions ADD COLUMN {column} {ddl}")
+
+
+def store_odds_snapshot_game_starts(
+    conn: sqlite3.Connection, snapshot_id: str, starts: Mapping[str, str]
+) -> None:
+    """Retain provider kickoff observations in the same transaction as the quotes."""
+    if not starts:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_snapshot_game_starts (
+            snapshot_id TEXT NOT NULL REFERENCES odds_snapshots(snapshot_id) ON DELETE CASCADE,
+            game_id TEXT NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+            observed_start_utc TEXT NOT NULL,
+            PRIMARY KEY (snapshot_id, game_id)
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO odds_snapshot_game_starts VALUES (?, ?, ?)",
+        [(snapshot_id, game_id, start) for game_id, start in starts.items()],
+    )
 
 
 def _dedupe_current_predictions(conn: sqlite3.Connection) -> None:

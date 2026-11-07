@@ -330,6 +330,44 @@ def _nba_schedule_snapshot(
     }
 
 
+@pytest.mark.parametrize("case", ["valid", "naive_receipt", "duplicate_event", "wrong_teams"])
+def test_ordinary_odds_retains_only_verified_provider_kickoff(tmp_path, monkeypatch, case):
+    db_path = tmp_path / "odds.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+
+    current = _nba_schedule_snapshot("2026-11-07T23:04:00Z", "2026-11-08T03:25:12Z", "event")
+    loaders.load_odds_snapshot(current, sport_key="basketball_nba")
+    # Simulate a warehouse created before provider kickoff evidence was added.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE odds_snapshot_game_starts")
+    fetched = "2026-11-07T23:03:00" if case == "naive_receipt" else "2026-11-07T23:03:00Z"
+    archived = _nba_schedule_snapshot(fetched, "2026-11-07T22:24:12-05:00", "event")
+    event = archived["results"][0]
+    event["sport_key"] = "basketball_nba"
+    if case == "duplicate_event":
+        archived["results"].append(event.copy())
+    if case == "wrong_teams":
+        event["home_team"], event["away_team"] = event["away_team"], event["home_team"]
+    loaders.load_odds_snapshot(archived, sport_key="basketball_nba")
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT start_time_utc FROM games").fetchone() == (
+            "2026-11-08T03:25:12+00:00",
+        )
+        has_evidence = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'odds_snapshot_game_starts'"
+        ).fetchone()
+        if case == "valid":
+            assert has_evidence
+            assert conn.execute(
+                "SELECT observed_start_utc FROM odds_snapshot_game_starts"
+            ).fetchall() == [("2026-11-08T03:24:12+00:00",)]
+        else:
+            assert not has_evidence
+
+
 @pytest.mark.parametrize("newer_line", [221.5, None])
 def test_delayed_snapshot_keeps_newer_fixture_schedule_and_records_quotes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newer_line: float | None

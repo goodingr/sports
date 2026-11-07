@@ -7,6 +7,7 @@ import logging
 import re
 import sqlite3
 import uuid
+from collections import Counter
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -16,7 +17,7 @@ import pandas as pd
 
 from src.data.team_mappings import NCAAB_TEAM_NAMES, get_ncaab_team_code, normalize_team_code
 
-from .core import connect
+from .core import connect, store_odds_snapshot_game_starts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def _sorted_bookmakers(bookmakers: Sequence[Mapping[str, Any]]) -> list[Mapping[
     )
 
 
-def _parse_utc_datetime(value: Any) -> Optional[datetime]:
+def _parse_utc_datetime(value: Any, *, require_offset: bool = False) -> Optional[datetime]:
     if value in (None, ""):
         return None
     try:
@@ -65,7 +66,7 @@ def _parse_utc_datetime(value: Any) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
+        return None if require_offset else parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
 
 
@@ -1167,7 +1168,12 @@ def load_odds_snapshot(
     historical = source == "the-odds-api-history"
     ordinary_odds_api = source == "the-odds-api"
     fetched_at = payload.get("fetched_at")
-    schedule_observed_at = _parse_utc_datetime(fetched_at) if ordinary_odds_api else None
+    provider_fetched_at = (
+        _parse_utc_datetime(fetched_at, require_offset=True) if ordinary_odds_api else None
+    )
+    schedule_observed_at = provider_fetched_at or (
+        _parse_utc_datetime(fetched_at) if ordinary_odds_api else None
+    )
     if ordinary_odds_api:
         fetched_dt = schedule_observed_at or datetime.now(timezone.utc)
     elif fetched_at:
@@ -1214,10 +1220,18 @@ def load_odds_snapshot(
             (snapshot_id, fetched_dt.isoformat(), sport_id, source, raw_path),
         )
 
+        provider_starts: dict[str, str | None] = {}
+        event_counts = Counter(
+            event["id"] for event in results if isinstance(event.get("id"), str)
+        ) if ordinary_odds_api else Counter()
         for event in results:
             commence_time = event.get("commence_time")
+            observed_start = None
             try:
-                commence_iso = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+                raw_start = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+                commence_iso = raw_start.astimezone(timezone.utc).isoformat()
+                if raw_start.utcoffset() is not None:
+                    observed_start = commence_iso
             except Exception:  # noqa: BLE001
                 commence_iso = None
             event_observed_at = schedule_observed_at if commence_iso is not None else None
@@ -1317,6 +1331,30 @@ def load_odds_snapshot(
                     (event.get("id"), commence_iso, game_id),
                 )
             
+            if ordinary_odds_api:
+                event_id = event.get("id")
+                identity_matches = (
+                    game_id not in provider_starts
+                    and provider_fetched_at is not None
+                    and observed_start is not None
+                    and isinstance(event_id, str) and bool(event_id) and event_counts[event_id] == 1
+                    and event.get("sport_key") == sport_key
+                    and conn.execute(
+                        """
+                        SELECT 1 FROM games g
+                        WHERE g.game_id = ? AND g.home_team_id = ? AND g.away_team_id = ?
+                          AND g.odds_api_id = ?
+                          AND NOT EXISTS (
+                              SELECT 1 FROM games other
+                              WHERE other.sport_id = g.sport_id AND other.odds_api_id = g.odds_api_id
+                                AND other.game_id <> g.game_id
+                          )
+                        """,
+                        (game_id, home_team_id, away_team_id, event_id),
+                    ).fetchone() is not None
+                )
+                provider_starts[game_id] = observed_start if identity_matches else None
+
             # Extract moneylines from first bookmaker to update game_results
             # We'll collect all outcomes first, then determine home/away based on the outcome_key logic
             home_ml_close = None
@@ -1493,6 +1531,9 @@ def load_odds_snapshot(
             else:
                 LOGGER.debug("Game %s: no outcome data captured for odds snapshot", game_id)
 
+        store_odds_snapshot_game_starts(
+            conn, snapshot_id, {game_id: start for game_id, start in provider_starts.items() if start}
+        )
         LOGGER.info("Stored odds snapshot %s with %d events", snapshot_id, len(results))
 
 

@@ -18,7 +18,7 @@ import pandas as pd
 from src.data.config import RAW_DATA_DIR, load_env
 from src.data.ingest_odds import _request_metadata, write_snapshot
 from src.data.team_mappings import NBA_ALIASES
-from src.db.core import connect, resolve_db_path
+from src.db.core import connect, resolve_db_path, store_odds_snapshot_game_starts
 from src.db.loaders import _american_to_decimal, _implied_probability
 from src.models.train import CalibratedModel, EnsembleModel, ProbabilityCalibrator  # noqa: F401
 from src.predict.engine import PredictionEngine
@@ -334,6 +334,7 @@ def _append_entry_quotes(
     counts = Counter(event["id"] for event in requested)
     quoted = {}
     rows = []
+    provider_starts = {}
     minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
     local_day = fetched_at.astimezone(_EASTERN).date()
     daily_capture = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
@@ -364,6 +365,7 @@ def _append_entry_quotes(
             line, over, under = totals
             home, away = moneyline
             quoted[fixture.game_id] = earliest_start
+            provider_starts[fixture.game_id] = provider_start.isoformat()
             for market, outcome, price, point in (
                 ("h2h", "home", home, None),
                 ("h2h", "away", away, None),
@@ -397,6 +399,7 @@ def _append_entry_quotes(
                     str(raw_path),
                 ),
             )
+            store_odds_snapshot_game_starts(conn, snapshot_id, provider_starts)
             conn.executemany(
                 """
                 INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american,

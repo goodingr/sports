@@ -96,7 +96,7 @@ def test_dry_run_and_no_due_are_network_free(warehouse, monkeypatch):
     assert paper_close_poll.poll_closes(collect=True) == {"status": "no_close_due", "due_events": 0}
 
 
-def test_existing_close_skips_provider(warehouse, monkeypatch):
+def test_existing_close_skips_provider_only_with_observed_start(warehouse, monkeypatch):
     monkeypatch.setattr(requests, "get", _unexpected_request)
     with connect(warehouse) as conn:
         conn.execute(
@@ -109,6 +109,15 @@ def test_existing_close_skips_provider(warehouse, monkeypatch):
             VALUES ('close', 'game', 1, 'totals', ?, -110, 226)
             """,
             [("Over",), ("Under",)],
+        )
+    assert paper_close_poll.poll_closes() == {"status": "due", "due_events": 1}
+    with connect(warehouse) as conn:
+        conn.execute(
+            """
+            INSERT INTO odds_snapshot_game_starts (snapshot_id, game_id, observed_start_utc)
+            VALUES ('close', 'game', ?)
+            """,
+            ((NOW + timedelta(minutes=30)).isoformat(),),
         )
     assert paper_close_poll.poll_closes(collect=True)["status"] == "no_close_due"
 
@@ -295,7 +304,8 @@ def _provider_event(event_id, start):
 
 def test_collects_and_loads_only_a_due_draftkings_totals_batch(warehouse, monkeypatch):
     calls = []
-    event = _provider_event("event", NOW + timedelta(minutes=30))
+    observed_start = NOW + timedelta(minutes=34)
+    event = _provider_event("event", observed_start)
     payload = [event, {**event, "id": "unexpected"}]
     with connect(warehouse) as conn:
         conn.execute("UPDATE games SET season = 2026, venue = 'Original arena', espn_id = 'espn'")
@@ -333,6 +343,12 @@ def test_collects_and_loads_only_a_due_draftkings_totals_batch(warehouse, monkey
         snapshot = conn.execute("SELECT * FROM odds_snapshots").fetchone()
         assert snapshot["source"] == "the-odds-api"
         assert snapshot["fetched_at_utc"] == NOW.isoformat()
+        assert [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT snapshot_id, game_id, observed_start_utc FROM odds_snapshot_game_starts"
+            )
+        ] == [(snapshot["snapshot_id"], "game", observed_start.isoformat())]
         assert [
             tuple(row)
             for row in conn.execute(
@@ -439,6 +455,7 @@ def test_snapshot_and_paired_outcomes_roll_back_together(warehouse, monkeypatch)
     with connect(warehouse) as conn:
         assert conn.execute("SELECT COUNT(*) FROM odds_snapshots").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM odds").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM odds_snapshot_game_starts").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM paper_close_requests").fetchone()[0] == 1
     assert len(list((warehouse.parent / "raw").rglob("odds_*.json"))) == 1
 

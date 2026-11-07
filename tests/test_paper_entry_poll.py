@@ -196,6 +196,7 @@ def test_read_only_trigger_limits_and_evening_boundary(warehouse):
 
 def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeypatch):
     path, raw, events, _, predictions = warehouse
+    events[0]["commence_time"] = (NOW + timedelta(minutes=69)).isoformat()
     _seed_quotes(events[2:])  # The model double returns this valid evening prediction too.
     with connect(path) as conn:
         old_games = [tuple(row) for row in conn.execute("SELECT * FROM games ORDER BY game_id")]
@@ -245,6 +246,15 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
         snapshot = conn.execute(
             "SELECT * FROM odds_snapshots WHERE raw_path IS NOT NULL"
         ).fetchone()
+        assert dict(
+            conn.execute(
+                """
+                SELECT game_id, observed_start_utc FROM odds_snapshot_game_starts
+                WHERE snapshot_id = ?
+                """,
+                (snapshot["snapshot_id"],),
+            )
+        ) == {event["id"]: event["commence_time"] for event in events[:2]}
         assert (
             conn.execute(
                 "SELECT count(*) FROM odds WHERE snapshot_id = ?", (snapshot["snapshot_id"],)
@@ -389,6 +399,7 @@ def test_malformed_and_duplicate_event_stay_in_raw_archive_only(warehouse, monke
     assert not predictions
     with connect(path) as conn:
         assert conn.execute("SELECT count(*) FROM odds_snapshots").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM odds_snapshot_game_starts").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM paper_decisions").fetchone()[0] == 0
     [archived] = raw.rglob("odds_*.json")
     assert json.loads(archived.read_text(encoding="utf-8"))["results"] == payload

@@ -17,7 +17,7 @@ import requests
 from src.data.config import RAW_DATA_DIR, OddsAPIKeyManager, load_env
 from src.data.ingest_odds import _request_metadata, write_snapshot
 from src.data.team_mappings import NBA_ALIASES
-from src.db.core import connect, resolve_db_path
+from src.db.core import connect, resolve_db_path, store_odds_snapshot_game_starts
 from src.db.loaders import _american_to_decimal, _implied_probability
 from src.predict.paper_settlement import (
     _MIN_LEAD,
@@ -321,6 +321,7 @@ def _append_closing_quotes(
     ]
     counts = Counter(event["id"] for event in requested)
     rows = []
+    provider_starts = {}
     sport_id = None
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -329,9 +330,15 @@ def _append_closing_quotes(
                 continue
             fixture = events[event["id"]]
             pair = _totals_pair(event)
-            if pair is None or not _matches_fixture(conn, event, fixture, fetched_at):
+            provider_start = _utc_timestamp(event.get("commence_time"))
+            if (
+                pair is None
+                or provider_start is None
+                or not _matches_fixture(conn, event, fixture, fetched_at)
+            ):
                 continue
             sport_id = fixture.sport_id
+            provider_starts[fixture.game_id] = provider_start.isoformat()
             line, over, under = pair
             for side, price in (("Over", over), ("Under", under)):
                 rows.append(
@@ -354,6 +361,7 @@ def _append_closing_quotes(
                 """,
                 (snapshot_id, fetched_at.isoformat(), sport_id, _SOURCE, str(raw_path)),
             )
+            store_odds_snapshot_game_starts(conn, snapshot_id, provider_starts)
             conn.executemany(
                 """
                 INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american,

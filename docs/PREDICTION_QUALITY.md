@@ -387,8 +387,12 @@ per decision. A push returns the stake. Cancelled games and starts that moved
 more than 10 minutes are voided. A small start-time correction uses the earlier
 start for lead time and closing eligibility. A decision with less than 15 minutes
 of lead time against the corrected start is voided. Closing line value uses the latest
-paired totals quote from the same book and feed within 90 minutes before tipoff
-and strictly after the decision. A missing close stays missing in the report.
+paired totals quote from the same book and feed after the decision and within
+90 minutes before the earliest captured, current, or provider-recorded tipoff.
+The three kickoff times must agree within ten minutes. New snapshots retain
+the provider's kickoff for each verified fixture. A legacy snapshot needs a
+matching raw receipt to establish its kickoff. A missing close stays missing
+in the report.
 
 Ledger updates re-evaluate source results and retain grade revisions, including
 official score corrections and retracted final scores. Reports select the latest
@@ -401,9 +405,9 @@ Preview the closing collector with
 one batched request when pending decisions need a close and have 10 to 60
 minutes until tipoff. The collector checks a 200-credit reserve, spaces requests
 at least 15 minutes apart, and allows up to three attempts per UTC day. A preview
-only reads the warehouse. For collection, free quota probes check the active key
-and then distinct configured keys. A qualifying key is used locally for that
-request, under the shared attempt cap and cooldown.
+reads the warehouse and retained receipts. For collection, free quota probes
+check the active key and then distinct configured keys. A qualifying key is used
+locally for that request, under the shared attempt cap and cooldown.
 
 The scheduled collector waits until the first eligible game is within 28 minutes
 of tipoff, then includes all eligible games in the same request. This leaves one

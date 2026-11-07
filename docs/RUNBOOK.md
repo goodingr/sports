@@ -210,9 +210,14 @@ with all quotes below the threshold as healthy. An empty or unverified slate,
 a missing odds receipt, and a missing or failed capture need separate triage.
 Exit `2` indicates an empty slate that the archive cannot verify independently.
 Exit `1` indicates missing, invalid, or incomplete evidence.
-The supplemental Task Scheduler jobs can both succeed on the same day without
+The entry and closing collectors can both succeed on the same day without
 collecting anything, so their exit codes cannot confirm the daily capture.
 Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
+
+On the current Windows host, `DailyPipelineRun` requires the PC to be awake and
+the task owner to be signed in at its scheduled time. A missed launch can appear
+as Task Scheduler Operational event `153` even when the missed-run counter is
+zero. Check the event log when the odds receipt is absent after the grace period.
 
 ### Stale games / scores
 ```bash

@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
     raw_path TEXT
 );
 
+CREATE TABLE IF NOT EXISTS odds_snapshot_game_starts (
+    snapshot_id TEXT NOT NULL REFERENCES odds_snapshots(snapshot_id) ON DELETE CASCADE,
+    game_id TEXT NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+    observed_start_utc TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, game_id)
+);
+
 CREATE TABLE IF NOT EXISTS odds (
     snapshot_id TEXT NOT NULL REFERENCES odds_snapshots(snapshot_id),
     game_id TEXT NOT NULL REFERENCES games(game_id),

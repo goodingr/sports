@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 import src.predict.publishable_bets as publisher
+from src.db.core import store_odds_snapshot_game_starts
 from src.models.prediction_quality import QualityGate
 from src.predict.paper_approval import (
     paper_reviews,
@@ -115,6 +116,7 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
                     (close, (start - timedelta(minutes=30)).isoformat()),
                 ],
             )
+            store_odds_snapshot_game_starts(conn, close, {game_id: start.isoformat()})
             conn.executemany(
                 """
                 INSERT INTO odds (
