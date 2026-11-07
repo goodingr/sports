@@ -210,6 +210,16 @@ The drill performs these checks.
 The November 6, 2026 local warehouse drill restored a 3,046.60 MB snapshot
 into an isolated directory with its frozen models. Counts matched for 9,015
 games, 973,752 odds rows, 17,880 predictions, and the paper trial tables.
+
+The November 7, 2026 cross-platform drill restored the 3.64 GB Windows
+snapshot into empty volumes in an isolated Linux worker container with
+networking disabled. The installer ran as `app` (UID 1001). SQLite integrity
+and 14 source table counts matched. The pinned NBA totals model digest
+matched, both archived NBA receipts resolved from their original Windows
+paths, and the application user verified writes to both volumes. The
+temporary WSL wrapper emitted a Bash trap error after the installer, data
+checks, and scratch cleanup had succeeded.
+
 Remote transfer regression tests use a local AWS CLI stand-in, including
 failed model uploads and corrupted archives. A configured bucket still needs
 the remote drill above.
