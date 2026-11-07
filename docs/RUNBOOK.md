@@ -228,6 +228,22 @@ key and is marked stale after 80 minutes. A closing request needs at least 201
 credits and an early entry request needs 202 to preserve the 200-credit
 reserve. Collectors check current balances before spending.
 
+To prioritize the registered NBA and college basketball research lanes on
+the collection host, run the daily pipeline with the focused provider switch.
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/pipeline.ps1 -ResearchProviderLeagues
+```
+
+```bash
+bash scripts/pipeline.sh --research-provider-leagues
+```
+
+The switch limits live Odds API odds and score requests to NBA and NCAAB.
+It preserves the immediate NBA capture, ordinary history and predictions,
+and paid-release quality checks. Leagues without a fresh quote can still
+fail those checks and trigger revocation.
+
 The daily Windows and Linux pipelines log `NBA quote timing` after the paid
 gate or its skip. The report measures paper attempts and recorded decisions
 linked to the fresh receipt, and gives the receipt age at the paid command
