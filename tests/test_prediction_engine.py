@@ -128,7 +128,8 @@ def test_pinned_totals_needs_only_quote_inputs_and_retains_verified_bundle(
             "selected_totals_book_id": 1, "selected_h2h_snapshot_id": "quote", "selected_h2h_book_id": 1,
         }]
     )
-    def load_paper_inputs(league, days_ahead, *, paper_quotes, fixture_ids):
+    def load_paper_inputs(league, days_ahead, *, paper_quotes, fixture_ids, db_path):
+        assert db_path is None
         assert (league, days_ahead, paper_quotes, fixture_ids) == ("NBA", 7, True, {"GAME"})
         return games
 

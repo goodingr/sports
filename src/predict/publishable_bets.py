@@ -239,7 +239,9 @@ def _expand_current_totals(predictions: pd.DataFrame) -> pd.DataFrame:
         side_df["moneyline"] = side_df[f"{side}_moneyline"]
         side_df["no_vig_market_prob"] = side_df[f"{side}_no_vig_market_prob"]
         implied_column = f"{side}_implied_prob"
-        side_df["implied_prob"] = side_df["no_vig_market_prob"].fillna(side_df[implied_column])
+        side_df["implied_prob"] = side_df["no_vig_market_prob"]
+        if implied_column in side_df:
+            side_df["implied_prob"] = side_df["implied_prob"].fillna(side_df[implied_column])
         side_df["edge"] = side_df["predicted_prob"] - side_df["no_vig_market_prob"]
         rows.append(side_df)
     return pd.concat(rows, ignore_index=True)
@@ -285,6 +287,33 @@ def expand_current_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
     frames = [_expand_current_totals(predictions), _expand_current_moneyline(predictions)]
     non_empty = [frame for frame in frames if not frame.empty]
     return pd.concat(non_empty, ignore_index=True) if non_empty else pd.DataFrame()
+
+
+def _pinned_current_totals(db_path: Path, rule: dict[str, Any]) -> pd.DataFrame:
+    """Score a passing prospective rule without writing ordinary predictions."""
+    from src.predict.engine import FeatureContractError, PredictionEngine
+
+    digest = str(rule.get("model_sha256", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        return pd.DataFrame()
+    engine = PredictionEngine(model_type=rule["model_type"])
+    try:
+        scores = engine.predict_pinned_totals(rule["league"], digest, db_path=db_path)
+    except FeatureContractError:
+        LOGGER.warning(
+            "Cannot score approved NBA rule %s with its pinned model", rule["id"], exc_info=True
+        )
+        return pd.DataFrame()
+    if scores is None or scores.empty:
+        return pd.DataFrame()
+    predictions = scores.rename(
+        columns={
+            "commence_time": "start_time_utc",
+            "over_predicted_prob": "over_prob",
+            "under_predicted_prob": "under_prob",
+        }
+    ).assign(model_type=rule["model_type"], rule_id=rule["id"])
+    return _expand_current_totals(predictions)
 
 
 def _quality_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -501,18 +530,35 @@ def publishable_bets(
         status["reason"] = "no_passing_approved_rule"
         return persist(status)
 
-    current_predictions = load_current_prediction_output(
-        db_path=db_path, leagues=leagues, now=observed
-    )
-    current_bets = expand_current_predictions(current_predictions)
-    if current_bets.empty:
-        status["reason"] = "no_current_prediction_bets"
-        return persist(status)
-
+    release_leagues = tuple(leagues) if leagues is not None else None
+    allowed_leagues = {league.upper() for league in release_leagues or ()}
+    current_bets: pd.DataFrame | None = None
+    had_current_bets = False
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
+        pinned_live_totals = (
+            now is None
+            and rule.get("validation") == "prospective_paper"
+            and rule.get("league") == "NBA"
+            and rule.get("market") == "totals"
+            and rule.get("same_snapshot_moneyline_inputs") is True
+        )
+        if pinned_live_totals:
+            if allowed_leagues and "NBA" not in allowed_leagues:
+                continue
+            candidates = _pinned_current_totals(db_path, rule)
+        else:
+            if current_bets is None:
+                current_predictions = load_current_prediction_output(
+                    db_path=db_path, leagues=release_leagues, now=observed
+                )
+                current_bets = expand_current_predictions(current_predictions)
+            candidates = current_bets
+        if candidates.empty:
+            continue
+        had_current_bets = True
         matching_rows, metadata_mismatches, missing_matching_id = _matching_live_rows(
-            current_bets, rule
+            candidates, rule
         )
         if metadata_mismatches or missing_matching_id:
             rule_id = str(rule.get("id"))
@@ -535,7 +581,9 @@ def publishable_bets(
             publish_rows.append(_serialize_bet(row, rule, quality_result))
 
     if not publish_rows:
-        if status["skipped_passing_rule_ids"]:
+        if not had_current_bets:
+            status["reason"] = "no_current_prediction_bets"
+        elif status["skipped_passing_rule_ids"]:
             status["reason"] = "passing_rules_require_benchmarked_live_metadata"
         else:
             status["reason"] = "no_current_bets_matching_passing_rules"

@@ -3,6 +3,7 @@
 import logging
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AbstractSet, Any, Optional
 
 import numpy as np
@@ -221,6 +222,7 @@ def load_games_from_database(
     *,
     paper_quotes: bool = False,
     fixture_ids: AbstractSet[str] | None = None,
+    db_path: Path | None = None,
 ) -> pd.DataFrame:
     """
     Load upcoming games from the database for a specific league.
@@ -233,7 +235,7 @@ def load_games_from_database(
         DataFrame containing game details.
     """
     league = league.upper()
-    with connect() as conn:
+    with connect(db_path) as conn:
         sport_row = conn.execute("SELECT sport_id FROM sports WHERE league = ?", (league,)).fetchone()
         if not sport_row:
             LOGGER.warning("League %s not found in database", league)
