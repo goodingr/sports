@@ -69,6 +69,7 @@ export interface PremiumSnapshot {
     subscription_status: string | null;
     stripe_customer_id: string | null;
     subscription_current_period_end: number | null;
+    subscription_cancel_at_period_end: boolean;
 }
 
 function customerIdOf(sub: Stripe.Subscription): string | null {
@@ -81,10 +82,11 @@ function periodEndOf(sub: Stripe.Subscription): number | null {
     const item = sub.items?.data?.[0] as
         | (Stripe.SubscriptionItem & { current_period_end?: number })
         | undefined;
-    if (item?.current_period_end) return item.current_period_end;
     // Fallback for older API versions where it sat on the subscription itself.
     const legacy = (sub as unknown as { current_period_end?: number }).current_period_end;
-    return typeof legacy === "number" ? legacy : null;
+    const periodEnd = item?.current_period_end ?? legacy;
+    if (typeof periodEnd !== "number") return null;
+    return sub.cancel_at ? Math.min(periodEnd, sub.cancel_at) : periodEnd;
 }
 
 export function snapshotFromSubscription(sub: Stripe.Subscription): PremiumSnapshot {
@@ -93,6 +95,7 @@ export function snapshotFromSubscription(sub: Stripe.Subscription): PremiumSnaps
         subscription_status: sub.status,
         stripe_customer_id: customerIdOf(sub),
         subscription_current_period_end: periodEndOf(sub),
+        subscription_cancel_at_period_end: sub.cancel_at_period_end || sub.cancel_at != null,
     };
 }
 
@@ -105,13 +108,12 @@ export function revokedSnapshot(
         subscription_status: status,
         stripe_customer_id: customerId,
         subscription_current_period_end: null,
+        subscription_cancel_at_period_end: false,
     };
 }
 
 /**
- * Find the Clerk userId that owns a Stripe customer. Looks first at the
- * customer's metadata (which we set during checkout), and falls back to
- * scanning Clerk users by stored stripe_customer_id.
+ * Find the Clerk userId stored on the Stripe customer during checkout.
  */
 export async function findUserIdForCustomer(
     customerId: string,
@@ -141,8 +143,8 @@ export async function resolveUserId(
 }
 
 /**
- * Apply a premium snapshot to a Clerk user. Idempotent: a no-op if the stored
- * state already matches and the same Stripe event id was previously processed.
+ * Apply a current premium snapshot. Repeated events skip writes only when the
+ * stored billing state still matches the current Stripe state.
  *
  * Returns true when state changed (or the event was applied for the first time).
  */
@@ -154,26 +156,15 @@ export async function applySnapshot(
     const clerk = await getClerk();
     const user = await clerk.users.getUser(userId);
     const priv = (user.privateMetadata ?? {}) as Record<string, unknown>;
-    if (priv.stripe_last_event_id === eventId) {
-        return false; // replay
-    }
     const pub = (user.publicMetadata ?? {}) as Record<string, unknown>;
-    const nextPublic: Record<string, unknown> = {
-        ...pub,
-        [PREMIUM_KEY]: snapshot.is_premium,
-        subscription_status: snapshot.subscription_status,
-    };
-    if (snapshot.stripe_customer_id) {
-        nextPublic.stripe_customer_id = snapshot.stripe_customer_id;
-    }
-    if (snapshot.subscription_current_period_end !== null) {
-        nextPublic.subscription_current_period_end =
-            snapshot.subscription_current_period_end;
-    } else {
-        delete nextPublic.subscription_current_period_end;
+    const nextPublic: Record<string, unknown> = { ...snapshot, isPremium: null };
+    const matchesStored = Object.entries(nextPublic).every(([key, value]) =>
+        value === null ? pub[key] == null : pub[key] === value,
+    );
+    if (priv.stripe_last_event_id === eventId && matchesStored) {
+        return false;
     }
     const nextPrivate: Record<string, unknown> = {
-        ...priv,
         stripe_last_event_id: eventId,
         stripe_last_event_at: Math.floor(Date.now() / 1000),
     };
@@ -234,9 +225,8 @@ export async function getOrCreateCustomer(
         email,
         metadata: { userId },
     });
-    const pub = (user.publicMetadata ?? {}) as Record<string, unknown>;
     await clerk.users.updateUserMetadata(userId, {
-        publicMetadata: { ...pub, stripe_customer_id: customer.id },
+        publicMetadata: { stripe_customer_id: customer.id },
     });
     return customer.id;
 }

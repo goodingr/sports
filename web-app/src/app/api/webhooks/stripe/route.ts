@@ -5,9 +5,11 @@ import {
     applySnapshot,
     getStripe,
     getStripeWebhookSecret,
+    isPremiumStatus,
     resolveUserId,
     revokedSnapshot,
     snapshotFromSubscription,
+    type PremiumSnapshot,
 } from "@/lib/billing";
 
 const HANDLED: ReadonlySet<Stripe.Event["type"]> = new Set([
@@ -15,7 +17,10 @@ const HANDLED: ReadonlySet<Stripe.Event["type"]> = new Set([
     "customer.subscription.created",
     "customer.subscription.updated",
     "customer.subscription.deleted",
+    "customer.subscription.paused",
+    "customer.subscription.resumed",
     "invoice.payment_failed",
+    "invoice.paid",
 ]);
 
 export async function POST(req: Request) {
@@ -68,29 +73,36 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
                     ? session.subscription
                     : session.subscription.id;
             const sub = await stripe.subscriptions.retrieve(subId);
-            await syncFromSubscription(sub, event.id, session.metadata?.userId ?? null);
+            await syncFromSubscription(stripe, sub, event.id, session.metadata?.userId ?? null);
             return;
         }
         case "customer.subscription.created":
-        case "customer.subscription.updated": {
+        case "customer.subscription.updated":
+        case "customer.subscription.deleted":
+        case "customer.subscription.paused":
+        case "customer.subscription.resumed": {
             const sub = event.data.object as Stripe.Subscription;
-            await syncFromSubscription(sub, event.id, null);
+            await syncFromSubscription(stripe, sub, event.id, null);
             return;
         }
-        case "customer.subscription.deleted": {
-            const sub = event.data.object as Stripe.Subscription;
-            await syncDeleted(sub, event.id);
-            return;
-        }
-        case "invoice.payment_failed": {
+        case "invoice.payment_failed":
+        case "invoice.paid": {
             const invoice = event.data.object as Stripe.Invoice;
-            await syncFromInvoiceFailure(stripe, invoice, event.id);
+            const legacy = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription };
+            const subRef = invoice.parent?.type === "subscription_details"
+                ? invoice.parent.subscription_details?.subscription
+                : legacy.subscription;
+            const subId = typeof subRef === "string" ? subRef : subRef?.id;
+            if (!subId) return;
+            const sub = await stripe.subscriptions.retrieve(subId);
+            await syncFromSubscription(stripe, sub, event.id, null);
             return;
         }
     }
 }
 
 async function syncFromSubscription(
+    stripe: Stripe,
     sub: Stripe.Subscription,
     eventId: string,
     userIdHint: string | null,
@@ -98,42 +110,31 @@ async function syncFromSubscription(
     const customerId =
         typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
     const userId = userIdHint ?? (await resolveUserId(sub, customerId));
-    if (!userId) {
+    if (!userId || !customerId) {
         console.warn("[WEBHOOK] no userId for subscription", sub.id);
         return;
     }
-    await applySnapshot(userId, snapshotFromSubscription(sub), eventId);
-}
-
-async function syncDeleted(sub: Stripe.Subscription, eventId: string): Promise<void> {
-    const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
-    const userId = await resolveUserId(sub, customerId);
-    if (!userId) {
-        console.warn("[WEBHOOK] no userId for deleted subscription", sub.id);
-        return;
+    // Events can arrive out of order. Reconcile all current subscriptions so
+    // an old cancellation cannot revoke a replacement subscription.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const snapshot = await currentCustomerSnapshot(stripe, customerId, userId);
+        await applySnapshot(userId, snapshot, eventId);
+        const confirmed = await currentCustomerSnapshot(stripe, customerId, userId);
+        if (JSON.stringify(snapshot) === JSON.stringify(confirmed)) return;
     }
-    await applySnapshot(userId, revokedSnapshot(customerId, "canceled"), eventId);
+    throw new Error("Subscription state changed during synchronization");
 }
 
-async function syncFromInvoiceFailure(
+async function currentCustomerSnapshot(
     stripe: Stripe,
-    invoice: Stripe.Invoice,
-    eventId: string,
-): Promise<void> {
-    const subRef = (invoice as unknown as { subscription?: string | Stripe.Subscription })
-        .subscription;
-    const subId = typeof subRef === "string" ? subRef : subRef?.id;
-    if (!subId) return;
-    const sub = await stripe.subscriptions.retrieve(subId);
-    const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
-    const userId = await resolveUserId(sub, customerId);
-    if (!userId) {
-        console.warn("[WEBHOOK] no userId for failed invoice", invoice.id);
-        return;
+    customerId: string,
+    userId: string,
+): Promise<PremiumSnapshot> {
+    const subscriptions: Stripe.Subscription[] = [];
+    for await (const sub of stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 })) {
+        if (!sub.metadata.userId || sub.metadata.userId === userId) subscriptions.push(sub);
     }
-    // Re-fetch state from Stripe — could be past_due, unpaid, or already active
-    // again if a retry succeeded by the time we processed this event.
-    await applySnapshot(userId, snapshotFromSubscription(sub), eventId);
+    subscriptions.sort((left, right) => right.created - left.created);
+    const current = subscriptions.find((sub) => isPremiumStatus(sub.status)) ?? subscriptions[0];
+    return current ? snapshotFromSubscription(current) : revokedSnapshot(customerId, "canceled");
 }

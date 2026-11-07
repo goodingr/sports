@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useStats } from '@/hooks/useStats';
 import { Container } from '@/components/ui/Container';
 import { TrendingUp, DollarSign, Percent, ChevronUp, ChevronDown } from 'lucide-react';
+import Link from 'next/link';
 
 export function HeroStats() {
     const { stats, loading, error } = useStats();
@@ -60,6 +61,7 @@ export function HeroStats() {
                                 <p className="mt-1 text-xs text-muted-foreground">
                                     {hasResults ? 'Settled model selections using simulated stakes.' : 'No settled model selections yet.'}
                                 </p>
+                                <Link href="/record" className="mt-2 inline-block text-xs text-primary hover:underline">View the published pick record</Link>
                             </div>
                             {hasResults && <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
                                 <StatCard

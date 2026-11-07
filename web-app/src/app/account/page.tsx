@@ -35,6 +35,7 @@ export default async function AccountPage({ searchParams }: PageProps) {
     const meta = (user?.publicMetadata ?? {}) as Record<string, unknown>;
     const isPremium = meta.is_premium === true || meta.isPremium === true;
     const status = typeof meta.subscription_status === "string" ? meta.subscription_status : null;
+    const cancelScheduled = meta.subscription_cancel_at_period_end === true;
     const periodEnd =
         typeof meta.subscription_current_period_end === "number"
             ? meta.subscription_current_period_end
@@ -83,12 +84,12 @@ export default async function AccountPage({ searchParams }: PageProps) {
                     <div className="flex items-center justify-between gap-4">
                         <dt className="text-muted-foreground">Status</dt>
                         <dd className="font-medium text-foreground capitalize">
-                            {status ? status.replace(/_/g, " ") : "No active subscription"}
+                            {cancelScheduled && isPremium ? "Cancellation scheduled" : status ? status.replace(/_/g, " ") : "No active subscription"}
                         </dd>
                     </div>
                     {periodEnd && isPremium && (
                         <div className="flex items-center justify-between gap-4">
-                            <dt className="text-muted-foreground">Renews</dt>
+                            <dt className="text-muted-foreground">{cancelScheduled ? "Access until" : "Renews"}</dt>
                             <dd className="font-medium text-foreground">{formatDate(periodEnd)}</dd>
                         </div>
                     )}

@@ -34,8 +34,12 @@ function makeFakeClerk(users: Record<string, StoredUser>) {
                 },
             ) {
                 const user = users[id];
-                if (patch.publicMetadata) user.publicMetadata = patch.publicMetadata;
-                if (patch.privateMetadata) user.privateMetadata = patch.privateMetadata;
+                for (const key of ['publicMetadata', 'privateMetadata'] as const) {
+                    for (const [field, value] of Object.entries(patch[key] ?? {})) {
+                        if (value === null) delete user[key][field];
+                        else user[key][field] = value;
+                    }
+                }
                 return user;
             },
         },
@@ -93,6 +97,15 @@ describe("snapshotFromSubscription", () => {
         const snap = snapshotFromSubscription(makeSubscription({ status: "past_due" }));
         expect(snap.is_premium).toBe(false);
     });
+    it('retains access through a scheduled cancellation and records the end date', () => {
+        const snap = snapshotFromSubscription(makeSubscription({
+            cancel_at_period_end: true,
+            cancel_at: 1_790_000_000,
+        }));
+        expect(snap.is_premium).toBe(true);
+        expect(snap.subscription_cancel_at_period_end).toBe(true);
+        expect(snap.subscription_current_period_end).toBe(1_790_000_000);
+    });
 });
 
 describe("applySnapshot", () => {
@@ -120,7 +133,7 @@ describe("applySnapshot", () => {
         const users: Record<string, StoredUser> = {
             user_clerk_1: {
                 id: "user_clerk_1",
-                publicMetadata: {},
+                publicMetadata: { ...snapshotFromSubscription(makeSubscription()) },
                 privateMetadata: { stripe_last_event_id: "evt_dup" },
             },
         };
@@ -131,7 +144,7 @@ describe("applySnapshot", () => {
             "evt_dup",
         );
         expect(changed).toBe(false);
-        expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBeUndefined();
+        expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBe(true);
     });
 
     it("revokes premium when applying a revoked snapshot", async () => {
@@ -143,6 +156,8 @@ describe("applySnapshot", () => {
                     subscription_status: "active",
                     stripe_customer_id: "cus_abc",
                     subscription_current_period_end: 1_800_000_000,
+                    isPremium: true,
+                    preference: 'kept',
                 },
                 privateMetadata: {},
             },
@@ -158,6 +173,22 @@ describe("applySnapshot", () => {
         expect(
             users.user_clerk_1.publicMetadata.subscription_current_period_end,
         ).toBeUndefined();
+        expect(users.user_clerk_1.publicMetadata.isPremium).toBeUndefined();
+        expect(users.user_clerk_1.publicMetadata.preference).toBe('kept');
+    });
+
+    it('repairs changed Stripe state even when an event was already delivered', async () => {
+        const users = {
+            user_clerk_1: {
+                id: 'user_clerk_1',
+                publicMetadata: { ...snapshotFromSubscription(makeSubscription()) },
+                privateMetadata: { stripe_last_event_id: 'evt_retry' },
+            },
+        };
+        setClerkForTests(makeFakeClerk(users) as never);
+
+        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_retry')).toBe(true);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
     });
 });
 

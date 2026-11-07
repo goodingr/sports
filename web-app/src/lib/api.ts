@@ -54,6 +54,45 @@ export interface StatsResponse {
     total_bets: number;
 }
 
+export interface PublishedPick {
+    game_id: string;
+    league: string;
+    home_team: string;
+    away_team: string;
+    start_time_utc: string;
+    published_at: string;
+    market: string;
+    side: string;
+    moneyline: number;
+    total_line: number | null;
+    book: string;
+    rule_id: string;
+    outcome: 'win' | 'loss' | 'push' | 'void';
+    profit_units: number;
+    home_score: number | null;
+    away_score: number | null;
+    reason: string | null;
+}
+
+export interface PublishedRecordResponse {
+    data: PublishedPick[];
+    total: number;
+    page: number;
+    limit: number;
+    graded_picks: number;
+    wins: number;
+    losses: number;
+    pushes: number;
+    voids: number;
+    profit_units: number;
+    roi_percent: number | null;
+    win_rate_percent: number | null;
+    basis: string;
+    pending_picks?: number;
+    grading_corrections?: number;
+    last_processed_at?: string | null;
+}
+
 export interface OddsRecord {
     market: string;
     outcome: string;

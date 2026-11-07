@@ -41,6 +41,14 @@ function makeStripeWithMocks(opts: {
                 if (!subs[id]) throw new Error(`subscription not found: ${id}`);
                 return subs[id];
             },
+            list: (params: { customer: string; status: string; limit: number }) => ({
+                async *[Symbol.asyncIterator]() {
+                    expect(params.status).toBe('all');
+                    for (const sub of Object.values(subs)) {
+                        if (sub.customer === params.customer) yield sub;
+                    }
+                },
+            }),
         },
         customers: {
             retrieve: async (id: string) => {
@@ -72,6 +80,7 @@ function signedRequest(stripe: Stripe, event: TestEvent): Request {
 function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.Subscription {
     return {
         id: "sub_test",
+        created: 1_790_000_000,
         status: "active",
         customer: "cus_test",
         metadata: { userId: "user_clerk_1" },
@@ -103,8 +112,12 @@ function makeFakeClerk(users: Record<string, StoredUser>) {
                 },
             ) {
                 const user = users[id];
-                if (patch.publicMetadata) user.publicMetadata = patch.publicMetadata;
-                if (patch.privateMetadata) user.privateMetadata = patch.privateMetadata;
+                for (const key of ['publicMetadata', 'privateMetadata'] as const) {
+                    for (const [field, value] of Object.entries(patch[key] ?? {})) {
+                        if (value === null) delete user[key][field];
+                        else user[key][field] = value;
+                    }
+                }
                 return user;
             },
         },
@@ -179,7 +192,9 @@ describe("POST /api/webhooks/stripe", () => {
             stripe_customer_id: "cus_test",
         };
         setClerkForTests(makeFakeClerk(users) as never);
-        const stripe = makeStripeWithMocks({});
+        const stripe = makeStripeWithMocks({
+            subscriptions: { sub_test: makeSubscription({ status: 'canceled' }) },
+        });
         setStripeForTests(stripe);
 
         const event: TestEvent = {
@@ -202,7 +217,9 @@ describe("POST /api/webhooks/stripe", () => {
             subscription_status: "active",
         };
         setClerkForTests(makeFakeClerk(users) as never);
-        const stripe = makeStripeWithMocks({});
+        const stripe = makeStripeWithMocks({
+            subscriptions: { sub_test: makeSubscription({ status: 'past_due' }) },
+        });
         setStripeForTests(stripe);
 
         const event: TestEvent = {
@@ -279,6 +296,143 @@ describe("POST /api/webhooks/stripe", () => {
         expect(users.user_clerk_1.publicMetadata.sentinel).toBe(
             "should-not-be-overwritten",
         );
+    });
+
+    it('keeps cancellation applied when an older active event arrives later', async () => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({
+            subscriptions: { sub_test: makeSubscription({ status: 'canceled' }) },
+        });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_old_active', type: 'customer.subscription.updated',
+            data: { object: makeSubscription({ status: 'active' }) },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+        expect(users.user_clerk_1.publicMetadata.subscription_status).toBe('canceled');
+    });
+
+    it('retains a replacement subscription when an old subscription cancellation arrives', async () => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({
+            subscriptions: {
+                sub_test: makeSubscription({ status: 'canceled' }),
+                sub_new: makeSubscription({ id: 'sub_new', created: 1_790_000_001 }),
+            },
+        });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_old_canceled', type: 'customer.subscription.deleted',
+            data: { object: makeSubscription({ status: 'canceled' }) },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(true);
+    });
+
+    it.each(['sub_test', makeSubscription()])('handles current invoice parent subscription %s', async (subscription) => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({
+            subscriptions: { sub_test: makeSubscription({ status: 'unpaid' }) },
+        });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_current_invoice', type: 'invoice.payment_failed',
+            data: { object: { parent: { type: 'subscription_details', subscription_details: { subscription } } } },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.subscription_status).toBe('unpaid');
+    });
+
+    it('restores access when a successful invoice follows payment recovery', async () => {
+        const users = makeUsers();
+        users.user_clerk_1.publicMetadata = { is_premium: false, subscription_status: 'unpaid' };
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({ subscriptions: { sub_test: makeSubscription() } });
+        setStripeForTests(stripe);
+
+        const response = await POST(signedRequest(stripe, {
+            id: 'evt_recovered_invoice', type: 'invoice.paid',
+            data: { object: { parent: { type: 'subscription_details', subscription_details: { subscription: 'sub_test' } } } },
+        }));
+
+        expect(response.status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(true);
+    });
+
+    it('reconciles a cancellation that races with an older access grant', async () => {
+        const users = makeUsers();
+        const subscriptions = { sub_test: makeSubscription() };
+        const clerk = makeFakeClerk(users);
+        const writeMetadata = clerk.users.updateUserMetadata;
+        let allowFirstWrite: () => void;
+        const firstWriteGate = new Promise<void>((resolve) => { allowFirstWrite = resolve; });
+        let notifyFirstWrite: () => void;
+        const firstWriteStarted = new Promise<void>((resolve) => { notifyFirstWrite = resolve; });
+        let writes = 0;
+        vi.spyOn(clerk.users, 'updateUserMetadata').mockImplementation(async (userId, patch) => {
+            writes += 1;
+            if (writes === 1) {
+                notifyFirstWrite();
+                await firstWriteGate;
+            }
+            return writeMetadata(userId, patch);
+        });
+        setClerkForTests(clerk as never);
+        const stripe = makeStripeWithMocks({ subscriptions });
+        setStripeForTests(stripe);
+
+        const oldGrant = POST(signedRequest(stripe, {
+            id: 'evt_before_cancellation', type: 'customer.subscription.updated',
+            data: { object: makeSubscription() },
+        }));
+        await firstWriteStarted;
+        subscriptions.sub_test = makeSubscription({ status: 'canceled' });
+        const cancellation = await POST(signedRequest(stripe, {
+            id: 'evt_cancellation', type: 'customer.subscription.deleted',
+            data: { object: subscriptions.sub_test },
+        }));
+        allowFirstWrite!();
+
+        expect(cancellation.status).toBe(200);
+        expect((await oldGrant).status).toBe(200);
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+        expect(users.user_clerk_1.publicMetadata.subscription_status).toBe('canceled');
+    });
+
+    it('asks Stripe to retry when current subscription state cannot be loaded', async () => {
+        const users = makeUsers();
+        users.user_clerk_1.publicMetadata = { is_premium: false };
+        setClerkForTests(makeFakeClerk(users) as never);
+        const stripe = makeStripeWithMocks({});
+        Object.assign(stripe.subscriptions, {
+            list: () => ({
+                async *[Symbol.asyncIterator]() {
+                    throw new Error('Stripe unavailable');
+                },
+            }),
+        });
+        setStripeForTests(stripe);
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const response = await POST(signedRequest(stripe, {
+                id: 'evt_retry_later', type: 'customer.subscription.updated',
+                data: { object: makeSubscription() },
+            }));
+            expect(response.status).toBe(500);
+            expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+        } finally {
+            log.mockRestore();
+        }
     });
 
     it("ignores unrelated event types", async () => {
