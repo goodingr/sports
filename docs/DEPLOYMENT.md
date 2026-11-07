@@ -81,8 +81,8 @@ Budget for both markets per available league and scores. The paper reserve
 and request caps cover supplemental collection only.
 [Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
 
-Set both league scopes explicitly in the host's `.env`. For a future
-NBA-only paid release, use:
+Set both league scopes explicitly in the host's `.env`. The example below
+scopes a future paid release to the NBA.
 
 ```dotenv
 PAID_RELEASE_LEAGUES=NBA

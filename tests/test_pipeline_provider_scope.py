@@ -104,11 +104,16 @@ export -f python
             "skip_paper": "--skip-paper", "skip_prediction": "--skip-prediction",
         }
 
-    def run(*options, fail_quality=False, fail_schedule=False, fail_step="", daily=False, local_focus=False):
+    def run(
+        *options, fail_quality=False, fail_schedule=False, fail_step="", daily=False,
+        local_focus=False, local_paid=None, paid_env="",
+    ):
         if not daily:
             options += ("skip_benchmark",)
         if local_focus:
             (config / "research_provider_leagues.local").touch()
+        if local_paid is not None:
+            (config / "paid_release_leagues.local").write_text(local_paid, encoding="ascii", newline="")
         result = subprocess.run(
             [*command, *(flags[option] for option in options)], cwd=tmp_path,
             env={
@@ -116,6 +121,7 @@ export -f python
                 "PROVIDER_TEST_FAIL_QUALITY": str(int(fail_quality)),
                 "PROVIDER_TEST_FAIL_SCHEDULE": str(int(fail_schedule)),
                 "PROVIDER_TEST_FAIL_STEP": fail_step,
+                "PAID_RELEASE_LEAGUES": paid_env,
             },
             capture_output=True, text=True, timeout=45,
         )
@@ -171,6 +177,35 @@ def test_focused_collection_keeps_release_revocation(pipeline):
     assert result.returncode == 1, result.stdout + result.stderr
     assert [args[0] for args in commands(calls, "src.predict.publishable_bets")] == ["revoke"]
     assert len(commands(calls, "src.data.ingest_odds")) == 2
+
+
+def test_local_paid_scope_avoids_unrelated_gate_failure(pipeline):
+    result, calls = pipeline(
+        "skip_prediction", local_focus=True, local_paid="NBA\r\n", fail_quality=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ["--leagues", "NBA"] in commands(calls, "src.data.quality")
+    assert all(args[args.index("--leagues") + 1] == "NBA" for args in commands(calls, "src.data.quality"))
+    assert [args[1] for args in commands(calls, "src.data.ingest_odds")] == RESEARCH
+    publish, = commands(calls, "src.predict.publishable_bets")
+    assert publish[0] == "publish" and publish[publish.index("--leagues") + 1] == "NBA"
+
+
+@pytest.mark.parametrize(
+    "options,local_paid,paid_env,expected_scope,warns",
+    [
+        ((), "NBA\n", "NBA,NHL", "NBA,NHL", False),
+        ((), "NBA,TYPO\n", "", PAID, True),
+        (("soccer",), "NBA\n", "", ",".join(LEAGUES[5:]), False),
+    ],
+)
+def test_local_paid_scope_precedence_and_validation(pipeline, options, local_paid, paid_env, expected_scope, warns):
+    result, calls = pipeline("skip_prediction", *options, local_paid=local_paid, paid_env=paid_env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("Invalid workspace paid-release scope" in result.stdout) is warns
+    assert ["--leagues", expected_scope] in commands(calls, "src.data.quality")
+    publish, = commands(calls, "src.predict.publishable_bets")
+    assert publish[publish.index("--leagues") + 1] == expected_scope
 
 
 def test_conflicting_scope_exits_before_any_commands(pipeline):
