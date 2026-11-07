@@ -101,7 +101,7 @@ export async function createOrResumeCheckout(
         customer,
         currency: CHECKOUT_CURRENCY,
         adaptive_pricing: { enabled: false },
-        success_url: new URL("/account?success=true", appUrl).href,
+        success_url: new URL("/account?success=true&session_id={CHECKOUT_SESSION_ID}", appUrl).href,
         cancel_url: new URL("/pricing?canceled=true", appUrl).href,
         payment_method_types: ["card"],
         mode: "subscription",

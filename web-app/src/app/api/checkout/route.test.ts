@@ -3,12 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auth, currentUser } from '@clerk/nextjs/server';
-import { getClerk, getStripe } from '@/lib/billing';
-import { CheckoutStore } from '@/lib/checkout-store';
+import Stripe from 'stripe';
+import { reconcileCheckoutReturn } from '@/app/account/checkout-return';
+import { POST as stripeWebhook } from '@/app/api/webhooks/stripe/route';
+import { getClerk, getStripe, setClerkForTests } from '@/lib/billing';
+import { CheckoutStore, type CheckoutSessionParams } from '@/lib/checkout-store';
 import { POST } from './route';
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: vi.fn(), currentUser: vi.fn() }));
 vi.mock('server-only', () => ({}));
+vi.mock('next/headers', () => ({ headers: async () => new Headers({ 'stripe-signature': signature }) }));
 vi.mock('@/lib/billing', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/lib/billing')>(),
     getAppUrl: () => 'https://app.example.test',
@@ -34,6 +38,10 @@ type Session = {
     livemode: boolean;
     expires_at: number;
     subscription: string | null;
+    currency: string;
+    amount_total: number;
+    payment_status: 'paid' | 'unpaid';
+    line_items: { has_more: boolean; data: { price: { id: string }; quantity: number }[] };
 };
 
 const fetchAccess = vi.fn<typeof fetch>();
@@ -53,24 +61,49 @@ const customerKeys = new Set<string>();
 let directory: string;
 let path: string;
 let metadata: Record<string, unknown>;
+let privateMetadata: Record<string, unknown>;
+let signature: string;
+const webhookSecret = 'whsec_checkout_return_fixture';
+const webhooks = new Stripe('sk_test_checkout_return_fixture').webhooks;
 
 async function* records<T>(rows: Iterable<T>) {
     yield* rows;
 }
 
-function sessionFor(params: Pick<Session, 'customer' | 'metadata'>, key: string): Session {
+function sessionFor(params: CheckoutSessionParams, key: string): Session {
     let id = sessionKeys.get(key);
     if (!id) {
         id = `cs_test_${sessionKeys.size + 1}`;
         sessionKeys.set(key, id);
         sessions.set(id, {
-            ...params, id, livemode: false, status: 'open', mode: 'subscription',
+            id, customer: params.customer, metadata: params.metadata, currency: params.currency,
+            livemode: false, status: 'open', mode: 'subscription',
             url: `https://checkout.stripe.com/${id}`,
             expires_at: Math.floor(Date.now() / 1000) + 3600,
             subscription: null,
+            amount_total: 2900,
+            payment_status: 'unpaid',
+            line_items: {
+                has_more: false,
+                data: params.line_items.map(({ price, quantity }) => ({ price: { id: price }, quantity })),
+            },
         });
     }
     return { ...sessions.get(id)! };
+}
+
+async function completeCheckout() {
+    expect((await POST()).status).toBe(200);
+    const session = sessions.get('cs_test_1')!;
+    const sub = {
+        id: 'sub_test', customer: session.customer, status: 'active', livemode: session.livemode,
+        created: 1_800_000_000, metadata: session.metadata,
+        items: { data: [{ price: { id: validPrice.id }, current_period_end: 1_803_000_000 }] },
+    };
+    Object.assign(session, { status: 'complete', subscription: sub.id, payment_status: 'paid' });
+    retrieveSubscription.mockResolvedValue(sub);
+    listSubscriptions.mockImplementation(() => records([sub]));
+    return { session, sub };
 }
 
 beforeEach(() => {
@@ -80,23 +113,35 @@ beforeEach(() => {
     new CheckoutStore(path).close();
     vi.stubEnv('SPORTS_CHECKOUT_DB_PATH', path);
     vi.stubEnv('STRIPE_PRICE_ID', validPrice.id);
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', webhookSecret);
     vi.stubGlobal('fetch', fetchAccess);
     fetchAccess.mockImplementation(async () => Response.json({ checkout_available: true }));
     vi.mocked(auth).mockResolvedValue({ userId: scope.userId } as Awaited<ReturnType<typeof auth>>);
     metadata = {};
+    privateMetadata = {};
+    signature = '';
     vi.mocked(currentUser).mockImplementation(async () => ({
         id: scope.userId, publicMetadata: { ...metadata },
     } as Awaited<ReturnType<typeof currentUser>>));
-    vi.mocked(getClerk).mockResolvedValue({
-        users: { updateUserMetadata: updateMetadata },
-    } as unknown as Awaited<ReturnType<typeof getClerk>>);
-    updateMetadata.mockImplementation(async (_, patch) => Object.assign(metadata, patch.publicMetadata));
+    const clerk = {
+        users: {
+            getUser: async () => ({ publicMetadata: { ...metadata }, privateMetadata: { ...privateMetadata } }),
+            updateUserMetadata: updateMetadata,
+        },
+    } as unknown as Awaited<ReturnType<typeof getClerk>>;
+    vi.mocked(getClerk).mockResolvedValue(clerk);
+    setClerkForTests(clerk);
+    updateMetadata.mockImplementation(async (_, patch) => {
+        Object.assign(metadata, patch.publicMetadata);
+        Object.assign(privateMetadata, patch.privateMetadata);
+    });
     vi.mocked(getStripe).mockReturnValue({
         accounts: { retrieve: retrieveAccount },
         prices: { retrieve: retrievePrice },
         customers: { create: createCustomer, retrieve: retrieveCustomer },
         checkout: { sessions: { create: createSession, retrieve: retrieveSession, list: listSessions } },
         subscriptions: { list: listSubscriptions, retrieve: retrieveSubscription },
+        webhooks,
     } as unknown as ReturnType<typeof getStripe>);
     sessions.clear();
     sessionKeys.clear();
@@ -117,6 +162,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    setClerkForTests(null);
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -161,6 +207,7 @@ describe('POST /api/checkout', () => {
         expect(createCustomer).toHaveBeenCalledExactlyOnceWith({ metadata: { userId: scope.userId } }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
         expect(createSession).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
             customer: 'cus_test', mode: 'subscription', currency: 'usd',
+            success_url: 'https://app.example.test/account?success=true&session_id={CHECKOUT_SESSION_ID}',
             adaptive_pricing: { enabled: false }, line_items: [{ price: validPrice.id, quantity: 1 }],
         }), expect.objectContaining({ idempotencyKey: expect.any(String) }));
     });
@@ -295,5 +342,95 @@ describe('POST /api/checkout', () => {
         expect((await POST()).status).toBe(503);
         expect(createCustomer).not.toHaveBeenCalled();
         expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('replays an older reservation with its original success URL and idempotency key', async () => {
+        const params: CheckoutSessionParams = {
+            customer: 'cus_test', mode: 'subscription', currency: 'usd', adaptive_pricing: { enabled: false },
+            success_url: 'https://app.example.test/account?success=true',
+            cancel_url: 'https://app.example.test/pricing?canceled=true',
+            payment_method_types: ['card'], billing_address_collection: 'auto',
+            line_items: [{ price: validPrice.id, quantity: 1 }],
+            metadata: { userId: scope.userId }, subscription_data: { metadata: { userId: scope.userId } },
+        };
+        const store = new CheckoutStore(path, { requireExisting: true });
+        store.reserveCustomer(scope, params, params.customer);
+        const attempt = store.reserveSession(scope, params);
+        store.close();
+        metadata.stripe_customer_id = params.customer;
+
+        expect((await POST()).status).toBe(200);
+        expect(createSession).toHaveBeenCalledExactlyOnceWith(params, { idempotencyKey: attempt.key });
+    });
+});
+
+describe('authenticated Checkout return', () => {
+    it('reconciles the exact paid session before any webhook and retains signed cancellation handling', async () => {
+        const { session, sub } = await completeCheckout();
+        expect(metadata.is_premium).toBeUndefined();
+
+        expect(await reconcileCheckoutReturn(session.id)).toBe(true);
+        expect(metadata).toMatchObject({ is_premium: true, subscription_status: 'active', stripe_customer_id: session.customer });
+        expect(retrieveSession).toHaveBeenCalledWith(session.id, { expand: ['line_items'] });
+        const writes = updateMetadata.mock.calls.length;
+        expect(await reconcileCheckoutReturn(session.id)).toBe(true);
+        expect(updateMetadata).toHaveBeenCalledTimes(writes);
+        expect((await POST()).status).toBe(409);
+        expect(sessionKeys.size).toBe(1);
+
+        sub.status = 'canceled';
+        const body = JSON.stringify({
+            id: 'evt_cancel_return_fixture', type: 'customer.subscription.deleted', data: { object: sub },
+        });
+        signature = webhooks.generateTestHeaderString({ payload: body, secret: webhookSecret });
+        expect((await stripeWebhook(new Request('https://app.example.test/api/webhooks/stripe', { method: 'POST', body }))).status).toBe(200);
+        expect(metadata).toMatchObject({ is_premium: false, subscription_status: 'canceled' });
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+    });
+
+    it.each<[string, Partial<Session>]>([
+        ['a different customer', { customer: 'cus_other' }],
+        ['a session tagged for another user', { metadata: { userId: 'user_other' } }],
+        ['an open session', { status: 'open' }],
+        ['an unpaid session', { payment_status: 'unpaid' }],
+        ['a zero-dollar session', { amount_total: 0 }],
+        ['an unresolved subscription', { subscription: null }],
+        ['an unrelated price', { line_items: { has_more: false, data: [{ price: { id: 'price_other' }, quantity: 1 }] } }],
+    ])('leaves entitlements untouched for %s', async (_, overrides) => {
+        const { session } = await completeCheckout();
+        Object.assign(session, overrides);
+        const writes = updateMetadata.mock.calls.length;
+
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+        expect(updateMetadata).toHaveBeenCalledTimes(writes);
+        expect(metadata.is_premium).toBeUndefined();
+    });
+
+    it('waits until Stripe confirms the attached subscription in current account state', async () => {
+        const { session, sub } = await completeCheckout();
+        listSubscriptions.mockImplementation(() => records([{ ...sub, id: 'sub_other' }]));
+
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+        expect(metadata.is_premium).toBeUndefined();
+    });
+
+    it('rejects another signed-in account replaying a real session ID', async () => {
+        const { session } = await completeCheckout();
+        // The fake Clerk account shares the Stripe ID to prove the session's owner tag is checked too.
+        vi.mocked(auth).mockResolvedValueOnce({ userId: 'user_other' } as Awaited<ReturnType<typeof auth>>);
+        const writes = updateMetadata.mock.calls.length;
+
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+        expect(updateMetadata).toHaveBeenCalledTimes(writes);
+    });
+
+    it('fails closed without Stripe credentials or a signed-in account', async () => {
+        vi.mocked(getStripe).mockImplementationOnce(() => { throw new Error('Stripe is not configured'); });
+        expect(await reconcileCheckoutReturn('cs_test_1')).toBe(false);
+        vi.mocked(auth).mockResolvedValueOnce({ userId: null } as Awaited<ReturnType<typeof auth>>);
+        expect(await reconcileCheckoutReturn('cs_test_1')).toBe(false);
+        expect(await reconcileCheckoutReturn('invalid-session')).toBe(false);
+        expect(retrieveSession).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
     });
 });

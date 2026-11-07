@@ -170,6 +170,13 @@ can recover checkout. Provider-confirmed terminal sessions can be replaced.
 Keep Stripe's single-subscription setting enabled as a separate control.
 [Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests) · [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
 
+New Checkout sessions return to `/account` with the Stripe session ID. The
+signed-in account can confirm a paid session and recover access while webhook
+delivery is pending. The same reconciliation handles webhook updates, including
+later cancellations. During the test-mode drill, complete Checkout with webhook
+delivery paused, confirm access on the return page, then resume delivery and
+verify a cancellation removes access. [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment?ui=full-page)
+
 ## Networking
 
 - All services share the `sports` Compose network.

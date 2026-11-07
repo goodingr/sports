@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import Stripe from "stripe";
 
+vi.mock("server-only", () => ({}));
+
 process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_secret";
 process.env.STRIPE_PRICE_ID = "price_test";

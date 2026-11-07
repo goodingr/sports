@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ManageSubscriptionButton } from "@/components/account/ManageSubscriptionButton";
+import { isCheckoutSessionId } from "@/lib/stripe-entitlements";
+import { CheckoutReturnStatus } from "./CheckoutReturnStatus";
 
 export const metadata: Metadata = {
     title: "Account | Sports Analytics",
@@ -11,7 +13,7 @@ export const metadata: Metadata = {
 };
 
 interface PageProps {
-    searchParams: Promise<{ success?: string; canceled?: string }>;
+    searchParams: Promise<{ success?: string; session_id?: string | string[] }>;
 }
 
 function formatDate(epochSeconds: number): string {
@@ -23,14 +25,17 @@ function formatDate(epochSeconds: number): string {
 }
 
 export default async function AccountPage({ searchParams }: PageProps) {
+    const params = await searchParams;
+    const sessionId = params.success === "true" && isCheckoutSessionId(params.session_id)
+        ? params.session_id : null;
     const { userId } = await auth();
     if (!userId) {
-        redirect("/login?redirect_url=/account");
+        const destination = sessionId ? `/account?success=true&session_id=${sessionId}` : "/account";
+        redirect(`/login?redirect_url=${encodeURIComponent(destination)}`);
     }
 
     const user = await currentUser();
-    const params = await searchParams;
-    const showSuccess = params.success === "true";
+    const showLegacyStatus = params.success === "true" && params.session_id === undefined;
 
     const meta = (user?.publicMetadata ?? {}) as Record<string, unknown>;
     const isPremium = meta.is_premium === true || meta.isPremium === true;
@@ -51,7 +56,8 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 {email ? <>Signed in as {email}.</> : <>Manage your subscription and billing.</>}
             </p>
 
-            {showSuccess && isPremium && (
+            {sessionId && <CheckoutReturnStatus key={sessionId} sessionId={sessionId} />}
+            {showLegacyStatus && isPremium && (
                 <div
                     role="status"
                     className="mb-6 rounded-xl border border-success/30 bg-success/10 p-4 text-sm text-success"
@@ -60,7 +66,7 @@ export default async function AccountPage({ searchParams }: PageProps) {
                     to published premium picks.
                 </div>
             )}
-            {showSuccess && !isPremium && (
+            {showLegacyStatus && !isPremium && (
                 <div role="status" className="mb-6 rounded-xl border border-white/10 bg-card p-4 text-sm text-muted-foreground">
                     Billing confirmation is pending. Refresh this page to check your access.
                 </div>
