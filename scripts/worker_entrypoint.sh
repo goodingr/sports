@@ -8,14 +8,16 @@
 
 set -euo pipefail
 
-/app/scripts/run_job.sh --validate-live-odds-jobs
-
 for recovery in "${MODELS_DIR:-/app/models}"/.restore-*; do
 	if [[ -e "$recovery" ]]; then
 		echo "[worker] interrupted restore requires recovery before jobs can start" >&2
 		exit 1
 	fi
 done
+
+if [[ -n ${WORKER_LIVE_ODDS_JOBS:-} ]]; then
+	/app/scripts/run_job.sh --validate-live-odds-jobs
+fi
 
 LOG_DIR=${LOG_DIR:-/app/logs}
 HEARTBEAT_DIR=${HEARTBEAT_DIR:-/app/logs/heartbeat}
