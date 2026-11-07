@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 
 from scripts.backup_evidence import EVIDENCE_ZIP, create_evidence_zip
 from src.db.core import connect, initialize
+from src.predict import paper_ledger
 from src.predict.engine import PredictionEngine
 from src.predict.paper_ledger import (
     capture_predictions,
@@ -209,6 +210,75 @@ def test_scoped_capture_checks_earlier_start_at_ledger_write(warehouse):
         trial, predictions, trial.model_sha256, db, fixture_start_limits={"game": earlier_start}
     ) == {"outside_decision_window": 1}
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {"recorded": 1}
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected"),
+    [
+        ("late_start", "outside_decision_window"),
+        ("minimum_lead", "recorded"),
+        ("expired_quote", "stale_quote"),
+        ("maximum_quote_age", "recorded"),
+        ("review_deadline", "trial_closed"),
+        ("clock_regression", "invalid_time"),
+    ],
+)
+def test_capture_rechecks_wall_clock_after_original_quote_verification(
+    warehouse, monkeypatch, boundary, expected
+):
+    db, trial, predictions, fetched_at = warehouse
+    verification_duration = timedelta(seconds=2)
+    attempt_at = fetched_at + timedelta(seconds=1)
+    start = fetched_at + timedelta(hours=2)
+    if boundary in {"late_start", "minimum_lead"}:
+        lead_slack = 1 if boundary == "late_start" else 2
+        start = attempt_at + timedelta(minutes=trial.min_minutes_before_start, seconds=lead_slack)
+    elif boundary in {"expired_quote", "maximum_quote_age"}:
+        age_slack = 1 if boundary == "expired_quote" else 2
+        attempt_at = fetched_at + timedelta(
+            minutes=trial.max_quote_age_minutes, seconds=-age_slack
+        )
+    elif boundary == "review_deadline":
+        trial = replace(
+            trial,
+            trial_id=f"{trial.trial_id}_clock_test",
+            review_at=(attempt_at + verification_duration).isoformat(),
+        )
+    elif boundary == "clock_regression":
+        verification_duration = timedelta(seconds=-1)
+    predictions = predictions.assign(
+        commence_time=start.isoformat(), predicted_at=attempt_at.isoformat()
+    )
+    with connect(db) as conn:
+        _set_fixture_start(conn, "game", start.isoformat())
+
+    class Clock(datetime):
+        current = attempt_at
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current.astimezone(tz)
+
+    verify_original_quote = paper_ledger._quote_source_start
+
+    def verify_with_clock_change(*args, **kwargs):
+        provider_start = verify_original_quote(*args, **kwargs)
+        assert provider_start is not None
+        Clock.current += verification_duration
+        return provider_start
+
+    monkeypatch.setattr(paper_ledger, "datetime", Clock)
+    monkeypatch.setattr(paper_ledger, "_quote_source_start", verify_with_clock_change)
+
+    assert capture_predictions(trial, predictions, trial.model_sha256, db) == {expected: 1}
+    with connect(db) as conn:
+        decision = conn.execute("SELECT captured_at FROM paper_decisions").fetchone()
+        attempt = conn.execute("SELECT observed_at FROM paper_capture_runs").fetchone()
+    assert attempt["observed_at"] == attempt_at.isoformat()
+    if expected == "recorded":
+        assert decision["captured_at"] == Clock.current.isoformat()
+    else:
+        assert decision is None
 
 
 def test_scoped_capture_checks_clock_span_across_all_three_sources(warehouse):

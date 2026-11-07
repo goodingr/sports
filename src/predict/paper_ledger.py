@@ -242,9 +242,8 @@ def _capture_one(
         fetched_at = _utc(quote["fetched_at_utc"])
     except ValueError:
         return "invalid_time"
-    if not fetched_at <= predicted_at or now - fetched_at > timedelta(
-        minutes=trial.max_quote_age_minutes
-    ):
+    maximum_quote_age = timedelta(minutes=trial.max_quote_age_minutes)
+    if not fetched_at <= predicted_at or now - fetched_at > maximum_quote_age:
         return "stale_quote"
     if not _model_inputs_match(conn, row, quote):
         return "unverified_model_inputs"
@@ -299,6 +298,17 @@ def _capture_one(
     if edge < trial.min_edge or expected_value(model, price, stake=1) <= 0:
         return "below_edge_threshold"
 
+    # Original quote verification can outlast the entry window.
+    captured_at = datetime.now(timezone.utc)
+    if captured_at < now:
+        return "invalid_time"
+    if captured_at >= _utc(trial.review_at):
+        return "trial_closed"
+    if decision_start - captured_at < minimum_lead:
+        return "outside_decision_window"
+    if captured_at - fetched_at > maximum_quote_age:
+        return "stale_quote"
+
     cursor = conn.execute(
         """
         INSERT INTO paper_decisions (
@@ -320,7 +330,7 @@ def _capture_one(
             game["home_team_id"],
             game["away_team_id"],
             decision_start.isoformat(),
-            now.isoformat(),
+            captured_at.isoformat(),
             predicted_at.isoformat(),
             trial.odds_source,
             quote["snapshot_id"],
