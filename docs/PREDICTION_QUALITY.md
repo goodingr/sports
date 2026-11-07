@@ -375,6 +375,8 @@ from that snapshot. An independent moneyline update cannot substitute a model
 input, and an incomplete newer totals observation still supersedes an older pair.
 The collector and ledger also check the original receipt for the ordered matchup,
 the paired totals and moneylines, and the provider kickoff before accepting entry.
+The ledger rechecks the minimum lead, quote age, and review deadline after
+verifying the receipt and timestamps the decision at that final check.
 
 The scheduled pipeline downloads NBA odds and captures eligible decisions after
 the preflight backup and before history ingestion. It reuses that download for
