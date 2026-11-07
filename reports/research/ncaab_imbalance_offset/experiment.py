@@ -98,8 +98,12 @@ def _paired_quote(event: dict, protocol: dict, fetched: datetime, kickoff: datet
     return Quote(event["id"], teams, kickoff, fetched, totals[1], totals[0], moneyline[0])
 
 
-def _quotes(conn: sqlite3.Connection, data_dir: Path, protocol: dict, start: datetime, end: datetime):
+def _quotes(
+    conn: sqlite3.Connection, data_dir: Path, protocol: dict, start: datetime, end: datetime,
+    *, first_capture: datetime | None = None,
+):
     minimum, maximum = (timedelta(hours=value) for value in protocol["selection"]["decision_lead_hours_inclusive"])
+    capture_start = first_capture if first_capture is not None else start - maximum
     tolerance = timedelta(minutes=protocol["selection"]["maximum_observed_kickoff_drift_minutes_inclusive"])
     expected_url = f"https://api.the-odds-api.com/v4/sports/{protocol['sport_key']}/odds"
     captures = conn.execute(
@@ -109,17 +113,17 @@ def _quotes(conn: sqlite3.Connection, data_dir: Path, protocol: dict, start: dat
         WHERE s.league = ? AND o.source = ? AND o.raw_path IS NOT NULL
           AND julianday(o.fetched_at_utc) BETWEEN julianday(?) AND julianday(?)
         """,
-        (protocol["league"], protocol["source"], (start - maximum).isoformat(), end.isoformat()),
+        (protocol["league"], protocol["source"], capture_start.isoformat(), end.isoformat()),
     )
     ordered = [
         (fetched, snapshot_id, path)
         for snapshot_id, stamp, path in captures
-        if (fetched := _utc_timestamp(stamp)) is not None and start - maximum <= fetched < end
+        if (fetched := _utc_timestamp(stamp)) is not None and capture_start <= fetched < end
     ]
     diagnostics: Counter[str] = Counter()
     receipts: set[tuple[datetime, bytes]] = set()
     selected: dict[str, Quote] = {}
-    ambiguous: set[str] = set()
+    histories: dict[str, set[tuple[tuple[str, str], datetime]]] = defaultdict(set)
     for fetched, _, path in sorted(ordered):
         try:
             raw = read_raw_evidence(path, data_dir)
@@ -152,17 +156,20 @@ def _quotes(conn: sqlite3.Connection, data_dir: Path, protocol: dict, start: dat
             teams = _teams(event, protocol["league"])
             if kickoff is None or teams is None:
                 continue
-            previous = selected.get(event_id)
-            if previous and (previous.teams != teams or abs(previous.kickoff - kickoff) > tolerance):
-                ambiguous.add(event_id)
-            if previous or not (start <= kickoff < end and minimum <= kickoff - fetched <= maximum):
+            histories[event_id].add((teams, kickoff))
+            if event_id in selected or not (start <= kickoff < end and minimum <= kickoff - fetched <= maximum):
                 continue
             quote = _paired_quote(event, protocol, fetched, kickoff, teams)
             if quote is not None:
                 selected[event_id] = quote
 
+    ambiguous: set[str] = set()
     matchups = defaultdict(list)
     for quote in selected.values():
+        history = histories[quote.event_id]
+        starts = [kickoff for _, kickoff in history]
+        if len({teams for teams, _ in history}) != 1 or max(starts) - min(starts) > tolerance:
+            ambiguous.add(quote.event_id)
         matchups[quote.teams].append(quote)
     for games in matchups.values():
         games.sort(key=lambda quote: quote.kickoff)
@@ -186,6 +193,7 @@ def _score_timestamp(path: Path) -> datetime | None:
 def _score_evidence(score_dir: Path, quotes: dict[str, Quote], protocol: dict, start: datetime, end: datetime):
     tolerance = timedelta(minutes=protocol["selection"]["maximum_observed_kickoff_drift_minutes_inclusive"])
     grades: dict[str, set[tuple[int, int]]] = defaultdict(set)
+    reopened: set[str] = set()
     diagnostics: Counter[str] = Counter()
     first_receipt = None
     for path in sorted(score_dir.glob("scores_*.json")):
@@ -215,8 +223,11 @@ def _score_evidence(score_dir: Path, quotes: dict[str, Quote], protocol: dict, s
                 kickoff is None or max(kickoff, quote.kickoff) >= observed
                 or abs(kickoff - quote.kickoff) > tolerance
                 or _teams(event, protocol["league"]) != quote.teams
-                or event.get("completed") is not True
             ):
+                continue
+            if event.get("completed") is not True:
+                if event.get("completed") is False and event_id in grades:
+                    reopened.add(event_id)
                 continue
             scores = event.get("scores")
             if not isinstance(scores, list) or len(scores) != 2 or not all(isinstance(row, dict) for row in scores):
@@ -234,7 +245,8 @@ def _score_evidence(score_dir: Path, quotes: dict[str, Quote], protocol: dict, s
             ):
                 continue
             grades[event_id].add((home, away))
-    diagnostics["ambiguous_score_fixtures"] = sum(len(scores) > 1 for scores in grades.values())
+    unresolved = reopened | {key for key, pairs in grades.items() if len(pairs) > 1}
+    diagnostics["ambiguous_score_fixtures"] = len(unresolved)
     diagnostics["missing_score_fixtures"] = len(quotes) - len(grades)
     first_receipt_fields = {
         "first_development_score_receipt_at_utc": first_receipt.isoformat() if first_receipt else None,
@@ -243,7 +255,7 @@ def _score_evidence(score_dir: Path, quotes: dict[str, Quote], protocol: dict, s
             for key, quote in quotes.items()
         ),
     }
-    totals = {event_id: sum(next(iter(pairs))) for event_id, pairs in grades.items() if len(pairs) == 1}
+    totals = {event_id: sum(next(iter(pairs))) for event_id, pairs in grades.items() if event_id not in unresolved}
     return totals, {**diagnostics, **first_receipt_fields}
 
 

@@ -1,13 +1,14 @@
 """Exercise the frozen archive and model boundaries without production outcomes."""
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from reports.research.ncaab_imbalance_offset import experiment
+from reports.research.ncaab_imbalance_offset import experiment, review
 
 FETCHED = datetime(2026, 11, 5, 22, tzinfo=timezone.utc)
 TIP = FETCHED + timedelta(hours=2)
@@ -112,6 +113,122 @@ def test_conflicting_and_wrong_identity_grades_stay_unresolved(tmp_path, protoco
         {"name": TEAMS["home_team"], "score": "80"},
         {"name": TEAMS["away_team"], "score": "68"},
     ]))
+    grades, counts = experiment._score_evidence(
+        tmp_path, _cohort(), protocol, FETCHED, TIP + timedelta(hours=8)
+    )
+    assert not grades
+    assert counts["ambiguous_score_fixtures"] == 1
+
+
+def _quote_event(fetched):
+    return {
+        "id": EVENT_ID, "sport_key": "basketball_ncaab", "commence_time": TIP.isoformat(), **TEAMS,
+        "bookmakers": [{"key": "draftkings", "markets": [
+            {"key": "h2h", "last_update": fetched.isoformat(), "outcomes": [
+                {"name": TEAMS["home_team"], "price": -200},
+                {"name": TEAMS["away_team"], "price": 160},
+            ]},
+            {"key": "totals", "last_update": fetched.isoformat(), "outcomes": [
+                {"name": "Over", "point": 142.5, "price": -110},
+                {"name": "Under", "point": 142.5, "price": -110},
+            ]},
+        ]}],
+    }
+
+
+def test_prospective_quote_selection_checks_capture_clock_and_live_source(tmp_path, monkeypatch, protocol):
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("""
+        CREATE TABLE sports(sport_id, league);
+        CREATE TABLE odds_snapshots(snapshot_id, fetched_at_utc, raw_path, sport_id, source);
+        INSERT INTO sports VALUES (1, 'NCAAB');
+    """)
+    captures = [
+        ("before", FETCHED - timedelta(microseconds=1), "the-odds-api"),
+        ("historical", FETCHED, "the-odds-api-history"),
+        ("live", FETCHED, "the-odds-api"),
+        ("live_duplicate", FETCHED, "the-odds-api"),
+    ]
+    for name, fetched, source in captures:
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps({
+            "fetched_at": fetched.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"},
+            "results": [_quote_event(fetched)],
+        }), encoding="utf-8")
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES (?, ?, ?, 1, ?)", (name, fetched.isoformat(), str(path), source)
+        )
+
+    original = experiment.read_raw_evidence
+
+    def live_only(path, data_dir):
+        assert Path(path).stem in {"live", "live_duplicate"}
+        return original(path, data_dir)
+
+    monkeypatch.setattr(experiment, "read_raw_evidence", live_only)
+    with conn:
+        quotes, counts = experiment._quotes(
+            conn, tmp_path, protocol, FETCHED, TIP + timedelta(days=1), first_capture=FETCHED
+        )
+    assert len(quotes) == 1
+    assert quotes[EVENT_ID].fetched == FETCHED
+    assert counts["verified_odds_receipts"] == counts["duplicate_odds_registrations"] == 1
+
+
+def test_holdout_clock_precedes_warehouse_and_score_access(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("The closed holdout accessed the warehouse or scores")
+
+    monkeypatch.setattr(review.sqlite3, "connect", forbidden)
+    monkeypatch.setattr(review.experiment, "_score_evidence", forbidden)
+    result = review.review(tmp_path / "db", tmp_path, now=FETCHED)
+    assert result["status"] == "review_not_yet_open"
+
+
+def test_paired_interval_uses_eastern_fixture_dates():
+    quote = _cohort()[EVENT_ID]
+    # A 23:30 ET tip and a 00:30 ET tip belong to different ET clusters.
+    first = experiment.Quote(EVENT_ID, quote.teams, FETCHED.replace(hour=4, minute=30), quote.fetched,
+                             quote.line, quote.over, quote.home)
+    second = experiment.Quote(EVENT_ID, quote.teams, FETCHED.replace(hour=5, minute=30), quote.fetched,
+                              quote.line, quote.over, quote.home)
+    metrics = review._paired_metrics(
+        [(first, False), (second, False)], -0.2, bootstrap_resamples=20, bootstrap_seed=42
+    )
+    assert metrics["eastern_dates"] == 2
+    assert metrics["paired_log_loss_delta_ci95"][1] < 0
+
+
+def test_earlier_schedule_only_conflict_is_ambiguous(tmp_path, protocol):
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("""
+        CREATE TABLE sports(sport_id, league);
+        CREATE TABLE odds_snapshots(snapshot_id, fetched_at_utc, raw_path, sport_id, source);
+        INSERT INTO sports VALUES (1, 'NCAAB');
+    """)
+    earlier = FETCHED - timedelta(minutes=30)
+    no_markets = _quote_event(earlier)
+    no_markets["bookmakers"] = []
+    no_markets["commence_time"] = (TIP + timedelta(minutes=30)).isoformat()
+    for name, fetched, event in (("schedule", earlier, no_markets), ("quote", FETCHED, _quote_event(FETCHED))):
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps({
+            "fetched_at": fetched.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"},
+            "results": [event],
+        }), encoding="utf-8")
+        conn.execute("INSERT INTO odds_snapshots VALUES (?, ?, ?, 1, 'the-odds-api')",
+                     (name, fetched.isoformat(), str(path)))
+    with conn:
+        quotes, counts = experiment._quotes(conn, tmp_path, protocol, FETCHED, TIP + timedelta(days=1))
+    assert not quotes
+    assert counts["ambiguous_quote_fixtures"] == 1
+
+
+def test_explicit_post_final_reopening_remains_unresolved(tmp_path, protocol):
+    _archive(tmp_path, TIP + timedelta(hours=4), _final())
+    _archive(tmp_path, TIP + timedelta(hours=5), _final(completed=False, scores=None))
     grades, counts = experiment._score_evidence(
         tmp_path, _cohort(), protocol, FETCHED, TIP + timedelta(hours=8)
     )
