@@ -37,6 +37,12 @@ function clerkUser(record?: object, status = "verified") {
     };
 }
 
+function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+}
+
 describe("price-interest API", () => {
     beforeEach(() => {
         vi.resetAllMocks();
@@ -69,6 +75,71 @@ describe("price-interest API", () => {
         getUser.mockResolvedValue(clerkUser(view));
         await POST(request({ action: "view", source: "referral" }));
         expect(updateUserMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it("serializes a delayed first read with later views and joins for that account", async () => {
+        const readStarted = deferred();
+        const releaseRead = deferred();
+        const records = new Map<string, object>();
+        getUser.mockImplementation(async (userId: string) => clerkUser(records.get(userId)));
+        getUser.mockImplementationOnce(async (userId: string) => {
+            const original = clerkUser(records.get(userId));
+            readStarted.resolve();
+            await releaseRead.promise;
+            return original;
+        });
+        updateUserMetadata.mockImplementation(async (userId: string, update) => {
+            const record = { ...records.get(userId), ...update.privateMetadata[key] };
+            records.set(userId, record);
+            return clerkUser(record);
+        });
+        auth.mockResolvedValueOnce({ userId: "buyer" })
+            .mockResolvedValueOnce({ userId: "buyer" })
+            .mockResolvedValueOnce({ userId: "buyer" })
+            .mockResolvedValueOnce({ userId: "independent" });
+
+        const first = POST(request({ action: "view", source: "referral" }));
+        await readStarted.promise;
+        const repeated = POST(request({ action: "view", source: "direct" }));
+        const join = POST(request({ action: "join", source: "direct", consent: true }));
+        try {
+            const independent = await POST(request({ action: "view", source: "email" }));
+            expect(await independent.json()).toEqual({ joined: false });
+            expect(getUser.mock.calls).toEqual([["buyer"], ["independent"]]);
+            expect(records.has("buyer")).toBe(false);
+        } finally {
+            releaseRead.resolve();
+            await Promise.allSettled([first, repeated, join]);
+        }
+
+        expect(await (await first).json()).toEqual({ joined: false });
+        expect((await repeated).status).toBe(200);
+        expect(await (await join).json()).toEqual({ joined: true });
+        expect(records.get("buyer")).toMatchObject({
+            source: "referral", viewedAt: expect.any(String), joinedAt: expect.any(String),
+        });
+        const buyerWrites = updateUserMetadata.mock.calls.filter(([userId]) => userId === "buyer");
+        expect(buyerWrites).toHaveLength(2);
+        expect(buyerWrites[1][1].privateMetadata[key]).not.toHaveProperty("viewedAt");
+    });
+
+    it("releases the account queue when a Clerk update fails", async () => {
+        const writeStarted = deferred();
+        const releaseWrite = deferred();
+        updateUserMetadata.mockImplementationOnce(async () => {
+            writeStarted.resolve();
+            await releaseWrite.promise;
+            throw new Error("simulated Clerk failure");
+        }).mockResolvedValueOnce(clerkUser(view));
+
+        const first = POST(request({ action: "view", source: "community" }));
+        await writeStarted.promise;
+        const retry = POST(request({ action: "view", source: "community" }));
+        releaseWrite.resolve();
+
+        expect((await first).status).toBe(503);
+        expect(await (await retry).json()).toEqual({ joined: false });
+        expect(updateUserMetadata).toHaveBeenCalledTimes(2);
     });
 
     it("requires explicit consent and verified contact information", async () => {

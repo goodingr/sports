@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 const OFFER_VERSION = "premium-29-usd-monthly-v1";
 const METADATA_KEY = "commercialPriceInterest";
 const SOURCES = new Set(["direct", "community", "referral", "email", "other"]);
+const pendingRequestsByUser = new Map<string, Promise<void>>();
 
 type Interest = {
     offerVersion: string;
@@ -65,7 +66,13 @@ export async function POST(request: Request) {
         return new NextResponse("Contact consent required", { status: 400 });
     }
 
+    // The pilot runs in one Node process. Keep each account's Clerk read and patch together.
+    const previousRequest = pendingRequestsByUser.get(userId);
+    let releaseRequest!: () => void;
+    const pendingRequest = new Promise<void>((resolve) => { releaseRequest = resolve; });
+    pendingRequestsByUser.set(userId, pendingRequest);
     try {
+        await previousRequest;
         const { users } = await clerkClient();
         const user = await users.getUser(userId);
         const stored = user.privateMetadata[METADATA_KEY];
@@ -106,5 +113,10 @@ export async function POST(request: Request) {
         return response(Boolean(saved?.joinedAt && !saved.withdrawnAt));
     } catch {
         return new NextResponse("Unable to save interest. Try again.", { status: 503 });
+    } finally {
+        releaseRequest();
+        if (pendingRequestsByUser.get(userId) === pendingRequest) {
+            pendingRequestsByUser.delete(userId);
+        }
     }
 }
