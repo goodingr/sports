@@ -445,6 +445,15 @@ Eastern capture, which would give about 156 decisions at the same rate if every
 eligible quote were captured and every decision graded. These are planning
 estimates from previously examined data. [Published NBA schedule by date](https://ak-static.cms.nba.com/wp-content/uploads/sites/46/2026/08/2026-27-NBA-Regular-Season-Schedule-By-Date.pdf)
 
+A schedule simulation sampled 2,500 independent seasons at the historical
+18-in-104 decision rate. With all 1,068 dated games eligible for entry, the
+existing quarter-hour collector and three-request UTC-day cap covered a
+median 99.4% of modeled closes and 97.6% at the fifth percentile. The simulation
+assumed an awake host, sufficient credits, exact scheduled tipoffs, and usable
+quotes on every modeled request. Evening entry alone reached 150 decisions
+in about 70% of draws, before accounting for missed entries or unresolved
+grades. These figures describe collection capacity under those assumptions.
+
 On Windows, `scripts/install_paper_close_task.ps1 -Entry` previews the
 supplemental entry task. Add `-Apply` to register `SportsPaperEarlyEntry`.
 It checks every 15 minutes, five minutes after the closing collector's checks,
