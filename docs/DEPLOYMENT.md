@@ -153,6 +153,20 @@ See [docs/RUNBOOK.md](RUNBOOK.md) for the full rollback procedure.
 requires `docker compose build web`. Server-only secrets (Clerk secret key,
 Stripe secret key) are read at runtime from `.env`.
 
+Set the same `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, and Stripe key mode
+in the web and API environments. Checkout and entitlement reconciliation
+verify the provider account against `STRIPE_ACCOUNT_ID`. The subscriber
+gate checks that Clerk's verified billing record matches the account, key
+mode, price, and canonical customer. A legacy premium flag requires provider
+reconciliation before it grants access. [Stripe API keys](https://docs.stripe.com/keys)
+· [Clerk metadata](https://clerk.com/docs/guides/users/extending)
+
+Run paid test drills with a separate Clerk instance. Use the same production
+Clerk instance for the no-charge pilot and paid site so a signed-in pilot
+participant retains their account. Before changing a live Stripe account or
+price, close enrollment and reconcile existing active subscriptions in the
+old configuration.
+
 `PAID_ENROLLMENT_ENABLED` defaults to `false`. After verifying the paid launch
 checklist, set it to `true` in the API environment and recreate the API service.
 The endpoint for starting new Checkout sessions still requires a passing publisher

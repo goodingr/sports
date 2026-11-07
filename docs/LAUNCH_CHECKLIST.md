@@ -126,8 +126,11 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       `proxy:443`.
 - [ ] `.env` does not contain any test/dev keys
       (`grep -E '_test_|_test\b|placeholder|replace_me' .env` is empty).
-- [ ] Stripe keys, if used, are live keys; webhook signing secret matches
-      the registered endpoint.
+- [ ] Stripe keys, if used, are live keys. The webhook signing secret
+      matches the registered endpoint. The web and API agree on
+      `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, and key mode.
+- [ ] The paid test drill confirms a matching billing record unlocks picks
+      and an old test, account, or price record leaves the picks locked.
 - [ ] Stripe Checkout's single-subscription protection and the customer portal
       are enabled for the canonical customer flow. Verify simultaneous checkout
       and retry behavior before opening paid enrollment. [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
