@@ -46,6 +46,10 @@ moneyline consensus holdout produced one win across 32 decisions. That +5000
 payout accounted for its entire gain. Its date-clustered ROI interval included
 losses, its Brier score was worse than DraftKings, and it had zero qualifying
 closing quotes. See `reports/research/ncaab_moneyline_consensus/result.json`.
+The BetRivers soccer draw replay used early, same-snapshot moneyline and totals
+quotes. On 456 later fixtures, the paired log-loss difference missed the frozen
+gate. Its 165 selected draws returned −2.30% and had zero verified closes.
+See `reports/research/soccer_draw_cross_market/result.json`.
 The NBA prospective trial is collecting evidence and its
 scheduled final review is April 19, 2027 at midnight Eastern time.
 
