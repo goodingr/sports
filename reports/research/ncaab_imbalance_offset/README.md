@@ -31,3 +31,16 @@ ordinary provider captures from November 8 through the March 15 capture
 cutoff and requires 400 non-push fixtures across at least 30 Eastern dates.
 The analysis is a replay on quotes archived after the model freeze. It
 provides forecast evidence without an issued-pick or wagering record.
+
+## Quote coverage before review
+
+Run this read-only preview from the current project checkout during collection.
+
+```powershell
+poetry run python -B -m scripts.ncaab_quote_coverage --db <warehouse-path>
+```
+
+It applies the frozen quote selector to the current archive and reports aggregate
+receipt counts, eligible fixtures and Eastern dates, and ambiguity. An archived
+quote can qualify before its fixture tips off. The preview reads no scores.
+Run the final review separately at the scheduled cutoff.

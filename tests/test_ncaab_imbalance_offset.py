@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 from reports.research.ncaab_imbalance_offset import experiment, review
+from scripts import ncaab_quote_coverage
 
 FETCHED = datetime(2026, 11, 5, 22, tzinfo=timezone.utc)
 TIP = FETCHED + timedelta(hours=2)
@@ -234,3 +236,80 @@ def test_explicit_post_final_reopening_remains_unresolved(tmp_path, protocol):
     )
     assert not grades
     assert counts["ambiguous_score_fixtures"] == 1
+
+
+def test_quote_coverage_is_empty_before_first_capture(tmp_path, monkeypatch, protocol):
+    start = datetime.fromisoformat(
+        protocol["prospective_holdout"]["first_quote_and_kickoff_not_before_utc"]
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Preview opened evidence before the first eligible capture")
+
+    monkeypatch.setattr(ncaab_quote_coverage.sqlite3, "connect", forbidden)
+    monkeypatch.setattr(experiment, "_score_evidence", forbidden)
+    assert ncaab_quote_coverage.preview(
+        tmp_path / "warehouse.db", now=start - timedelta(microseconds=1)
+    ) == {
+        "verified_odds_receipts": 0,
+        "unverified_odds_registrations": 0,
+        "duplicate_odds_registrations": 0,
+        "eligible_fixtures": 0,
+        "eastern_fixture_dates": 0,
+        "ambiguous_quote_fixtures": 0,
+        "earliest_eligible_capture_utc": None,
+        "latest_eligible_capture_utc": None,
+    }
+
+
+def test_quote_coverage_counts_a_later_fixture_without_reading_scores(tmp_path, monkeypatch):
+    fetched = datetime(2026, 11, 8, 23, 8, tzinfo=timezone.utc)
+    event = _quote_event(fetched)
+    event["commence_time"] = (fetched + timedelta(hours=2)).isoformat()
+    receipt = tmp_path / "odds.json"
+    receipt.write_text(json.dumps({
+        "fetched_at": fetched.isoformat(),
+        "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"},
+        "results": [event],
+    }), encoding="utf-8")
+
+    db = tmp_path / "warehouse.db"
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.executescript("""
+            CREATE TABLE sports(sport_id, league);
+            CREATE TABLE odds_snapshots(snapshot_id, fetched_at_utc, raw_path, sport_id, source);
+            INSERT INTO sports VALUES (1, 'NCAAB');
+        """)
+        conn.executemany(
+            "INSERT INTO odds_snapshots VALUES (?, ?, ?, 1, 'the-odds-api')",
+            [
+                ("original", fetched.isoformat(), str(receipt)),
+                ("duplicate", fetched.isoformat(), str(receipt)),
+                ("missing", fetched.isoformat(), str(tmp_path / "missing.json")),
+            ],
+        )
+
+    score_dir = tmp_path / "raw" / "scores" / "NCAAB"
+    score_dir.mkdir(parents=True)
+    forbidden_score = _archive(score_dir, fetched + timedelta(minutes=1), _final())
+    original_open = Path.open
+
+    def open_without_scores(path, *args, **kwargs):
+        assert path != forbidden_score
+        return original_open(path, *args, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Preview called the score reader")
+
+    monkeypatch.setattr(Path, "open", open_without_scores)
+    monkeypatch.setattr(experiment, "_score_evidence", forbidden)
+    assert ncaab_quote_coverage.preview(db, now=fetched + timedelta(minutes=1)) == {
+        "verified_odds_receipts": 1,
+        "unverified_odds_registrations": 1,
+        "duplicate_odds_registrations": 1,
+        "eligible_fixtures": 1,
+        "eastern_fixture_dates": 1,
+        "ambiguous_quote_fixtures": 0,
+        "earliest_eligible_capture_utc": fetched.isoformat(),
+        "latest_eligible_capture_utc": fetched.isoformat(),
+    }
