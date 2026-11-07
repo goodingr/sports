@@ -1,18 +1,28 @@
-# Preview the paper closing task, or the supplemental entry task with -Entry.
+# Preview a paper task. Use -Entry or -Discover for the supplemental modes.
 param(
     [string]$PythonPath = "",
     [switch]$Entry = $false,
+    [switch]$Discover = $false,
     [switch]$Apply = $false
 )
 
 $ErrorActionPreference = "Stop"
+if ($Entry -and $Discover) { throw "Choose one supplemental mode." }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
-$taskName = if ($Entry) { "SportsPaperEarlyEntry" } else { "SportsPaperClosingQuotes" }
+$taskName = if ($Discover) {
+    "SportsPaperNBAEvents"
+} elseif ($Entry) {
+    "SportsPaperEarlyEntry"
+} else {
+    "SportsPaperClosingQuotes"
+}
 $taskPath = "\"
 $wrapperPath = Join-Path $PSScriptRoot "paper_close_poll.ps1"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-$description = if ($Entry) {
+$description = if ($Discover) {
+    "Sports paper NBA event discovery owned by $projectRoot"
+} elseif ($Entry) {
     "Sports supplemental paper entry owned by $projectRoot"
 } else {
     "Sports paper closing quotes owned by $projectRoot"
@@ -73,15 +83,16 @@ if ($metadataExitCode -ne 0) {
     throw "Could not read the trial deadline with the selected interpreter."
 }
 $metadata = ($metadataOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
-$deadline = if ($Entry) { $metadata.review_at } else { $metadata.end_boundary }
+$deadline = if ($Entry -or $Discover) { $metadata.review_at } else { $metadata.end_boundary }
 $expiresAt = [DateTimeOffset]::Parse($deadline).ToLocalTime()
-$offsetMinutes = if ($Entry) { 5 } else { 0 }
+$offsetMinutes = if ($Discover) { 10 } elseif ($Entry) { 5 } else { 0 }
+$intervalMinutes = if ($Discover) { 60 } else { 15 }
 $phaseTicks = [TimeSpan]::FromMinutes($offsetMinutes).Ticks
-$intervalTicks = [TimeSpan]::FromMinutes(15).Ticks
+$interval = [TimeSpan]::FromMinutes($intervalMinutes)
 $startsAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
-$phaseRemainder = ($startsAt.Ticks - $phaseTicks) % $intervalTicks
-$startsAt = $startsAt.AddTicks($intervalTicks - $phaseRemainder).ToLocalTime()
-if ($expiresAt -le $startsAt.AddMinutes(15)) {
+$phaseRemainder = ($startsAt.Ticks - $phaseTicks) % $interval.Ticks
+$startsAt = $startsAt.AddTicks($interval.Ticks - $phaseRemainder).ToLocalTime()
+if ($expiresAt -le $startsAt.Add($interval)) {
     throw "The trial deadline does not allow another $taskName interval."
 }
 
@@ -91,6 +102,7 @@ if ([string]$daily.Principal.LogonType -ne "Interactive" -or [string]$daily.Prin
 }
 $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Collect -PythonPath "{1}"' -f $wrapperPath, $python.FullName
 if ($Entry) { $arguments += ' -Entry' }
+if ($Discover) { $arguments += ' -Discover' }
 $existing = Get-ScheduledTask -TaskPath $taskPath -ErrorAction Stop |
     Where-Object { $_.TaskName -eq $taskName }
 if ($existing) {
@@ -123,7 +135,7 @@ $plan = [ordered]@{
     run_level = "Limited"
     first_start = $startsAt.ToString("o")
     end_boundary = $expiresAt.ToString("yyyy-MM-ddTHH:mm:sszzz")
-    repetition_minutes = 15
+    repetition_minutes = $intervalMinutes
     offset_minutes = $offsetMinutes
     execution_limit_minutes = if ($Entry) { 5 } else { 2 }
     window_style = "Hidden"
@@ -135,7 +147,7 @@ $plan = [ordered]@{
 if ($Apply) {
     $action = New-ScheduledTaskAction -Execute $powershellPath -Argument $arguments -WorkingDirectory $projectRoot
     $principal = New-ScheduledTaskPrincipal -UserId $daily.Principal.UserId -LogonType Interactive -RunLevel Limited
-    $trigger = New-ScheduledTaskTrigger -Once -At $startsAt.LocalDateTime -RepetitionInterval ([TimeSpan]::FromMinutes(15)) -RepetitionDuration ($expiresAt - $startsAt)
+    $trigger = New-ScheduledTaskTrigger -Once -At $startsAt.LocalDateTime -RepetitionInterval $interval -RepetitionDuration ($expiresAt - $startsAt)
     $trigger.EndBoundary = $plan.end_boundary
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable:$plan.start_when_available -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes($plan.execution_limit_minutes)) -WakeToRun:$false
     $definition = New-ScheduledTask -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description $description

@@ -1100,6 +1100,17 @@ SPORT_CONFIG = {
 SPORT_CONFIG_BY_LEAGUE = {config["league"].upper(): config for config in SPORT_CONFIG.values()}
 
 
+def _ensure_odds_api_schedule_clock(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_api_schedule_clock (
+            game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+            fetched_at_utc TEXT NOT NULL
+        )
+        """
+    )
+
+
 def _advance_odds_api_schedule_clock(
     conn: sqlite3.Connection,
     game_id: str,
@@ -1182,14 +1193,7 @@ def load_odds_snapshot(
         if ordinary_odds_api:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS odds_api_schedule_clock (
-                    game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
-                    fetched_at_utc TEXT NOT NULL
-                )
-                """
-            )
+            _ensure_odds_api_schedule_clock(conn)
         _ensure_game_results_total_close_lineage_columns(conn)
         sport_id = _ensure_sport(
             conn,

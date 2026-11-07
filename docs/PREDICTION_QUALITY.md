@@ -450,6 +450,24 @@ supplement could use up to 94 credits on the listed fixtures if all 47 dates
 require a provider request. Fixture discovery, quote availability, the credit
 reserve, and the host schedule determine actual coverage.
 
+The standalone NBA schedule discovery command previews without contacting the
+provider. With `--collect`, it requests the next 48 hours from the schedule
+endpoint at most once per hour. It requires a zero-credit response, archives
+the response without credentials, and links only unambiguous scheduled games.
+It fills a missing provider ID or inserts a scheduled game for a new identity.
+Existing tipoff times and results are preserved. A new game remains visible to
+the missing-odds check until its odds arrive. [The Odds API events endpoint](https://the-odds-api.com/liveapi/guides/v4/#get-events)
+
+```powershell
+poetry run python -m src.data.ingest_nba_events
+poetry run python -m src.data.ingest_nba_events --collect --observe-paper
+```
+
+On Windows, `scripts/install_paper_close_task.ps1 -Discover` previews the hourly
+`SportsPaperNBAEvents` task. Add `-Apply` to register it. It runs at ten minutes
+past the hour and expires at the capture deadline. It retains the known windows
+for the configured paper trial and writes `logs/paper_events_YYYYMMDD.log`.
+
 Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
 grades April 19 at midnight Eastern time and requires at least 150 graded
 decisions, 5% flat-unit ROI, a positive lower 95% date-clustered bootstrap bound,

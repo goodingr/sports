@@ -3,10 +3,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PythonPath,
     [switch]$Collect = $false,
-    [switch]$Entry = $false
+    [switch]$Entry = $false,
+    [switch]$Discover = $false
 )
 
 $ErrorActionPreference = "Stop"
+if ($Entry -and $Discover) { throw "Choose one supplemental mode." }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 if ($PythonPath -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/])') {
@@ -20,12 +22,14 @@ if ($python.PSIsContainer) {
 $logDirectory = Join-Path $projectRoot "logs"
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $startedAt = [DateTime]::UtcNow
-$pollMode = if ($Entry) { "entry" } else { "close" }
+$pollMode = if ($Discover) { "events" } elseif ($Entry) { "entry" } else { "close" }
 $logPath = Join-Path $logDirectory ("paper_{0}_{1}.log" -f $pollMode, $startedAt.ToString("yyyyMMdd"))
-$pythonArgs = @("-B", "-m", "src.predict.paper_${pollMode}_poll")
+$module = if ($Discover) { "src.data.ingest_nba_events" } else { "src.predict.paper_${pollMode}_poll" }
+$pythonArgs = @("-B", "-m", $module)
 if ($Collect) {
     $pythonArgs += "--collect"
-    if (-not $Entry) { $pythonArgs += "--batch-scheduled" }
+    if ($Discover) { $pythonArgs += "--observe-paper" }
+    elseif (-not $Entry) { $pythonArgs += "--batch-scheduled" }
 }
 
 # Windows PowerShell 5.1 represents redirected native stderr as ErrorRecord.
