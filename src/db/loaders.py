@@ -1086,6 +1086,47 @@ SPORT_CONFIG = {
 SPORT_CONFIG_BY_LEAGUE = {config["league"].upper(): config for config in SPORT_CONFIG.values()}
 
 
+def _advance_odds_api_schedule_clock(
+    conn: sqlite3.Connection,
+    game_id: str,
+    sport_key: str,
+    observed_at: datetime | None,
+) -> bool:
+    if observed_at is None:
+        return False
+    existing = conn.execute(
+        "SELECT 1 FROM odds_api_schedule_clock WHERE game_id = ?", (game_id,)
+    ).fetchone()
+    if existing is None:
+        # Ordinary archived batches are written directly under their sport directory.
+        # Quote-only closing polls use a separate directory (or had no raw path).
+        # Legacy events without odds rows have no per-fixture timestamp to recover.
+        legacy = conn.execute(
+            """
+            SELECT DISTINCT s.fetched_at_utc
+            FROM odds o JOIN odds_snapshots s USING (snapshot_id)
+            WHERE o.game_id = ? AND s.source = 'the-odds-api'
+              AND '/' || replace(s.raw_path, char(92), '/') GLOB ?
+            """,
+            (game_id, f"*/odds/{sport_key}/odds_????-??-??T??-??-??Z.json"),
+        )
+        timestamps = [_parse_utc_datetime(row[0]) for row in legacy]
+        latest = max((timestamp for timestamp in timestamps if timestamp is not None), default=None)
+        if latest is not None:
+            conn.execute(
+                "INSERT INTO odds_api_schedule_clock VALUES (?, ?)",
+                (game_id, latest.isoformat(timespec="microseconds")),
+            )
+    return conn.execute(
+        """
+        INSERT INTO odds_api_schedule_clock VALUES (?, ?)
+        ON CONFLICT(game_id) DO UPDATE SET fetched_at_utc = excluded.fetched_at_utc
+        WHERE excluded.fetched_at_utc > odds_api_schedule_clock.fetched_at_utc
+        """,
+        (game_id, observed_at.isoformat(timespec="microseconds")),
+    ).rowcount == 1
+
+
 def load_odds_snapshot(
     payload: Dict[str, Any],
     raw_path: Optional[str] = None,
@@ -1099,8 +1140,12 @@ def load_odds_snapshot(
 
     source = payload.get("source", "the-odds-api")
     historical = source == "the-odds-api-history"
+    ordinary_odds_api = source == "the-odds-api"
     fetched_at = payload.get("fetched_at")
-    if fetched_at:
+    schedule_observed_at = _parse_utc_datetime(fetched_at) if ordinary_odds_api else None
+    if ordinary_odds_api:
+        fetched_dt = schedule_observed_at or datetime.now(timezone.utc)
+    elif fetched_at:
         try:
             fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
         except ValueError:
@@ -1116,9 +1161,21 @@ def load_odds_snapshot(
 
     snapshot_id = uuid.uuid4().hex
 
-    config = SPORT_CONFIG.get((sport_key or "americanfootball_nfl").lower(), SPORT_CONFIG["americanfootball_nfl"])
+    sport_key = (sport_key or "americanfootball_nfl").lower()
+    config = SPORT_CONFIG.get(sport_key, SPORT_CONFIG["americanfootball_nfl"])
 
     with connect() as conn:
+        if ordinary_odds_api:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS odds_api_schedule_clock (
+                    game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+                    fetched_at_utc TEXT NOT NULL
+                )
+                """
+            )
         _ensure_game_results_total_close_lineage_columns(conn)
         sport_id = _ensure_sport(
             conn,
@@ -1145,6 +1202,7 @@ def load_odds_snapshot(
                 commence_iso = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
             except Exception:  # noqa: BLE001
                 commence_iso = None
+            event_observed_at = schedule_observed_at if commence_iso is not None else None
 
             home_name = event.get("home_team", "")
             away_name = event.get("away_team", "")
@@ -1191,7 +1249,10 @@ def load_odds_snapshot(
                     game_id = existing_canonical[0]
                     LOGGER.debug("Matched existing canonical game %s by Internal ID", game_id)
                     # Update Odds API ID if missing
-                    conn.execute("UPDATE games SET odds_api_id = ? WHERE game_id = ? AND odds_api_id IS NULL", (event.get("id"), game_id))
+                    if not ordinary_odds_api or _advance_odds_api_schedule_clock(
+                        conn, game_id, sport_key, event_observed_at
+                    ):
+                        conn.execute("UPDATE games SET odds_api_id = ? WHERE game_id = ? AND odds_api_id IS NULL", (event.get("id"), game_id))
                 else:
                     # 3. Create NEW Game with Canonical ID
                     game_id = internal_id
@@ -1221,7 +1282,12 @@ def load_odds_snapshot(
                             event.get("id"),
                         ),
                     )
-            elif not historical:
+                    if ordinary_odds_api:
+                        _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
+            elif not historical and (
+                not ordinary_odds_api
+                or _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
+            ):
                 conn.execute(
                     """
                     UPDATE games

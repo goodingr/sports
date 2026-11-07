@@ -264,3 +264,118 @@ def test_load_odds_snapshot_keeps_latest_pregame_total_close(
         assert conn.execute(
             "SELECT COUNT(*) FROM odds_snapshots WHERE source = 'the-odds-api-history'"
         ).fetchone() == (1,)
+
+
+def _nba_schedule_snapshot(
+    fetched_at: str, start: str, event_id: str, *, line: float | None = 220.5
+) -> dict:
+    bookmakers = []
+    if line is not None:
+        bookmakers = [
+            {
+                "title": "DraftKings",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {"name": side, "price": -110, "point": line}
+                            for side in ("Over", "Under")
+                        ],
+                    }
+                ],
+            }
+        ]
+    return {
+        "source": "the-odds-api",
+        "fetched_at": fetched_at,
+        "results": [
+            {
+                "id": event_id,
+                "commence_time": start,
+                "home_team": "Boston Celtics",
+                "away_team": "Philadelphia 76ers",
+                "bookmakers": bookmakers,
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("newer_line", [221.5, None])
+def test_delayed_snapshot_keeps_newer_fixture_schedule_and_records_quotes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newer_line: float | None
+) -> None:
+    db_path = tmp_path / "odds.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+
+    newer = _nba_schedule_snapshot(
+        "2026-11-07T18:01:00.000002-05:00", "2026-11-08T03:10:00Z", "new-id", line=newer_line
+    )
+    older = _nba_schedule_snapshot("2026-11-07T23:01:00.000001Z", "2026-11-08T02:40:00Z", "old-id")
+    loaders.load_odds_snapshot(newer, sport_key="basketball_nba")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE games SET status = 'in_progress'")
+    loaders.load_odds_snapshot(older, sport_key="basketball_nba")
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT start_time_utc, odds_api_id, status FROM games").fetchall() == [
+            ("2026-11-08T03:10:00+00:00", "new-id", "in_progress")
+        ]
+        assert conn.execute(
+            """
+            SELECT outcome, line FROM odds JOIN odds_snapshots USING (snapshot_id)
+            WHERE fetched_at_utc = '2026-11-07T23:01:00.000001+00:00'
+            ORDER BY outcome
+            """
+        ).fetchall() == [("Over", 220.5), ("Under", 220.5)]
+
+
+def test_existing_fixture_bootstraps_schedule_clock_from_ordinary_archive_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "odds.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+
+    ordinary = _nba_schedule_snapshot("2026-11-07T23:01:00Z", "2026-11-08T03:10:00Z", "new-id")
+    loaders.load_odds_snapshot(
+        ordinary,
+        raw_path=r"C:\sports\data\raw\odds\basketball_nba\odds_2026-11-07T23-01-00Z.json",
+        sport_key="basketball_nba",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE odds_api_schedule_clock")
+        conn.execute("UPDATE games SET status = 'voided'")
+        conn.execute(
+            """
+            INSERT INTO odds_snapshots
+                (snapshot_id, fetched_at_utc, sport_id, source, raw_path)
+            VALUES ('closing', '2026-11-07T23:10:00+00:00', 1, 'the-odds-api',
+                    'data/raw/odds/basketball_nba/paper_closing/odds_2026-11-07T23-10-00Z.json'),
+                   ('legacy_closing', '2026-11-07T23:11:00+00:00', 1, 'the-odds-api', NULL)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            SELECT s.snapshot_id, g.game_id, 1, 'totals', 'Over', -110, 220.5
+            FROM odds_snapshots s CROSS JOIN games g
+            WHERE s.snapshot_id IN ('closing', 'legacy_closing')
+            """
+        )
+
+    older = _nba_schedule_snapshot("2026-11-07T23:00:00Z", "2026-11-08T02:40:00Z", "old-id")
+    loaders.load_odds_snapshot(older, sport_key="basketball_nba")
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT start_time_utc, odds_api_id, status FROM games").fetchall() == [
+            ("2026-11-08T03:10:00+00:00", "new-id", "voided")
+        ]
+
+    correction = _nba_schedule_snapshot("2026-11-07T23:05:00Z", "2026-11-08T03:15:00Z", "fixed-id")
+    loaders.load_odds_snapshot(correction, sport_key="basketball_nba")
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT start_time_utc, odds_api_id, status FROM games").fetchall() == [
+            ("2026-11-08T03:15:00+00:00", "fixed-id", "voided")
+        ]
