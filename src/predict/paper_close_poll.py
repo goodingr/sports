@@ -305,7 +305,7 @@ def _budgeted_key(
 
 def _reserve_attempt(
     db_path: Path, *, batch_scheduled: bool
-) -> tuple[str, dict[str, _ClosingFixture]]:
+) -> tuple[str, dict[str, _ClosingFixture], datetime]:
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
@@ -315,7 +315,7 @@ def _reserve_attempt(
                 "CREATE TABLE IF NOT EXISTS paper_close_requests (requested_at TEXT PRIMARY KEY)"
             )
             conn.execute("INSERT INTO paper_close_requests VALUES (?)", (now.isoformat(),))
-        return status, events
+        return status, events, now
 
 
 def _totals_pair(event: dict) -> tuple[float, float, float] | None:
@@ -489,10 +489,23 @@ def poll_closes(*, collect: bool = False, batch_scheduled: bool = False) -> dict
     if key is None:
         return {**result, "status": "quota_reserve"}
 
-    status, events = _reserve_attempt(path, batch_scheduled=batch_scheduled)
+    status, events, reserved_at = _reserve_attempt(path, batch_scheduled=batch_scheduled)
     result.update(status=status, due_events=len(events))
     if status != "due":
         return result
+
+    # The reservation is committed even if its dispatch window has elapsed.
+    dispatch_at = datetime.now(timezone.utc)
+    if dispatch_at.date() != reserved_at.date():
+        return {**result, "status": "closing_date_changed", "due_events": 0}
+    events = {
+        event_id: fixture
+        for event_id, fixture in events.items()
+        if fixture.start - dispatch_at >= _MIN_TO_START
+    }
+    result["due_events"] = len(events)
+    if not events:
+        return {**result, "status": "closing_lead_elapsed"}
 
     params = {
         "apiKey": key,
