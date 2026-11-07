@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from collections import Counter
 from collections.abc import Iterable
@@ -12,7 +13,14 @@ from pathlib import Path
 
 import requests
 
-from src.data.audit_nba_schedule import _NBA_GAMES, _NBA_HEADERS, _Fixture, _official_fixtures
+from src.data.audit_nba_schedule import (
+    _NBA_GAMES,
+    _NBA_HEADERS,
+    AUDIT_REPORTS_DIR,
+    _Fixture,
+    _official_fixtures,
+    read_official_schedule_evidence,
+)
 from src.data.ingest_nba_events import (
     _EVENT_ID,
     _eligible_events,
@@ -33,6 +41,7 @@ from src.predict.paper_ledger import PaperTrial, _eligible_game
 from src.predict.paper_settlement import _START_TOLERANCE
 
 _MAX_OFFICIAL_AGE = timedelta(minutes=30)
+_MAX_PLANNING_AGE = timedelta(days=2)
 _POLL_INTERVAL = timedelta(minutes=15)
 
 
@@ -183,7 +192,11 @@ def read_official_fixtures(
         raise ValueError("Use timezone-aware observation times")
     if not timedelta(0) <= now - observed_at <= _MAX_OFFICIAL_AGE:
         return "stale_official_observation", []
-    _, fixtures = _official_fixtures(raw, now.astimezone(_EASTERN).date())
+    return _unambiguous_fixtures(raw, now.astimezone(_EASTERN).date())
+
+
+def _unambiguous_fixtures(raw: bytes, day: date) -> tuple[str, list[_Fixture]]:
+    _, fixtures = _official_fixtures(raw, day)
     codes = {code for fixture in fixtures for code in (fixture.home, fixture.away)}
     ids = {team_id for fixture in fixtures for team_id in (fixture.home_id, fixture.away_id)}
     if len(codes) != 2 * len(fixtures) or len(ids) != 2 * len(fixtures):
@@ -316,6 +329,38 @@ def plan_missing_ids(
         tuple(targets),
         frozenset(ordinary_due),
     )
+
+
+def cached_official_window_due(
+    conn: sqlite3.Connection,
+    trial: PaperTrial,
+    now: datetime,
+    ordinary_due: dict[str, _ClosingFixture],
+    data_dir: Path,
+) -> bool:
+    """Use a saved slate only to decide whether a fresh official fetch is useful."""
+    day = now.astimezone(_EASTERN).date()
+    try:
+        path = max((AUDIT_REPORTS_DIR / day.isoformat()).glob("*.json"), default=None)
+        if path is None:
+            return False
+        report = json.loads(path.read_bytes())
+        source = report["official_source"]
+        observed = _utc(source["observed_at_utc"])
+        if (
+            report["report_version"] != 1 or report["eastern_date"] != day.isoformat()
+            or report["trial_id"] != trial.trial_id or observed is None
+            or not timedelta() <= now - observed <= _MAX_PLANNING_AGE
+        ):
+            return False
+        raw = read_official_schedule_evidence(day, source, data_dir)
+        verified, fixtures = _unambiguous_fixtures(raw, day)
+        if verified != "verified":
+            return False
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return False
+    status, _ = plan_missing_ids(conn, trial, raw, observed, now, ordinary_due, fixtures)
+    return status == "window_due"
 
 
 def classify_probe(payload: list, plan: FallbackPlan) -> tuple[str, dict[str, datetime]]:

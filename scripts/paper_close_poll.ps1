@@ -29,7 +29,8 @@ $pythonArgs = @("-B", "-m", $module)
 if ($Collect) {
     $pythonArgs += "--collect"
     if ($Discover) { $pythonArgs += "--observe-paper" }
-    elseif (-not $Entry) { $pythonArgs += "--batch-scheduled" }
+    elseif ($Entry) { $pythonArgs += "--scheduled-official-fallback" }
+    else { $pythonArgs += "--batch-scheduled" }
 }
 
 # Windows PowerShell 5.1 represents redirected native stderr as ErrorRecord.

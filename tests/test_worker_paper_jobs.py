@@ -10,7 +10,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 PAPER_JOBS = [
     ("paper_close", "*/15", "src.predict.paper_close_poll --collect --batch-scheduled"),
-    ("paper_entry", "5,20,35,50", "src.predict.paper_entry_poll --collect"),
+    ("paper_entry", "5,20,35,50", "src.predict.paper_entry_poll --collect --scheduled-official-fallback"),
     ("paper_events", "10,25,40,55", "src.data.ingest_nba_events --collect --observe-paper"),
 ]
 

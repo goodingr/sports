@@ -110,7 +110,7 @@ dispatch() {
 
 		paper_entry)
 			log "Checking for early NBA paper entries"
-			run timeout 120s python -m src.predict.paper_entry_poll --collect
+			run timeout 120s python -m src.predict.paper_entry_poll --collect --scheduled-official-fallback
 			;;
 
 		paper_events)

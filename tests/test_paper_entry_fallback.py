@@ -394,6 +394,85 @@ def _collect_window():
     return entry.poll_entry(collect=True, official_window_fallback=True)
 
 
+def _save_planning_audit(path, monkeypatch, *, observed=NOW - timedelta(hours=36), corrupt=False):
+    raw = _official()
+    checksum = hashlib.sha256(raw).hexdigest()
+    day = "2026-11-08"
+    raw_path = f"raw/schedules/nba/{day}/{checksum}.body"
+    body = path.parent / raw_path
+    body.parent.mkdir(parents=True, exist_ok=True)
+    body.write_bytes(b"corrupt" if corrupt else raw)
+    reports = path.parent / "audits"
+    directory = reports / day
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "saved.json").write_text(json.dumps({
+        "report_version": 1,
+        "eastern_date": day,
+        "trial_id": load_trial().trial_id,
+        "official_source": {
+            "observed_at_utc": observed.isoformat(),
+            "sha256": checksum,
+            "raw_path": raw_path,
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(fallback, "AUDIT_REPORTS_DIR", reports)
+
+
+def test_scheduled_window_uses_fresh_official_evidence_and_one_slot(entry_runtime, monkeypatch):
+    path, raw, _, _ = entry_runtime
+    _save_planning_audit(path, monkeypatch)
+    calls = _mock_sources(monkeypatch, [
+        _quote("a" * 32, PHI_START, "CHI", "PHI"),
+        _quote("b" * 32, DET_START, "DET", "LAL"),
+    ])
+
+    result = entry.poll_entry(collect=True, scheduled_official_fallback=True)
+
+    assert result["mode"] == "official_window"
+    assert result["decisions_recorded"] == 2
+    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["games?date=2026-11-08", "events", "odds"]
+    receipt, = raw.rglob("odds_*.json")
+    assert json.loads(receipt.read_bytes())["official_schedule"]["observed_at"] == NOW.isoformat()
+    assert entry.poll_entry(collect=True, scheduled_official_fallback=True)["status"] == "daily_cap"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("state", ["missing", "corrupt", "too_old", "too_early"])
+def test_scheduled_window_avoids_any_requests_without_a_relevant_audit(entry_runtime, monkeypatch, state):
+    path, _, clock, _ = entry_runtime
+    if state == "missing":
+        monkeypatch.setattr(fallback, "AUDIT_REPORTS_DIR", path.parent / "missing")
+    else:
+        _save_planning_audit(
+            path, monkeypatch,
+            observed=NOW - timedelta(hours=49 if state == "too_old" else 36),
+            corrupt=state == "corrupt",
+        )
+    if state == "too_early":
+        clock.current -= timedelta(minutes=15)
+
+    assert entry.poll_entry(collect=True, scheduled_official_fallback=True)["status"] == "no_entry_due"
+    with connect(path) as conn:
+        assert not entry._has_table(conn, "paper_entry_requests")
+
+
+def test_scheduled_mixed_window_falls_back_to_the_due_target(entry_runtime, monkeypatch):
+    path, _, clock, _ = entry_runtime
+    clock.current = NOW - timedelta(minutes=30)
+    _save_planning_audit(path, monkeypatch)
+    with connect(path) as conn:
+        _game(conn, "known", PHI_START, "CHI", "PHI", "a" * 32)
+    calls = _mock_sources(monkeypatch, [_quote("a" * 32, PHI_START, "CHI", "PHI")])
+
+    result = entry.poll_entry(collect=True, scheduled_official_fallback=True)
+
+    assert result["status"] == "collected" and "mode" not in result
+    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["games?date=2026-11-08", "events", "odds"]
+    assert calls[-1][1]["eventIds"] == "a" * 32
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+
+
 def _resume_after_reservation(monkeypatch, clock, dispatch_at):
     reserve = entry._reserve
 

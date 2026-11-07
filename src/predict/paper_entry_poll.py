@@ -626,7 +626,11 @@ def _capture(
 
 
 def poll_entry(
-    *, collect: bool = False, rules: Path | None = None, official_window_fallback: bool = False
+    *,
+    collect: bool = False,
+    rules: Path | None = None,
+    official_window_fallback: bool = False,
+    scheduled_official_fallback: bool = False,
 ) -> dict[str, str | int]:
     load_env()
     trial = load_trial(rules if rules is not None else DEFAULT_RULES)
@@ -640,11 +644,18 @@ def poll_entry(
         status, due, fresh = _plan(conn, trial, now)
         if (
             collect
-            and official_window_fallback
+            and (official_window_fallback or scheduled_official_fallback)
             and status == "no_entry_due"
             and _entry_slot_taken(conn, now)
         ):
             status = "daily_cap"
+        if (
+            collect and scheduled_official_fallback and not official_window_fallback
+            and status in {"due", "no_entry_due"}
+        ):
+            from src.predict.paper_entry_fallback import cached_official_window_due
+
+            official_window_fallback = cached_official_window_due(conn, trial, now, due, path.parent)
     official = None
     window = None
     if collect and official_window_fallback and status in {"due", "no_entry_due"}:
@@ -831,20 +842,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--collect", action="store_true", help="Allow one paid odds request if due")
     parser.add_argument("--paper-rules", type=Path, default=DEFAULT_RULES)
-    parser.add_argument(
+    fallback = parser.add_mutually_exclusive_group()
+    fallback.add_argument(
         "--official-window-fallback",
         action="store_true",
         help="Use the same entry slot for a verified official slate when provider IDs are missing",
     )
+    fallback.add_argument(
+        "--scheduled-official-fallback",
+        action="store_true",
+        help="Check saved slate evidence before fetching a fresh official schedule",
+    )
     args = parser.parse_args()
-    if args.official_window_fallback and not args.collect:
-        parser.error("--official-window-fallback requires --collect")
+    if (args.official_window_fallback or args.scheduled_official_fallback) and not args.collect:
+        parser.error("The official fallback options require --collect")
     logging.basicConfig(level=logging.INFO)
     try:
         result = poll_entry(
             collect=args.collect,
             rules=args.paper_rules,
             official_window_fallback=args.official_window_fallback,
+            scheduled_official_fallback=args.scheduled_official_fallback,
         )
     except (RuntimeError, ValueError) as exc:
         parser.exit(1, f"{exc}\n")
