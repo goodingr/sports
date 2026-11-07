@@ -16,7 +16,14 @@ export default defineConfig({
     webServer: {
         command: `npm run dev -- --port ${PORT}`,
         url: BASE_URL,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
+        // Product UI checks use a signed-out identity fixture, without external credentials.
+        env: {
+            PLAYWRIGHT_MOCK_AUTH: '1',
+            NEXT_PUBLIC_CLERK_KEYLESS_DISABLED: '1',
+            CLERK_SECRET_KEY: '',
+            STRIPE_SECRET_KEY: '',
+        },
         timeout: 120_000,
     },
     projects: [

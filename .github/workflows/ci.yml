@@ -14,6 +14,16 @@ env:
     src/models/prediction_quality.py
     src/models/train_betting.py
     src/predict/publishable_bets.py
+    src/predict/paper_approval.py
+    src/predict/paper_close_poll.py
+    src/predict/paper_coverage.py
+    src/predict/paper_ledger.py
+    src/predict/paper_report.py
+    src/predict/paper_schedule.py
+    src/predict/paper_settlement.py
+    src/predict/published_ledger.py
+    src/models/totals_calibration.py
+    src/data/replay_local_odds.py
     tests/test_betting_benchmark.py
     tests/test_betting_model_input.py
     tests/test_prediction_quality.py
@@ -28,6 +38,16 @@ env:
     src/models/feature_loader.py
     src/models/prediction_quality.py
     src/predict/publishable_bets.py
+    src/predict/paper_approval.py
+    src/predict/paper_close_poll.py
+    src/predict/paper_coverage.py
+    src/predict/paper_ledger.py
+    src/predict/paper_report.py
+    src/predict/paper_schedule.py
+    src/predict/paper_settlement.py
+    src/predict/published_ledger.py
+    src/models/totals_calibration.py
+    src/data/replay_local_odds.py
 
 jobs:
   python:
@@ -127,13 +147,13 @@ jobs:
         run: npm test
 
       - name: Build
+        env:
+          # Public placeholder for prerendering; this reserved domain has no Clerk instance.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
         run: npm run build
 
-      # Playwright e2e is gated owner: Agent 4. Until that suite is green,
-      # don't fail the whole pipeline on it -- but still surface failures.
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: E2E tests
         run: npm run test:e2e
-        continue-on-error: true
