@@ -95,6 +95,9 @@ ${WORKER_BENCHMARK_CRON:-30 10 * * *}    app /app/scripts/run_job.sh benchmark  
 ${WORKER_BACKUP_CRON:-0 18 * * *}        app /app/scripts/run_job.sh backup_local  >> $LOG_DIR/cron.log 2>&1
 ${WORKER_REMOTE_BACKUP_CRON:-30 18 * * *} app /app/scripts/run_job.sh backup_remote >> $LOG_DIR/cron.log 2>&1
 EOF
+if [[ ${WORKER_PAPER_CLOSE_ENABLED:-0} == 1 ]]; then
+	printf '*/15 * * * * app /app/scripts/run_job.sh paper_close >> %s/cron.log 2>&1\n' "$LOG_DIR" >> "$CRON_FILE"
+fi
 chmod 0644 "$CRON_FILE"
 
 echo "[worker] crontab installed:"

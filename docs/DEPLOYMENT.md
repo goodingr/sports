@@ -84,8 +84,14 @@ Verify:
 ```bash
 curl -fsS https://${API_DOMAIN}/health
 curl -fsS https://${APP_DOMAIN}/ | head
-docker compose exec worker crontab -l -u app
+docker compose exec worker cat /etc/cron.d/sports
 ```
+
+When moving the paper trial to this worker, pause the Windows prediction and
+closing jobs before taking the warehouse snapshot. Restore it and set
+`WORKER_PAPER_CLOSE_ENABLED=1` in the worker's `.env` before starting the worker.
+It checks on each UTC quarter hour and records the outcome in its job logs and
+health heartbeat. It uses the same request cap and reserve as the Windows collector.
 
 ## Rebuild / redeploy
 

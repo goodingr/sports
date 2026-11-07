@@ -5,7 +5,7 @@
 # pipeline command, and writes a heartbeat file so the container healthcheck
 # can tell whether jobs are succeeding or silently failing.
 #
-# Usage: run_job.sh <predict|train|benchmark|backup_local|backup_remote>
+# Usage: run_job.sh <predict|train|benchmark|paper_close|backup_local|backup_remote>
 #
 # Heartbeats live in $HEARTBEAT_DIR (default /app/logs/heartbeat):
 #   <job>.ok    — touched on success, body = ISO-8601 UTC timestamp
@@ -16,7 +16,7 @@
 
 set -uo pipefail
 
-JOB=${1:?job name required: predict|train|benchmark|backup_local|backup_remote}
+JOB=${1:?job name required: predict|train|benchmark|paper_close|backup_local|backup_remote}
 
 # Load env that was captured by worker_entrypoint.sh.
 ENV_FILE=/app/scripts/.worker_env
@@ -76,6 +76,11 @@ dispatch() {
 			# benchmark + publish gate, without the legacy prediction refresh.
 			log "Starting daily paid-picks benchmark"
 			run /app/scripts/pipeline.sh --skip-odds --skip-prediction
+			;;
+
+		paper_close)
+			log "Checking for paper decisions due for closing quotes"
+			run timeout 120s python -m src.predict.paper_close_poll --collect --batch-scheduled
 			;;
 
 		backup_local)
