@@ -24,6 +24,16 @@ def _time_text(value: datetime) -> str:
     return value.astimezone(_EASTERN).strftime("%b %d, %I:%M %p %Z")
 
 
+def _deadline_text(row: dict[str, Any], now: datetime) -> str:
+    deadline = _timestamp(row["decision_deadline_utc"])
+    text = _time_text(deadline)
+    if row["deadline_passed"]:
+        return f"{text} · Passed at audit"
+    if now > deadline:
+        return f"{text} · Passed since audit"
+    return text
+
+
 def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
     official = _timestamp(report["official_source"]["observed_at_utc"])
     audited = _timestamp(report["warehouse_audited_at_utc"])
@@ -87,7 +97,12 @@ def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
                 [
                     html.Thead(
                         html.Tr(
-                            [html.Th("Matchup"), html.Th("Tipoff"), html.Th("Provider evidence")]
+                            [
+                                html.Th("Matchup"),
+                                html.Th("Official tipoff"),
+                                html.Th("Entry deadline"),
+                                html.Th("Provider evidence at audit"),
+                            ]
                         )
                     ),
                     html.Tbody(
@@ -96,14 +111,10 @@ def _saved_card(day: date, report: dict[str, Any], now: datetime) -> dbc.Card:
                                 [
                                     html.Td(f"{row['away']} at {row['home']}"),
                                     html.Td(_time_text(_timestamp(row["official_start_utc"]))),
+                                    html.Td(_deadline_text(row, now)),
                                     html.Td(
                                         row["status"].replace("_", " ").capitalize()
                                         + (" · Early start" if row["early_entry"] else "")
-                                        + (
-                                            " · Entry deadline passed"
-                                            if row["deadline_passed"]
-                                            else ""
-                                        )
                                     ),
                                 ]
                             )

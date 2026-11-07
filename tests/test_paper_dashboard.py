@@ -191,6 +191,7 @@ def _schedule_report(*, audited_at=NOW, observed_at=NOW, linked=False):
             {
                 "away": "DEN", "home": "IND", "early_entry": True,
                 "official_start_utc": (NOW + timedelta(hours=21)).isoformat(),
+                "decision_deadline_utc": (NOW + timedelta(hours=20, minutes=45)).isoformat(),
                 "warehouse_matched": linked, "provider_linked": linked,
                 "status": "linked" if linked else "missing_warehouse_fixture",
                 "deadline_passed": False,
@@ -215,6 +216,18 @@ def test_schedule_panel_reads_latest_saved_audit_and_explains_early_gaps(tmp_pat
     assert "DEN at IND" in text
     assert "Missing warehouse fixture · Early start" in text
     assert "Official schedule observed Nov 06, 11:00 PM EST" in text
+    assert "Entry deadline" in text
+    assert "Nov 07, 07:45 PM EST" in text
+
+
+def test_schedule_panel_marks_elapsed_deadline_without_updating_saved_evidence(tmp_path):
+    path = save_schedule_audit(_schedule_report(), tmp_path)
+    original = path.read_bytes()
+    text = _text(dashboard.schedule_coverage_cards(tmp_path, NOW + timedelta(hours=21)))
+    assert "Nov 07, 07:45 PM EST · Passed since audit" in text
+    assert "Provider evidence at audit" in text
+    assert "Missing warehouse fixture · Early start" in text
+    assert path.read_bytes() == original
 
 
 def test_schedule_panel_flags_old_or_unusable_audit(tmp_path, monkeypatch):
