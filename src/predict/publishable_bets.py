@@ -8,6 +8,7 @@ import logging
 import re
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, Optional
@@ -15,7 +16,7 @@ from typing import Any, Iterable, Optional
 import pandas as pd
 import yaml
 
-from src.db.core import DB_PATH, resolve_db_path
+from src.db.core import DB_PATH, connect, resolve_db_path
 from src.models.prediction_quality import (
     DEFAULT_RELEASE_LEAGUES,
     _json_default,
@@ -400,14 +401,31 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _persist_release(
-    status: dict[str, Any], db_path: Path, output_path: Path
+    status: dict[str, Any],
+    db_path: Path,
+    output_path: Path,
+    *,
+    commit_at: datetime | None = None,
+    quality: tuple[Path, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload = json.loads(json.dumps(status, default=_json_default, allow_nan=False))
-    released = publish_release(payload, db_path)
-    if released["publishable_profitable_list_exists"]:
-        _write_json(output_path, released)
-    else:
-        _remove_paid_output(output_path)
+    released = publish_release(payload, db_path, commit_at=commit_at)
+    if released.get("superseded"):
+        return released
+    with connect(db_path) as conn:
+        # A newer release may have committed before this job reached the export.
+        conn.execute("BEGIN IMMEDIATE")
+        latest = conn.execute(
+            "SELECT release_id, payload FROM published_releases ORDER BY release_id DESC LIMIT 1"
+        ).fetchone()
+        if latest["release_id"] != released["release_id"]:
+            return {**json.loads(latest["payload"]), "superseded": True}
+        if quality is not None:
+            _write_json(*quality)
+        if released["publishable_profitable_list_exists"]:
+            _write_json(output_path, released)
+        else:
+            _remove_paid_output(output_path)
     return released
 
 
@@ -432,13 +450,14 @@ def publishable_bets(
     benchmark_prediction_paths: Optional[Iterable[Path]] = None,
 ) -> dict[str, Any]:
     """Write the latest paid bet list only when approved rules pass the gate."""
+    observed = _normalize_now(now)
+    commit_at = observed.to_pydatetime() if now is not None else None
     rules_config = load_rules(rules_path)
     rules = configured_rules(rules_config)
     approved_rules = [
         rule for rule in rules if rule.get("status") == "approved" and not rule_is_disabled(rule)
     ]
 
-    observed = _normalize_now(now)
     reviews = paper_reviews(db_path, observed.to_pydatetime()) if approved_rules else {}
     gate = _quality_gate_from_config(rules_config)
     results = [
@@ -458,10 +477,13 @@ def publishable_bets(
         "publishable_profitable_list_exists": bool(passing_rules),
         "evidence_source": "prospective_paper",
     }
-    _write_json(quality_output_path, report)
+    def persist(status: dict[str, Any]) -> dict[str, Any]:
+        return _persist_release(
+            status, db_path, output_path, commit_at=commit_at, quality=(quality_output_path, report)
+        )
 
     status: dict[str, Any] = {
-        "generated_at": _normalize_now(now).isoformat(),
+        "generated_at": observed.isoformat(),
         "rules_path": str(rules_path),
         "quality_report_path": str(quality_output_path),
         "output_path": str(output_path),
@@ -475,13 +497,15 @@ def publishable_bets(
 
     if not passing_rules:
         status["reason"] = "no_passing_approved_rule"
-        return _persist_release(status, db_path, output_path)
+        return persist(status)
 
-    current_predictions = load_current_prediction_output(db_path=db_path, leagues=leagues, now=now)
+    current_predictions = load_current_prediction_output(
+        db_path=db_path, leagues=leagues, now=observed
+    )
     current_bets = expand_current_predictions(current_predictions)
     if current_bets.empty:
         status["reason"] = "no_current_prediction_bets"
-        return _persist_release(status, db_path, output_path)
+        return persist(status)
 
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
@@ -513,13 +537,13 @@ def publishable_bets(
             status["reason"] = "passing_rules_require_benchmarked_live_metadata"
         else:
             status["reason"] = "no_current_bets_matching_passing_rules"
-        return _persist_release(status, db_path, output_path)
+        return persist(status)
 
     status["publishable_profitable_list_exists"] = True
     status["bets"] = publish_rows
     status["bet_count"] = len(publish_rows)
-    released = _persist_release(status, db_path, output_path)
-    if not released["bets"]:
+    released = persist(status)
+    if not released["bets"] and not released.get("superseded"):
         released["reason"] = "no_current_bets_matching_original_quotes"
     return released
 

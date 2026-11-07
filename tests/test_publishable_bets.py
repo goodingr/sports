@@ -456,6 +456,43 @@ def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
     assert bet["quality_summary"]["roi"] > 0.5
 
 
+def test_revocation_committed_before_export_prevents_stale_artifacts(tmp_path, monkeypatch):
+    db_path = tmp_path / "publish.db"
+    rules_path = tmp_path / "rules.yml"
+    output_path = tmp_path / "latest_publishable_bets.json"
+    quality_path = tmp_path / "quality.json"
+    _create_publish_db(db_path, include_history=True)
+    _write_rules(rules_path)
+    quality_path.write_text("newer diagnostic", encoding="utf-8")
+    publish_release = publisher.publish_release
+
+    def publish_then_revoke(payload, path, *, commit_at):
+        first = publish_release(payload, path, commit_at=commit_at)
+        assert first["bet_count"] == 1
+        revocation_time = commit_at + timedelta(seconds=1)
+        publish_release(
+            {
+                "generated_at": revocation_time.isoformat(), "bets": [],
+                "passing_approved_rule_ids": [], "reason": "data_quality_failed",
+            },
+            path,
+            commit_at=revocation_time,
+        )
+        return first
+
+    monkeypatch.setattr(publisher, "publish_release", publish_then_revoke)
+    result = publisher.publishable_bets(
+        db_path=db_path, rules_path=rules_path, output_path=output_path,
+        quality_output_path=quality_path, leagues=["NBA"],
+        now="2026-02-01T12:00:00+00:00",
+    )
+    assert result["superseded"] is True
+    assert result["reason"] == "data_quality_failed"
+    assert result["bets"] == []
+    assert not output_path.exists()
+    assert quality_path.read_text(encoding="utf-8") == "newer diagnostic"
+
+
 def test_legacy_historical_approval_is_insufficient_to_publish(tmp_path, monkeypatch):
     rules_path = tmp_path / "rules.yml"
     output_path = tmp_path / "latest_publishable_bets.json"

@@ -236,15 +236,34 @@ def _verified_quote(
 
 
 def publish_release(
-    payload: dict[str, Any], db_path: Path | None = None
+    payload: dict[str, Any], db_path: Path | None = None, *, commit_at: datetime | None = None
 ) -> dict[str, Any]:
-    """Commit the active release and its immutable first picks together."""
-    now = _utc(payload["generated_at"])
+    """Commit a release in evaluation order, using the write clock for its picks."""
+    evaluated_at = _utc(payload["generated_at"])
     picks = payload.get("bets", [])
     passing = payload.get("passing_approved_rule_ids", [])
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute("BEGIN IMMEDIATE")
+        now = datetime.now(timezone.utc) if commit_at is None else _utc(commit_at.isoformat())
+        if evaluated_at > now:
+            raise ValueError("The release evaluation is later than its publication time")
+        previous = conn.execute(
+            "SELECT published_at, payload FROM published_releases ORDER BY release_id DESC LIMIT 1"
+        ).fetchone()
+        if previous is not None:
+            latest = json.loads(previous["payload"])
+            latest_evaluated_at = _utc(latest.get("generated_at", previous["published_at"]))
+            if (
+                evaluated_at < latest_evaluated_at
+                or now < _utc(previous["published_at"])
+                or (
+                    evaluated_at == latest_evaluated_at
+                    and picks
+                    and not latest.get("passing_approved_rule_ids")
+                )
+            ):
+                return {**latest, "superseded": True}
         _settle(conn, now)
         release_id = conn.execute(
             "INSERT INTO published_releases (published_at, payload) VALUES (?, '{}')",
@@ -318,7 +337,8 @@ def publish_release(
             )
             active.append(published)
         result = {
-            **payload, "release_id": release_id, "bets": active, "bet_count": len(active),
+            **payload, "release_id": release_id, "published_at": now.isoformat(),
+            "bets": active, "bet_count": len(active),
             "publishable_profitable_list_exists": bool(active),
         }
         conn.execute(

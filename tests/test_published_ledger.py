@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import src.predict.published_ledger as ledger
 from src.db.core import initialize
 from src.predict.published_ledger import load_active_release, publish_release, published_record
 
@@ -56,6 +57,10 @@ def release(start):
     }
 
 
+def publish_at_evaluation(payload, path):
+    return publish_release(payload, path, commit_at=datetime.fromisoformat(payload["generated_at"]))
+
+
 def test_published_quote_is_immutable_and_retries_do_not_add_bets(warehouse):
     path, start = warehouse
     original = release(start)
@@ -87,8 +92,8 @@ def test_grading_uses_the_original_quote_and_includes_all_outcomes(
             (home, away),
         )
     closed = {"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}
-    publish_release(closed, path)
-    publish_release(closed, path)
+    publish_at_evaluation(closed, path)
+    publish_at_evaluation(closed, path)
     record = published_record(path)
     assert record["total"] == 1
     assert record["data"][0]["total_line"] == 220.0
@@ -123,11 +128,11 @@ def test_score_corrections_update_returns_and_keep_prior_grading(warehouse):
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE games SET status = 'final'")
         conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',115,110)")
-    publish_release(closed, path)
+    publish_at_evaluation(closed, path)
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE game_results SET home_score = 100")
-    publish_release(closed, path)
-    publish_release(closed, path)
+    publish_at_evaluation(closed, path)
+    publish_at_evaluation(closed, path)
 
     record = published_record(path)
     assert record["data"][0]["outcome"] == "loss"
@@ -146,12 +151,12 @@ def test_withdrawn_final_results_return_to_pending_with_the_prior_grade_retained
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE games SET status = 'final'")
         conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',115,110)")
-    publish_release(closed, path)
+    publish_at_evaluation(closed, path)
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE games SET status = 'in_progress'")
         conn.execute("UPDATE game_results SET home_score = NULL, away_score = NULL")
-    publish_release(closed, path)
-    publish_release(closed, path)
+    publish_at_evaluation(closed, path)
+    publish_at_evaluation(closed, path)
 
     record = published_record(path)
     assert record["total"] == record["wins"] == record["profit_units"] == 0
@@ -203,12 +208,16 @@ def test_invalid_nba_final_and_future_corrected_start_do_not_grade(warehouse):
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE games SET status='final'")
         conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',0,0)")
-    publish_release({"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}, path)
+    publish_at_evaluation(
+        {"generated_at": (start + timedelta(minutes=1)).isoformat(), "bets": []}, path
+    )
     assert published_record(path)["pending_picks"] == 1
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE game_results SET home_score=115, away_score=110")
         conn.execute("UPDATE games SET start_time_utc=?", ((start + timedelta(minutes=5)).isoformat(),))
-    publish_release({"generated_at": (start + timedelta(minutes=1)).isoformat(), "bets": []}, path)
+    publish_at_evaluation(
+        {"generated_at": (start + timedelta(minutes=2)).isoformat(), "bets": []}, path
+    )
     assert published_record(path)["pending_picks"] == 1
 
 
@@ -229,5 +238,62 @@ def test_two_way_moneyline_tie_is_a_push(warehouse):
     with sqlite3.connect(path) as conn:
         conn.execute("UPDATE games SET status='final'")
         conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',21,21)")
-    publish_release({"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}, path)
+    publish_at_evaluation(
+        {"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}, path
+    )
     assert published_record(path)["data"][0]["outcome"] == "push"
+
+
+@pytest.mark.parametrize("revocation_delay_seconds", [0, 30])
+def test_earlier_or_tied_evaluation_cannot_restore_a_revocation(warehouse, revocation_delay_seconds):
+    path, start = warehouse
+    candidate = release(start)
+    evaluation = datetime.fromisoformat(candidate["generated_at"])
+    revoked_at = evaluation + timedelta(seconds=revocation_delay_seconds)
+    revoked = publish_at_evaluation(
+        {
+            "generated_at": revoked_at.isoformat(), "bets": [],
+            "passing_approved_rule_ids": [], "reason": "data_quality_failed",
+        },
+        path,
+    )
+    result = publish_release(candidate, path, commit_at=revoked_at + timedelta(seconds=1))
+    assert result["superseded"] is True
+    assert result["release_id"] == revoked["release_id"]
+    assert result["reason"] == "data_quality_failed"
+    assert load_active_release(path)["bets"] == []
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_releases").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("delay", ["fresh", "expired", "started"])
+def test_production_publication_checks_and_records_transaction_time(warehouse, monkeypatch, delay):
+    path, start = warehouse
+    candidate = release(start)
+    evaluated_at = start - timedelta(minutes=1) if delay == "started" else start - timedelta(hours=2)
+    candidate["generated_at"] = evaluated_at.isoformat()
+    candidate["bets"][0]["predicted_at"] = evaluated_at.isoformat()
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE odds_snapshots SET fetched_at_utc = ?",
+            ((evaluated_at - timedelta(minutes=1)).isoformat(),),
+        )
+    committed_at = evaluated_at + (
+        timedelta(minutes=16) if delay == "expired" else timedelta(minutes=2)
+    )
+
+    class PublicationClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return committed_at.astimezone(tz)
+
+    monkeypatch.setattr(ledger, "datetime", PublicationClock)
+    result = publish_release(candidate, path)
+    assert result["generated_at"] == evaluated_at.isoformat()
+    assert result["published_at"] == committed_at.isoformat()
+    if delay == "fresh":
+        assert result["bets"][0]["published_at"] == committed_at.isoformat()
+    else:
+        assert result["bets"] == []
+        assert published_record(path)["published_picks"] == 0
