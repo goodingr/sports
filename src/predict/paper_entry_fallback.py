@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -42,6 +43,10 @@ class _Target:
     game_id: str | None
     canonical_start: datetime | None
 
+    @property
+    def earliest_start(self) -> datetime:
+        return min(self.official.start, self.canonical_start or self.official.start)
+
 
 @dataclass(frozen=True)
 class FallbackPlan:
@@ -61,6 +66,13 @@ class FallbackPlan:
             "commenceTimeFrom": _iso_parameter(self.request_from),
             "commenceTimeTo": _iso_parameter(self.request_to),
         }
+
+    def dispatch_status(self, now: datetime, minimum_lead: timedelta) -> str:
+        if now < self.planned_at:
+            return "entry_clock_reversed"
+        if not timedelta(0) <= now - self.official_observed_at <= _MAX_OFFICIAL_AGE:
+            return "stale_official_observation"
+        return _last_window_status(self.targets, now, minimum_lead)
 
 
 @dataclass(frozen=True)
@@ -131,6 +143,19 @@ def _safe_canonical(
     return row, start
 
 
+def _last_window_status(
+    targets: Iterable[_Target], now: datetime, minimum_lead: timedelta
+) -> str:
+    trigger_min = max(minimum_lead, _MIN_TRIGGER_LEAD)
+    leads = (target.earliest_start - now for target in targets)
+    trigger = min((lead for lead in leads if lead >= trigger_min), default=None)
+    if trigger is None:
+        return "outside_last_window"
+    if trigger >= trigger_min + _POLL_INTERVAL:
+        return "waiting_for_last_window"
+    return "window_due"
+
+
 def plan_missing_ids(
     conn: sqlite3.Connection,
     trial: PaperTrial,
@@ -162,7 +187,6 @@ def plan_missing_ids(
     lead = timedelta(minutes=trial.min_minutes_before_start)
     max_lead = timedelta(hours=trial.max_hours_before_start)
     targets = []
-    earliest = []
     for fixture in fixtures:
         if not (lead <= fixture.start - now <= max_lead and fixture.start - lead < evening):
             continue
@@ -188,16 +212,12 @@ def plan_missing_ids(
         else:
             game_id, start = None, None
         targets.append(_Target(fixture, home, away, game_id, start))
-        earliest.append(min(fixture.start, start) if start is not None else fixture.start)
 
     if not targets:
         return "no_official_early_fixture", None
-    trigger_min = max(lead, _MIN_TRIGGER_LEAD)
-    triggers = [start - now for start in earliest if start - now >= trigger_min]
-    if not triggers:
-        return "outside_last_window", None
-    if min(triggers) >= trigger_min + _POLL_INTERVAL:
-        return "waiting_for_last_window", None
+    status = _last_window_status(targets, now, lead)
+    if status != "window_due":
+        return status, None
     starts = [target.official.start for target in targets]
     return "window_due", FallbackPlan(
         day,

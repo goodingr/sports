@@ -5,6 +5,7 @@ import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
@@ -361,7 +362,9 @@ def entry_runtime(warehouse, tmp_path, monkeypatch):
     return path, raw, Clock, predictions
 
 
-def _mock_sources(monkeypatch, paid, *, events=None, free_cost="0", remaining="202", barrier=None):
+def _mock_sources(
+    monkeypatch, paid, *, events=None, free_cost="0", remaining="202", barrier=None, official=None
+):
     calls = []
 
     def get(url, **kwargs):
@@ -370,7 +373,7 @@ def _mock_sources(monkeypatch, paid, *, events=None, free_cost="0", remaining="2
         response.status_code = 200
         if url == "https://www.nba.com/games?date=2026-11-08":
             assert "params" not in kwargs
-            response._content = _official()
+            response._content = _official() if official is None else official
         elif url == f"{entry._BASE_URL}/events":
             assert kwargs["params"] == {"apiKey": "test-key"}
             response.headers.update(
@@ -395,6 +398,110 @@ def _mock_sources(monkeypatch, paid, *, events=None, free_cost="0", remaining="2
 
 def _collect_window():
     return entry.poll_entry(collect=True, official_window_fallback=True)
+
+
+def _resume_after_reservation(monkeypatch, clock, dispatch_at):
+    reserve = entry._reserve
+
+    def delayed(*args, **kwargs):
+        result = reserve(*args, **kwargs)
+        assert result[0] in {"due", "window_due"}
+        clock.current = dispatch_at
+        return result
+
+    monkeypatch.setattr(entry, "_reserve", delayed)
+
+
+@pytest.mark.parametrize(
+    ("dispatch_at", "status"),
+    [
+        (PHI_START - timedelta(minutes=30), "no_entry_quotes"),
+        (PHI_START - timedelta(minutes=30) + timedelta(microseconds=1), "waiting_for_last_window"),
+        (NOW + timedelta(minutes=20), "waiting_for_last_window"),
+        (NOW + timedelta(minutes=20, microseconds=1), "no_entry_quotes"),
+        (NOW + timedelta(minutes=30), "no_entry_quotes"),
+        (NOW + timedelta(minutes=30, microseconds=1), "stale_official_observation"),
+        (NOW.replace(hour=23, minute=15), "outside_entry_window"),
+        (NOW + timedelta(hours=10), "entry_date_changed"),
+        (NOW - timedelta(microseconds=1), "entry_clock_reversed"),
+    ],
+)
+def test_fallback_rechecks_clocks_at_paid_dispatch(entry_runtime, monkeypatch, dispatch_at, status):
+    path, _, clock, _ = entry_runtime
+    # The second fixture is exactly 45 minutes away 20 minutes after reservation.
+    second_start = NOW + timedelta(minutes=65)
+    official = _official().replace(
+        DET_START.isoformat().encode(), second_start.isoformat().encode(), 1
+    )
+    calls = _mock_sources(monkeypatch, [], official=official)
+    _resume_after_reservation(monkeypatch, clock, dispatch_at)
+
+    assert _collect_window()["status"] == status
+
+    assert len(calls) == (3 if status == "no_entry_quotes" else 2)
+    with connect(path) as conn:
+        assert conn.execute("SELECT entry_date_et FROM paper_entry_requests").fetchone()[0] == (
+            "2026-11-08"
+        )
+    clock.current = NOW
+    assert _collect_window()["status"] == "daily_cap"
+    assert len(calls) == (3 if status == "no_entry_quotes" else 2)
+
+
+def test_fallback_dispatch_uses_earlier_locked_canonical_start(entry_runtime, monkeypatch):
+    path, _, clock, _ = entry_runtime
+    with connect(path) as conn:
+        _game(conn, "existing", PHI_START - timedelta(minutes=5), "CHI", "PHI")
+    calls = _mock_sources(monkeypatch, [])
+    _resume_after_reservation(monkeypatch, clock, PHI_START - timedelta(minutes=30))
+
+    assert _collect_window()["status"] == "waiting_for_last_window"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("late_by", "second_due", "status"),
+    [(0, False, "no_entry_quotes"), (1, False, "entry_lead_elapsed"), (1, True, "no_entry_quotes")],
+)
+def test_ordinary_paid_batch_keeps_any_actionable_fixture(
+    entry_runtime, monkeypatch, late_by, second_due, status
+):
+    path, _, clock, _ = entry_runtime
+    with connect(path) as conn:
+        _game(conn, "phi", PHI_START, "CHI", "PHI", "a" * 32)
+        if second_due:
+            _game(conn, "det", DET_START, "DET", "LAL", "b" * 32)
+    calls = _mock_sources(monkeypatch, [])
+    _resume_after_reservation(
+        monkeypatch, clock, PHI_START - timedelta(minutes=15) + timedelta(microseconds=late_by)
+    )
+
+    assert entry.poll_entry(collect=True)["status"] == status
+
+    assert len(calls) == (2 if status == "no_entry_quotes" else 1)
+    if second_due:
+        assert calls[-1][1]["eventIds"] == f"{'a' * 32},{'b' * 32}"
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("use_fallback", [False, True])
+def test_review_cutoff_prevents_reserved_paid_dispatch(entry_runtime, monkeypatch, use_fallback):
+    path, _, clock, _ = entry_runtime
+    review = NOW + timedelta(minutes=1)
+    trial = replace(load_trial(), review_at=review.isoformat())
+    with connect(path) as conn:
+        conn.execute("UPDATE paper_trials SET specification = ?", (trial.specification,))
+        if not use_fallback:
+            _game(conn, "phi", PHI_START, "CHI", "PHI", "a" * 32)
+    monkeypatch.setattr(entry, "load_trial", lambda *_: trial)
+    calls = _mock_sources(monkeypatch, [])
+    _resume_after_reservation(monkeypatch, clock, review)
+
+    assert entry.poll_entry(collect=True, official_window_fallback=use_fallback)["status"] == (
+        "trial_inactive"
+    )
+    assert len(calls) == (2 if use_fallback else 1)
 
 
 def test_window_binds_only_raw_pairs_and_captures_the_earliest_verified_clocks(

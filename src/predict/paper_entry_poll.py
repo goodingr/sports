@@ -680,9 +680,6 @@ def poll_entry(
         if window
         else next(iter(due.values())).start.astimezone(_EASTERN).date()
     )
-    if datetime.now(timezone.utc).astimezone(_EASTERN).date() != entry_day:
-        return {**result, "status": "entry_date_changed"}
-
     params = {
         "apiKey": key,
         "regions": "us",
@@ -692,9 +689,26 @@ def poll_entry(
     }
     if window is not None:
         params.update(window.odds_window())
-        result["mode"] = "official_window"
     else:
         params["eventIds"] = ",".join(sorted(due))
+
+    # The date slot is already committed. Recheck the clocks before spending it.
+    dispatch_at = datetime.now(timezone.utc)
+    if dispatch_at.astimezone(_EASTERN).date() != entry_day:
+        return {**result, "status": "entry_date_changed"}
+    if dispatch_at >= datetime.fromisoformat(trial.review_at):
+        return {**result, "status": "trial_inactive"}
+    if dispatch_at >= datetime.combine(entry_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN):
+        return {**result, "status": "outside_entry_window"}
+    minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
+    if window is not None:
+        dispatch_status = window.dispatch_status(dispatch_at, minimum_lead)
+        if dispatch_status != "window_due":
+            return {**result, "status": dispatch_status}
+        result["mode"] = "official_window"
+    elif not any(fixture.start - dispatch_at >= minimum_lead for fixture in due.values()):
+        return {**result, "status": "entry_lead_elapsed"}
+
     response = _provider_get("odds", params)
     fetched_at = datetime.now(timezone.utc)
     try:
