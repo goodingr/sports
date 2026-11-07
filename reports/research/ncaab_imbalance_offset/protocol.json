@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "protocol_id": "ncaab_draftkings_totals_imbalance_offset_v1",
+  "frozen_at_utc": "2026-11-07T06:59:55+00:00",
+  "hypothesis": "At the same DraftKings full-game totals probability, greater moneyline imbalance lowers the chance of an over among non-push results.",
+  "league": "NCAAB",
+  "sport_key": "basketball_ncaab",
+  "source": "the-odds-api",
+  "book": "draftkings",
+  "development": {
+    "start_utc": "2025-11-01T00:00:00+00:00",
+    "end_exclusive_utc": "2026-11-07T00:00:00+00:00",
+    "label_availability_lag_hours": 6,
+    "label_purge": "Raw provider kickoff plus six hours must strictly precede the development end. Open score receipts only from the bounded development window and extract outcomes only for the already-selected development cohort.",
+    "purpose": "Fit and report development diagnostics only. Historical fixtures may have been used in prior experiments."
+  },
+  "selection": {
+    "decision_lead_hours_inclusive": [
+      1,
+      72
+    ],
+    "maximum_market_update_age_minutes_inclusive": 10,
+    "maximum_observed_kickoff_drift_minutes_inclusive": 10,
+    "snapshot": "First verified registered source capture per unambiguous provider fixture, sorted by exact fetched UTC then snapshot ID. Verify source, ordinary live archive request route, archive fetch timestamp, unique event ID and ordered teams. Deduplicate repeated archive timestamp/content. Treat conflicting event identity or kickoff as ambiguous.",
+    "market": "DraftKings main full-game two-way home/away moneyline and paired over/under totals at one positive integer or half-point line. Both markets appear in the same snapshot and each has its own timezone-aware update timestamp from zero to ten minutes before fetch.",
+    "price": "Each of the four finite American prices has absolute value at least 100.",
+    "settlement": "Use original local provider score receipts with a unique exact event ID, ordered teams, matching kickoff within ten minutes and completed non-tied integer scores in [0, 200]. Conflicting or missing evidence remains unresolved. Sum scores and exclude pushes from paired accuracy and fitting.",
+    "kickoff": "Original provider capture kickoff drives quote eligibility. A verified exact-time independent kickoff, if used, must agree within ten minutes. Current warehouse date-only times and mutable team orientation do not select quotes."
+  },
+  "model": {
+    "baseline": "p_over_fair is the proportional two-way no-vig probability from the same DraftKings totals pair.",
+    "predictor": "p_home_fair is the proportional two-way no-vig probability from the same DraftKings moneyline pair.",
+    "formula": "logit(p_over_fair) + beta * abs(logit(p_home_fair))",
+    "intercept": false,
+    "beta_bounds_inclusive": [
+      -1.0,
+      0.0
+    ],
+    "objective": "Summed Bernoulli log loss plus 0.5 * l2 * beta^2.",
+    "l2": 5.0,
+    "zero_stop": "If the constrained development optimum equals zero, record the result and leave holdout closed. Do not fit another direction, feature, threshold, or subgroup on this protocol."
+  },
+  "prospective_holdout": {
+    "first_quote_and_kickoff_not_before_utc": "2026-11-08T05:00:00+00:00",
+    "quote_and_kickoff_end_exclusive_utc": "2027-03-15T04:00:00+00:00",
+    "review_not_before_utc": "2027-03-22T04:00:00+00:00",
+    "freeze": "The immutable fit artifact records code and protocol SHA-256, coefficient, and cutoffs. It must be committed before the first prospective date. Only ordinary provider captures strictly after this freeze can qualify. The holdout replays frozen forecasts against that post-freeze archive, independently of grading. It is not a record of bets or forecasts issued before tipoff. No interim outcome reads or scoring.",
+    "minimum_non_push_fixtures": 400,
+    "minimum_eastern_date_clusters": 30,
+    "primary": "Mean paired model-minus-market log loss on identical eligible non-push fixtures. Success requires the upper bound of the 95% date-cluster percentile interval to be strictly negative.",
+    "secondary": "Mean paired model-minus-market Brier score on the same cohort. Report coverage, excluded pushes and missing/invalid final results.",
+    "cluster_unit": "America/New_York fixture date from the earlier verified kickoff",
+    "bootstrap_resamples": 5000,
+    "bootstrap_seed": 42,
+    "scope": "Forecast research only. This protocol selects no wagers and makes no paid approval or profitability claim.",
+    "grading": "Use verified score receipts strictly before the review cutoff. An incomplete or ambiguous final grade blocks a passing verdict; report missing and ambiguous counts for the frozen quote cohort."
+  }
+}
