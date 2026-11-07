@@ -359,6 +359,8 @@ Paper inference and cached entry both select the unique latest totals snapshot
 from the registered source. The model gets the DraftKings moneylines and total
 from that snapshot. An independent moneyline update cannot substitute a model
 input, and an incomplete newer totals observation still supersedes an older pair.
+The collector and ledger also check the original receipt for the ordered matchup,
+the paired totals and moneylines, and the provider kickoff before accepting entry.
 
 The scheduled pipeline downloads NBA odds and captures eligible decisions after
 the preflight backup and before history ingestion. It reuses that download for

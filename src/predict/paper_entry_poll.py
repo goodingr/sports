@@ -48,6 +48,7 @@ from src.predict.paper_ledger import (
 )
 from src.predict.paper_settlement import (
     _START_TOLERANCE,
+    _quote_source_start,
     _utc_timestamp,
     _valid_american_odds,
     _valid_total_line,
@@ -235,6 +236,12 @@ def _fresh_quotes(
             continue
         snapshot_id = quote["snapshot_id"]
         start = fixture_starts[row.game_id]
+        provider_start = _quote_source_start(
+            conn, quote, fetched, moneylines=(row.home_moneyline, row.away_moneyline)
+        )
+        if provider_start is None or abs(start - provider_start) > _START_TOLERANCE:
+            continue
+        start = min(start, provider_start)
         evidence_key = (snapshot_id, row.game_id)
         if evidence_key in stored_starts:
             verified_start = stored_starts[evidence_key]

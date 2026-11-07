@@ -458,6 +458,18 @@ def test_newer_unpaired_trial_totals_still_block_reuse_of_older_quotes(warehouse
     assert pd.isna(paper.selected_totals_snapshot_id)
 
 
+def test_cached_pair_requires_original_moneyline_prices(warehouse):
+    path, _, events, _, _ = warehouse
+    _seed_quotes(events)
+    assert paper_entry_poll.poll_entry() == {"status": "reusable", "due_events": 2}
+    with connect(path) as conn:
+        receipt = Path(conn.execute("SELECT raw_path FROM odds_snapshots").fetchone()[0])
+    original = json.loads(receipt.read_bytes())
+    original["results"][0]["bookmakers"][0]["markets"][0]["outcomes"][0]["price"] = -130
+    receipt.write_text(json.dumps(original), encoding="utf-8")
+    assert paper_entry_poll.poll_entry() == {"status": "due", "due_events": 2}
+
+
 @pytest.mark.parametrize(
     ("fetch_offset", "status"),
     [
