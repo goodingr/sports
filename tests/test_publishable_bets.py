@@ -516,6 +516,51 @@ def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
     assert checkout_has_recent_delivery(db_path, now=datetime(2026, 2, 1, 12, 20, tzinfo=timezone.utc))
 
 
+@pytest.mark.parametrize(
+    ("change", "failure"),
+    [
+        ("score", "paper_trial_has_unreconciled_grades"),
+        ("rule", "approval_rule_changed_before_publication"),
+    ],
+)
+def test_approval_change_before_commit_blocks_issuance(tmp_path, monkeypatch, change, failure):
+    db_path = tmp_path / "publish.db"
+    rules_path = tmp_path / "rules.yml"
+    output_path = tmp_path / "latest_publishable_bets.json"
+    quality_path = tmp_path / "quality.json"
+    _create_publish_db(db_path, include_history=True)
+    _write_rules(rules_path)
+    publish_release = publisher.publish_release
+
+    def change_before_commit(payload, path, **kwargs):
+        assert payload["passing_approved_rule_ids"] == ["nba_totals_fixture"]
+        assert len(payload["bets"]) == 1
+        if change == "score":
+            with sqlite3.connect(path) as conn:
+                conn.execute(
+                    "UPDATE game_results SET home_score = 98, away_score = 97 WHERE game_id = 'forward0'"
+                )
+        else:
+            rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+        return publish_release(payload, path, **kwargs)
+
+    monkeypatch.setattr(publisher, "publish_release", change_before_commit)
+    result = publisher.publishable_bets(
+        db_path=db_path, rules_path=rules_path, output_path=output_path,
+        quality_output_path=quality_path, leagues=["NBA"],
+        now="2026-02-01T12:00:00+00:00",
+    )
+    assert result["bets"] == []
+    assert result["reason"] == "approval_changed_before_publication"
+    assert result["passing_approved_rule_ids"] == []
+    assert not output_path.exists()
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    assert quality["passing_approved_rule_ids"] == []
+    assert failure in quality["rule_results"][0]["launch_gate_failures"]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == 0
+
+
 def test_revocation_committed_before_export_prevents_stale_artifacts(tmp_path, monkeypatch):
     db_path = tmp_path / "publish.db"
     rules_path = tmp_path / "rules.yml"
@@ -526,8 +571,8 @@ def test_revocation_committed_before_export_prevents_stale_artifacts(tmp_path, m
     quality_path.write_text("newer diagnostic", encoding="utf-8")
     publish_release = publisher.publish_release
 
-    def publish_then_revoke(payload, path, *, commit_at):
-        first = publish_release(payload, path, commit_at=commit_at)
+    def publish_then_revoke(payload, path, *, commit_at, approval_check):
+        first = publish_release(payload, path, commit_at=commit_at, approval_check=approval_check)
         assert first["bet_count"] == 1
         revocation_time = commit_at + timedelta(seconds=1)
         publish_release(

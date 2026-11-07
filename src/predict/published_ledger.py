@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ VOID_STATUSES = {"cancelled", "canceled", "voided", "no_contest", "postponed"}
 QUOTE_FIELDS = ("rule_id", "side", "moneyline", "total_line", "book", "start_time_utc")
 MAX_RELEASE_AGE = timedelta(hours=30)
 RECENT_DELIVERY_WINDOW = timedelta(days=7)
+ApprovalCheck = Callable[[sqlite3.Connection, datetime], dict[str, dict[str, Any]]]
 
 
 def _utc(value: str) -> datetime:
@@ -272,7 +274,8 @@ def _verified_quote(
 
 
 def publish_release(
-    payload: dict[str, Any], db_path: Path | None = None, *, commit_at: datetime | None = None
+    payload: dict[str, Any], db_path: Path | None = None, *, commit_at: datetime | None = None,
+    approval_check: ApprovalCheck | None = None,
 ) -> dict[str, Any]:
     """Commit a release in evaluation order, using the write clock for its picks."""
     evaluated_at = _utc(payload["generated_at"])
@@ -301,6 +304,25 @@ def publish_release(
             ):
                 return {**latest, "superseded": True}
         _settle(conn, now)
+        if approval_check is not None and passing:
+            verified_rules = approval_check(conn, now)
+            removed = [rule_id for rule_id in passing if rule_id not in verified_rules]
+            passing = [rule_id for rule_id in passing if rule_id in verified_rules]
+            had_picks = bool(picks)
+            picks = [
+                {**pick, "quality_summary": verified_rules[pick["rule_id"]]}
+                for pick in picks if pick["rule_id"] in passing
+            ]
+            payload = {**payload, "passing_approved_rule_ids": passing}
+            if removed:
+                payload["approval_changed_rule_ids"] = removed
+                if not passing or (had_picks and not picks):
+                    payload["reason"] = "approval_changed_before_publication"
+            if commit_at is None:
+                write_at = datetime.now(timezone.utc)
+                if write_at < now:
+                    raise ValueError("The publication clock moved backwards during approval")
+                now = write_at
         release_id = conn.execute(
             "INSERT INTO published_releases (published_at, payload) VALUES (?, '{}')",
             (now.isoformat(),),

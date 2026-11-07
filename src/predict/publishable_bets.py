@@ -28,7 +28,7 @@ from src.models.prediction_quality import (
     rule_is_disabled,
 )
 from src.predict.paper_approval import paper_reviews, paper_rule_result, promote_paper_trial
-from src.predict.published_ledger import publish_release
+from src.predict.published_ledger import ApprovalCheck, publish_release
 
 LOGGER = logging.getLogger(__name__)
 
@@ -438,9 +438,10 @@ def _persist_release(
     *,
     commit_at: datetime | None = None,
     quality: tuple[Path, dict[str, Any]] | None = None,
+    approval_check: ApprovalCheck | None = None,
 ) -> dict[str, Any]:
     payload = json.loads(json.dumps(status, default=_json_default, allow_nan=False))
-    released = publish_release(payload, db_path, commit_at=commit_at)
+    released = publish_release(payload, db_path, commit_at=commit_at, approval_check=approval_check)
     if released.get("superseded"):
         return released
     with connect(db_path) as conn:
@@ -508,9 +509,36 @@ def publishable_bets(
         "publishable_profitable_list_exists": bool(passing_rules),
         "evidence_source": "prospective_paper",
     }
+
+    def check_approval(conn: sqlite3.Connection, write_at: datetime) -> dict[str, dict[str, Any]]:
+        current_config = load_rules(rules_path)
+        current_rules = configured_rules(current_config)
+        current_gate = _quality_gate_from_config(current_config)
+        current_reviews = paper_reviews(db_path, write_at, connection=conn)
+        verified = {}
+        for rule in passing_rules:
+            rule_id = str(rule["id"])
+            result = (
+                paper_rule_result(rule, current_reviews.get(str(rule.get("paper_trial_id"))), current_gate)
+                if rule in current_rules else {
+                    **result_by_id[rule_id],
+                    "passes_launch_gate": False,
+                    "launch_gate_failures": ["approval_rule_changed_before_publication"],
+                }
+            )
+            result_by_id[rule_id] = result
+            if result["passes_launch_gate"]:
+                verified[rule_id] = _quality_summary(result)
+        report["rule_results"] = list(result_by_id.values())
+        report["passing_approved_rule_ids"] = list(verified)
+        report["publishable_profitable_list_exists"] = bool(verified)
+        report["approval_checked_at"] = write_at.isoformat()
+        return verified
+
     def persist(status: dict[str, Any]) -> dict[str, Any]:
         return _persist_release(
-            status, db_path, output_path, commit_at=commit_at, quality=(quality_output_path, report)
+            status, db_path, output_path, commit_at=commit_at, quality=(quality_output_path, report),
+            approval_check=check_approval if passing_rules else None,
         )
 
     status: dict[str, Any] = {
@@ -594,7 +622,7 @@ def publishable_bets(
     status["bet_count"] = len(publish_rows)
     released = persist(status)
     if not released["bets"] and not released.get("superseded"):
-        released["reason"] = "no_current_bets_matching_original_quotes"
+        released.setdefault("reason", "no_current_bets_matching_original_quotes")
     return released
 
 

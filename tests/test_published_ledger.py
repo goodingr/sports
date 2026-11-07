@@ -73,6 +73,32 @@ def publish_at_evaluation(payload, path):
     return publish_release(payload, path, commit_at=datetime.fromisoformat(payload["generated_at"]))
 
 
+def test_quote_expires_during_the_locked_approval_review(warehouse, monkeypatch):
+    path, start = warehouse
+    payload = release(start)
+    evaluated_at = datetime.fromisoformat(payload["generated_at"])
+
+    class PublicationClock(datetime):
+        current = evaluated_at
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current.astimezone(tz)
+
+    def recheck(conn, observed):
+        assert conn.in_transaction
+        assert observed == evaluated_at
+        PublicationClock.current += timedelta(minutes=15)
+        return {"validated": {"passes_launch_gate": True}}
+
+    monkeypatch.setattr(ledger, "datetime", PublicationClock)
+    result = publish_release(payload, path, approval_check=recheck)
+    assert result["published_at"] == PublicationClock.current.isoformat()
+    assert result["bets"] == []
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize(
     ("clock", "complete", "issue_latest"),
     [("utc", True, True), ("offset", True, True), ("utc", False, False), ("naive", True, False)],

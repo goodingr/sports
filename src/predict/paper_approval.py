@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from contextlib import closing
+from contextlib import ExitStack, closing
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -19,18 +19,24 @@ from src.predict.paper_settlement import unreconciled_grades
 APPROVAL_METADATA_FIELDS = frozenset({"status", "approved_at", "evidence_cutoff"})
 
 
-def paper_reviews(db_path: Path, observed_at: datetime) -> dict[str, dict[str, Any]]:
-    with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
-        conn.row_factory = sqlite3.Row
-        conn.execute("BEGIN")
-        if not conn.execute(
+def paper_reviews(
+    db_path: Path, observed_at: datetime, *, connection: sqlite3.Connection | None = None
+) -> dict[str, dict[str, Any]]:
+    with ExitStack() as resources:
+        if connection is None:
+            connection = resources.enter_context(closing(sqlite3.connect(
+                db_path.resolve().as_uri() + "?mode=ro", uri=True
+            )))
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN")
+        if not connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_trials'"
         ).fetchone():
             return {}
-        report = build_paper_report(conn, observed_at)
+        report = build_paper_report(connection, observed_at)
         for trial in report["trials"]:
             trial["unreconciled_grades"] = unreconciled_grades(
-                conn, trial["trial_id"], observed_at
+                connection, trial["trial_id"], observed_at
             )
         return {trial["trial_id"]: trial for trial in report["trials"]}
 

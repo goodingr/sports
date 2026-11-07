@@ -149,7 +149,9 @@ def prospective_release(tmp_path, monkeypatch):
             "clv_win_rate": 0.6,
         },
     }
-    monkeypatch.setattr(publishable_bets, "paper_reviews", lambda db, at: {trial.trial_id: review})
+    monkeypatch.setattr(
+        publishable_bets, "paper_reviews", lambda db, at, **kwargs: {trial.trial_id: review}
+    )
     rule = {**rule_for_trial(review), "status": "approved"}
     rules = tmp_path / "rules.yml"
     rules.write_text(yaml.safe_dump({"approved_rules": [rule]}), encoding="utf-8")

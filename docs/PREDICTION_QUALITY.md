@@ -307,7 +307,8 @@ with the warehouse. The issued record keeps the original line and price.
 After an NBA totals rule passes prospective approval, the live publisher
 scores from the approved model digest and the current paired quotes in its
 warehouse. An explicit `--now` evaluation reads retained predictions at the
-specified time.
+specified time. The release transaction rechecks the approved rule and its
+grade evidence before recording new picks or a passing release.
 
 The original price and line remain fixed in the record. Changed prices or
 opposite signals cannot replace an issued selection. Provider aliases representing
