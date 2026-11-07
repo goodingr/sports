@@ -88,6 +88,8 @@ def paper_rule_result(
     failures = result["launch_gate_failures"]
     if review["review_status"] != "complete" or review["review_verdict"] != "pass":
         failures.append("paper_trial_review_did_not_pass")
+    if review.get("late_grade_changes", 0):
+        failures.append("paper_trial_has_late_grade_changes")
     if result["bets"] < result["required_min_bets"]:
         failures.append("insufficient_graded_decisions")
     checks = (

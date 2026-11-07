@@ -594,3 +594,19 @@ def test_filtered_subset_cannot_inherit_the_full_trial_approval(tmp_path):
     assert len(publisher.filter_bets_for_rule(rows, canonical)) == 2
     assert publisher.filter_bets_for_rule(rows, filtered)["game_id"].tolist() == ["dearer"]
     assert not paper_rule_result(filtered, review, QualityGate())["passes_launch_gate"]
+
+
+def test_late_material_grade_changes_revoke_approval_without_rewriting_frozen_metrics(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    original_metrics = dict(review["metrics"])
+    assert paper_rule_result(canonical, review, QualityGate())["passes_launch_gate"]
+
+    review["late_grade_changes"] = 1
+    result = paper_rule_result(canonical, review, QualityGate())
+
+    assert result["passes_launch_gate"] is False
+    assert result["launch_gate_failures"] == ["paper_trial_has_late_grade_changes"]
+    assert review["metrics"] == original_metrics
