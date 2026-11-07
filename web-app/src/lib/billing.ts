@@ -27,12 +27,13 @@ export function getStripePriceId(): string {
     return requireEnv("STRIPE_PRICE_ID");
 }
 
-export async function getVerifiedCheckoutPriceId(stripe: Stripe): Promise<string | null> {
+export async function getVerifiedCheckoutPrice(stripe: Stripe): Promise<Pick<Stripe.Price, "id" | "livemode"> | null> {
     const priceId = getStripePriceId();
     const price = await stripe.prices.retrieve(priceId, { expand: ["product"] });
     const { product, recurring, unit_amount_decimal: decimal } = price;
     if (
         price.id !== priceId
+        || typeof price.livemode !== "boolean"
         || price.active !== true
         || !product || typeof product === "string" || !("active" in product) || product.active !== true
         || price.currency !== CHECKOUT_CURRENCY
@@ -50,7 +51,7 @@ export async function getVerifiedCheckoutPriceId(stripe: Stripe): Promise<string
     ) {
         return null;
     }
-    return priceId;
+    return { id: priceId, livemode: price.livemode };
 }
 
 export function getStripeWebhookSecret(): string {
@@ -231,31 +232,4 @@ export async function createBillingPortalSession(
         return_url: returnUrl,
     });
     return session.url;
-}
-
-/**
- * Get or create a Stripe customer for a Clerk user. Persists the resulting
- * customer id on Clerk so we always reuse it on subsequent checkouts.
- */
-export async function getOrCreateCustomer(
-    userId: string,
-    email: string,
-): Promise<string> {
-    const stripe = getStripe();
-    const clerk = await getClerk();
-    const user = await clerk.users.getUser(userId);
-    const existing = (user.publicMetadata as Record<string, unknown> | undefined)?.[
-        "stripe_customer_id"
-    ];
-    if (typeof existing === "string" && existing.length > 0) {
-        return existing;
-    }
-    const customer = await stripe.customers.create({
-        email,
-        metadata: { userId },
-    });
-    await clerk.users.updateUserMetadata(userId, {
-        publicMetadata: { stripe_customer_id: customer.id },
-    });
-    return customer.id;
 }

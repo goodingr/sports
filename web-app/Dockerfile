@@ -63,6 +63,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
 # Production-only install for the runtime stage.
 RUN npm ci --omit=dev --no-audit --no-fund \
  && npm cache clean --force \
+ && mkdir -m 0700 /app/checkout-state \
  && chown -R nextjs:nodejs /app
 
 USER nextjs

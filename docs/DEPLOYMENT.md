@@ -136,6 +136,40 @@ cannot satisfy the relevant checks. Quote expiry still controls each pick shown
 to subscribers. Set the flag back to `false` and recreate the API service to close
 new enrollment.
 
+Full-stack Compose mounts the private `sports_checkout` volume at
+`/app/checkout-state`. Before the first paid enrollment, provision the SQLite
+file once as the web service user. The web route requires the file to exist
+and stops checkout if it is missing. An empty directory after a restart or
+restore requires investigation before checkout can resume.
+
+```bash
+docker compose exec web node --input-type=module -e '
+import { closeSync, openSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+closeSync(openSync(path, "wx", 0o600));
+const db = new DatabaseSync(path);
+db.exec("PRAGMA user_version = 1");
+db.close();'
+```
+
+Keep the volume across redeployments and include it in the private restore
+drill. Use a consistent SQLite backup of the live database. Close enrollment
+before any restore or rollback. Reconcile Stripe and Clerk activity after the
+backup cutoff with the restored reservations before reopening. Disabling the
+app route stops new sessions. Expire existing open Stripe sessions if payment
+must stop immediately. Web processes on one host share this file. A second
+host needs an equivalent shared transactional store before accepting checkout
+traffic.
+
+The store saves Stripe resource IDs, the Clerk account ID, and the exact
+server-created requests. Stripe collects the billing email for new customers.
+Checkout retries use the same saved idempotency key. Unresolved requests
+that reach 23 hours require reconciliation in Stripe before an operator
+can recover checkout. Provider-confirmed terminal sessions can be replaced.
+Keep Stripe's single-subscription setting enabled as a separate control.
+[Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests) · [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
+
 ## Networking
 
 - All services share the `sports` Compose network.

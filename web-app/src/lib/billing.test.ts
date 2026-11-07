@@ -4,9 +4,8 @@ import {
     PREMIUM_KEY,
     applySnapshot,
     createBillingPortalSession,
-    getOrCreateCustomer,
     getStoredCustomerId,
-    getVerifiedCheckoutPriceId,
+    getVerifiedCheckoutPrice,
     isPremiumStatus,
     revokedSnapshot,
     setClerkForTests,
@@ -70,13 +69,13 @@ beforeEach(() => {
     setClerkForTests(null);
 });
 
-describe("getVerifiedCheckoutPriceId", () => {
+describe("getVerifiedCheckoutPrice", () => {
     const product = { id: "prod_test", object: "product", active: true } as Stripe.Product;
     const recurring: Stripe.Price.Recurring = {
         interval: "month", interval_count: 1, usage_type: "licensed", meter: null, trial_period_days: null,
     };
     const price = {
-        id: "price_test", active: true, product, currency: "usd", unit_amount: 2900,
+        id: "price_test", active: true, product, currency: "usd", unit_amount: 2900, livemode: false,
         unit_amount_decimal: "2900.00", type: "recurring", billing_scheme: "per_unit",
         custom_unit_amount: null, transform_quantity: null, recurring,
     };
@@ -94,7 +93,7 @@ describe("getVerifiedCheckoutPriceId", () => {
         vi.stubEnv("NODE_ENV", "production");
         retrieve.mockResolvedValue({ ...price, livemode });
 
-        await expect(getVerifiedCheckoutPriceId(stripe)).resolves.toBe(price.id);
+        await expect(getVerifiedCheckoutPrice(stripe)).resolves.toEqual({ id: price.id, livemode });
         expect(retrieve).toHaveBeenCalledExactlyOnceWith(price.id, { expand: ["product"] });
     });
 
@@ -118,7 +117,7 @@ describe("getVerifiedCheckoutPriceId", () => {
     ])("rejects %s", async (_, overrides) => {
         retrieve.mockResolvedValue({ ...price, ...overrides });
 
-        await expect(getVerifiedCheckoutPriceId(stripe)).resolves.toBeNull();
+        await expect(getVerifiedCheckoutPrice(stripe)).resolves.toBeNull();
     });
 });
 
@@ -242,50 +241,6 @@ describe("applySnapshot", () => {
 
         expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_retry')).toBe(true);
         expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
-    });
-});
-
-describe("getOrCreateCustomer", () => {
-    it("reuses an existing stripe_customer_id from Clerk metadata", async () => {
-        const users: Record<string, StoredUser> = {
-            user_clerk_1: {
-                id: "user_clerk_1",
-                publicMetadata: { stripe_customer_id: "cus_existing" },
-                privateMetadata: {},
-            },
-        };
-        setClerkForTests(makeFakeClerk(users) as never);
-        let createCalled = false;
-        setStripeForTests({
-            customers: {
-                create: async () => {
-                    createCalled = true;
-                    return { id: "cus_new" };
-                },
-            },
-        } as unknown as Stripe);
-        const id = await getOrCreateCustomer("user_clerk_1", "user@example.com");
-        expect(id).toBe("cus_existing");
-        expect(createCalled).toBe(false);
-    });
-
-    it("creates a new customer and stores the id", async () => {
-        const users: Record<string, StoredUser> = {
-            user_clerk_1: { id: "user_clerk_1", publicMetadata: {}, privateMetadata: {} },
-        };
-        setClerkForTests(makeFakeClerk(users) as never);
-        setStripeForTests({
-            customers: {
-                create: async (params: { email: string; metadata: Record<string, string> }) => {
-                    expect(params.email).toBe("user@example.com");
-                    expect(params.metadata.userId).toBe("user_clerk_1");
-                    return { id: "cus_new" };
-                },
-            },
-        } as unknown as Stripe);
-        const id = await getOrCreateCustomer("user_clerk_1", "user@example.com");
-        expect(id).toBe("cus_new");
-        expect(users.user_clerk_1.publicMetadata.stripe_customer_id).toBe("cus_new");
     });
 });
 

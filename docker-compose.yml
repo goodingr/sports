@@ -13,6 +13,7 @@
 #   - sports_logs    -> /app/logs    (pipeline transcripts)
 #   - sports_reports -> /app/reports (quality reports and gated pick output)
 #   - sports_backups -> /app/backups (local snapshots before remote push)
+#   - sports_checkout -> /app/checkout-state (private Stripe checkout reservations)
 #
 # Secrets come from `.env` at the repo root. Never commit it.
 # ============================================================================
@@ -124,6 +125,9 @@ services:
       PORT: "3000"
       HOSTNAME: 0.0.0.0
       SPORTS_API_INTERNAL_URL: http://api:8000
+      SPORTS_CHECKOUT_DB_PATH: /app/checkout-state/intents.db
+    volumes:
+      - sports_checkout:/app/checkout-state
     expose:
       - "3000"
     depends_on:
@@ -173,5 +177,6 @@ volumes:
   sports_logs:
   sports_reports:
   sports_backups:
+  sports_checkout:
   caddy_data:
   caddy_config:

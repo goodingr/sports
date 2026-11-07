@@ -131,6 +131,9 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
 - [ ] Stripe Checkout's single-subscription protection and the customer portal
       are enabled for the canonical customer flow. Verify simultaneous checkout
       and retry behavior before opening paid enrollment. [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
+- [ ] The private checkout volume is provisioned, backed up, and restored in
+      staging. Reuse the same reservation after interrupting the response and
+      restarting the web service. [Deployment instructions](DEPLOYMENT.md)
 - [ ] The configured Stripe price is active and charges $29 USD each month.
       Verify the hosted price before enabling `PAID_ENROLLMENT_ENABLED`.
 
