@@ -1,17 +1,25 @@
 """Fetch recent scores from The Odds API and update the database."""
 
 import argparse
+import json
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 
-import json
-from src.data.config import OddsAPISettings, OddsAPIKeyManager, RAW_DATA_DIR
+from src.data.config import RAW_DATA_DIR, OddsAPIKeyManager, OddsAPISettings
+from src.data.team_mappings import NBA_ALIASES
 from src.db.core import connect
+from src.db.loaders import _parse_utc_datetime
 from src.predict.config import LEAGUE_SPORT_KEYS, SUPPORTED_LEAGUES
+
+_NBA_SCORE_SOURCE = "the-odds-api-scores"
+_NBA_TEAM_CODES = {**NBA_ALIASES, **{code.lower(): code for code in NBA_ALIASES.values()}}
+_NBA_CANCELLED = {"canceled", "cancelled", "no_contest", "voided"}
+
 
 def _get_sport_key(league: str) -> str:
     try:
@@ -67,10 +75,181 @@ def write_score_snapshot(data: List[Dict], league: str) -> None:
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     LOGGER.info("Saved raw scores to %s", output_path)
 
+
+def _nba_final_scores(event: dict, names: tuple[str, str]) -> tuple[int, int] | None:
+    scores = event.get("scores")
+    if not isinstance(scores, list) or len(scores) != 2:
+        return None
+    values = {
+        item["name"]: item.get("score")
+        for item in scores
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    if values.keys() != set(names):
+        return None
+    raw_home, raw_away = (values[name] for name in names)
+    if not all(
+        type(value) is int or isinstance(value, str) and value.isdecimal()
+        for value in (raw_home, raw_away)
+    ):
+        return None
+    try:
+        home, away = int(raw_home), int(raw_away)
+    except ValueError:
+        return None
+    return (home, away) if 0 <= home < 2**63 and 0 <= away < 2**63 and home != away else None
+
+
+def _update_nba_scores(scores_data: List[Dict]) -> int:
+    received_by = datetime.now(timezone.utc)
+    event_counts = Counter(
+        event["id"]
+        for event in scores_data
+        if isinstance(event, dict) and isinstance(event.get("id"), str)
+    )
+    updated = 0
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nba_odds_api_score_state (
+                game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+                provider_event_id TEXT NOT NULL,
+                home_team_id INTEGER NOT NULL,
+                away_team_id INTEGER NOT NULL,
+                last_update_utc TEXT NOT NULL,
+                completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+                home_score INTEGER,
+                away_score INTEGER,
+                applied INTEGER NOT NULL CHECK (applied IN (0, 1))
+            )
+            """
+        )
+        for event in scores_data:
+            if not isinstance(event, dict) or event.get("sport_key") != _get_sport_key("NBA"):
+                continue
+            event_id, completed = event.get("id"), event.get("completed")
+            names = event.get("home_team"), event.get("away_team")
+            if (
+                not isinstance(event_id, str)
+                or not event_id.strip()
+                or event_counts[event_id] != 1
+                or type(completed) is not bool
+                or not all(isinstance(name, str) for name in names)
+            ):
+                continue
+            home_code, away_code = (_NBA_TEAM_CODES.get(name.strip().lower()) for name in names)
+            if not home_code or not away_code or home_code == away_code:
+                continue
+            try:
+                observed = _parse_utc_datetime(event.get("last_update"), require_offset=True)
+                kickoff = (
+                    _parse_utc_datetime(event.get("commence_time"), require_offset=True)
+                    if completed
+                    else None
+                )
+            except OverflowError:
+                continue
+            if (
+                observed is None
+                or observed > received_by
+                or (completed and (kickoff is None or observed <= kickoff))
+            ):
+                continue
+            stamp = observed.isoformat(timespec="microseconds")
+            scores = _nba_final_scores(event, names) if completed else (None, None)
+            if scores is None:
+                continue
+            matches = conn.execute(
+                """
+                SELECT g.game_id, g.home_team_id, g.away_team_id, g.status,
+                       h.code AS home_code, a.code AS away_code,
+                       r.home_score, r.away_score, r.source_version
+                FROM games g
+                JOIN sports s ON s.sport_id = g.sport_id
+                LEFT JOIN teams h ON h.team_id = g.home_team_id AND h.sport_id = g.sport_id
+                LEFT JOIN teams a ON a.team_id = g.away_team_id AND a.sport_id = g.sport_id
+                LEFT JOIN game_results r ON r.game_id = g.game_id
+                WHERE s.league = 'NBA' AND g.odds_api_id = ?
+                LIMIT 2
+                """,
+                (event_id,),
+            ).fetchall()
+            if len(matches) != 1:
+                continue
+            game = matches[0]
+            status = (game["status"] or "").lower()
+            if status in _NBA_CANCELLED or (game["home_code"], game["away_code"]) != (
+                home_code,
+                away_code,
+            ):
+                continue
+            game_id = game["game_id"]
+            previous = conn.execute(
+                "SELECT * FROM nba_odds_api_score_state WHERE game_id = ?", (game_id,)
+            ).fetchone()
+            identity = event_id, game["home_team_id"], game["away_team_id"]
+            if previous is not None and (
+                stamp <= previous["last_update_utc"]
+                or identity
+                != (
+                    previous["provider_event_id"],
+                    previous["home_team_id"],
+                    previous["away_team_id"],
+                )
+            ):
+                continue
+            current_scores = game["home_score"], game["away_score"]
+            owns_result = (
+                previous is not None
+                and previous["applied"]
+                and game["source_version"] == _NBA_SCORE_SOURCE
+                and current_scores == (previous["home_score"], previous["away_score"])
+            )
+            # Observing a legacy score again does not establish who wrote it.
+            applied = owns_result or (completed and current_scores == (None, None))
+            if applied and (completed or previous["completed"]):
+                new_status = "final" if completed else "in_progress"
+                if scores != current_scores or new_status != status or not owns_result:
+                    conn.execute(
+                        """
+                        INSERT INTO game_results (game_id, home_score, away_score, source_version)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(game_id) DO UPDATE SET
+                            home_score = excluded.home_score,
+                            away_score = excluded.away_score,
+                            source_version = excluded.source_version
+                        """,
+                        (game_id, *scores, _NBA_SCORE_SOURCE),
+                    )
+                    conn.execute(
+                        "UPDATE games SET status = ? WHERE game_id = ?", (new_status, game_id)
+                    )
+                    updated += 1
+            conn.execute(
+                """
+                INSERT INTO nba_odds_api_score_state (
+                    game_id, provider_event_id, home_team_id, away_team_id, last_update_utc,
+                    completed, home_score, away_score, applied
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    last_update_utc = excluded.last_update_utc,
+                    completed = excluded.completed,
+                    home_score = excluded.home_score,
+                    away_score = excluded.away_score,
+                    applied = excluded.applied
+                """,
+                (game_id, *identity, stamp, completed, *scores, applied),
+            )
+    return updated
+
+
 def update_database(scores_data: List[Dict], league: str) -> int:
     """Update game results in the database."""
     if not scores_data:
         return 0
+    if league.upper() == "NBA":
+        return _update_nba_scores(scores_data)
         
     updated_count = 0
     

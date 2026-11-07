@@ -226,9 +226,18 @@ zero. Check the event log when the odds receipt is absent after the grace period
 # List games that should have a final score but don't.
 docker compose exec -u app worker python scripts/list_stale_games.py
 
-# Backfill from ESPN.
-docker compose exec -u app worker python scripts/backfill_scores_espn.py
+# Fill missing finals from ESPN.
+docker compose exec -u app worker python -m src.data.score_backfill --resolve-stale --leagues NBA,NHL
 ```
+
+Recurring backfill fills incomplete score pairs and preserves any complete
+result saved before or during the fetch. The explicit date-range backfill
+can revise a complete score when reconciling verified corrections.
+
+NBA scores from The Odds API carry a provider update clock. A newer verified
+state can correct or reopen a result that the provider originally wrote.
+For older scores and results from another source, reconcile discrepancies
+against the official final before making a correction.
 
 ### Disk pressure
 `/ready` reports `disk_free_mb`. When it's red:
