@@ -8,6 +8,7 @@ import math
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ from src.db.core import connect, resolve_db_path
 from src.models.prediction_quality import expected_value, no_vig_pair
 from src.predict.paper_report import build_paper_report
 from src.predict.paper_schedule import record_known_fixtures
-from src.predict.paper_settlement import settle_open_trials
+from src.predict.paper_settlement import _START_TOLERANCE, settle_open_trials
 
 DEFAULT_RULES = Path("config/paper_trial.yml")
 SCHEMA_PATH = Path(__file__).with_name("paper_schema.sql")
@@ -216,7 +217,13 @@ def _model_inputs_match(conn: sqlite3.Connection, row: Any, quote: sqlite3.Row) 
 
 
 def _capture_one(
-    conn: sqlite3.Connection, trial: PaperTrial, row: Any, registered: datetime, now: datetime
+    conn: sqlite3.Connection,
+    trial: PaperTrial,
+    row: Any,
+    registered: datetime,
+    now: datetime,
+    *,
+    start_limit: datetime | None = None,
 ) -> str:
     game = _eligible_game(conn, row.game_id, trial.league)
     if game is None:
@@ -225,15 +232,17 @@ def _capture_one(
         start = _utc(game["start_time_utc"])
         model_start = _utc(row.commence_time)
         predicted_at = _utc(row.predicted_at)
+        verified_start = _utc(start_limit) if start_limit is not None else start
     except ValueError:
         return "invalid_time"
-    lead = start - now
+    if abs(start - verified_start) > _START_TOLERANCE:
+        return "game_schedule_changed"
+    decision_start = min(start, verified_start)
     if (
         start != model_start
         or not registered <= predicted_at <= now
-        or not timedelta(minutes=trial.min_minutes_before_start)
-        <= lead
-        <= timedelta(hours=trial.max_hours_before_start)
+        or decision_start - now < timedelta(minutes=trial.min_minutes_before_start)
+        or start - now > timedelta(hours=trial.max_hours_before_start)
     ):
         return "outside_decision_window"
     if pd.isna(row.selected_totals_snapshot_id) or pd.isna(row.selected_totals_book_id):
@@ -311,7 +320,7 @@ def _capture_one(
             row.game_id,
             game["home_team_id"],
             game["away_team_id"],
-            start.isoformat(),
+            decision_start.isoformat(),
             now.isoformat(),
             predicted_at.isoformat(),
             trial.odds_source,
@@ -329,7 +338,7 @@ def _capture_one(
             trial.trial_id,
             game["home_team_id"],
             game["away_team_id"],
-            start.isoformat(),
+            decision_start.isoformat(),
         ),
     )
     return "recorded" if cursor.rowcount else "already_recorded"
@@ -409,6 +418,7 @@ def capture_predictions(
     db_path: Path | None = None,
     *,
     fixture_ids: AbstractSet[str] | None = None,
+    fixture_start_limits: Mapping[str, datetime] | None = None,
 ) -> dict[str, int]:
     if predictions is not None and not predictions.empty and model_sha256 != trial.model_sha256:
         raise ValueError(
@@ -434,7 +444,8 @@ def capture_predictions(
             for row in predictions.itertuples(index=False):
                 if fixture_ids is not None and row.game_id not in fixture_ids:
                     continue
-                outcome = _capture_one(conn, trial, row, registered, now)
+                start_limit = fixture_start_limits.get(row.game_id) if fixture_start_limits else None
+                outcome = _capture_one(conn, trial, row, registered, now, start_limit=start_limit)
                 counts[outcome] += 1
                 snapshot = row.selected_totals_snapshot_id
                 outcomes[row.game_id] = (outcome, None if pd.isna(snapshot) else str(snapshot))

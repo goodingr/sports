@@ -132,6 +132,22 @@ def test_scoped_capture_excludes_other_eligible_fixtures(warehouse):
     ]
 
 
+def test_scoped_capture_checks_earlier_start_at_ledger_write(warehouse):
+    db, trial, predictions, now = warehouse
+    canonical_start = now + timedelta(minutes=20)
+    earlier_start = canonical_start - timedelta(minutes=8)
+    predictions["commence_time"] = canonical_start.isoformat()
+    with connect(db) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'game'",
+            (canonical_start.isoformat(),),
+        )
+    assert capture_predictions(
+        trial, predictions, trial.model_sha256, db, fixture_start_limits={"game": earlier_start}
+    ) == {"outside_decision_window": 1}
+    assert capture_predictions(trial, predictions, trial.model_sha256, db) == {"recorded": 1}
+
+
 def test_capture_rejects_missing_provenance_wrong_model_and_invalid_market(warehouse):
     db, trial, predictions, _ = warehouse
     with pytest.raises(ValueError, match="pinned digest"):
