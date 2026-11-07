@@ -14,6 +14,7 @@ import yaml
 from src.models.prediction_quality import QualityGate, load_rules
 from src.predict.paper_ledger import PaperTrial
 from src.predict.paper_report import build_paper_report
+from src.predict.paper_settlement import unreconciled_grades
 
 APPROVAL_METADATA_FIELDS = frozenset({"status", "approved_at", "evidence_cutoff"})
 
@@ -27,6 +28,10 @@ def paper_reviews(db_path: Path, observed_at: datetime) -> dict[str, dict[str, A
         ).fetchone():
             return {}
         report = build_paper_report(conn, observed_at)
+        for trial in report["trials"]:
+            trial["unreconciled_grades"] = unreconciled_grades(
+                conn, trial["trial_id"], observed_at
+            )
         return {trial["trial_id"]: trial for trial in report["trials"]}
 
 
@@ -80,6 +85,7 @@ def paper_rule_result(
         avg_closing_line_value=metrics["avg_clv_points"],
         closing_line_value_win_rate=metrics["clv_win_rate"],
         evidence_cutoff=review["evidence_cutoff"],
+        unreconciled_grades=review.get("unreconciled_grades", 0),
         model_beats_market_brier=(
             metrics["model_brier"] is not None and metrics["market_brier"] is not None
             and metrics["model_brier"] < metrics["market_brier"]
@@ -90,6 +96,8 @@ def paper_rule_result(
         failures.append("paper_trial_review_did_not_pass")
     if review.get("late_grade_changes", 0):
         failures.append("paper_trial_has_late_grade_changes")
+    if result["unreconciled_grades"] > 0:
+        failures.append("paper_trial_has_unreconciled_grades")
     if result["bets"] < result["required_min_bets"]:
         failures.append("insufficient_graded_decisions")
     checks = (

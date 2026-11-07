@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -16,6 +17,8 @@ from src.predict.paper_approval import (
     promote_paper_trial,
     rule_for_trial,
 )
+from src.predict.paper_ledger import SCHEMA_PATH as PAPER_SCHEMA_PATH
+from src.predict.paper_settlement import settle_open_trials
 from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_rule
 from src.predict.publishable_bets import main as publish_main
 
@@ -28,34 +31,103 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
         "max_hours_before_start": 72, "min_decisions": 150, "min_roi": 0.05,
         "min_clv_coverage": 0.8, "review_at": "2026-01-20T00:00:00+00:00",
     }
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
         conn.executescript("""
-            CREATE TABLE paper_trials (trial_id TEXT, registered_at TEXT, specification TEXT);
-            CREATE TABLE paper_decisions (
-                trial_id TEXT, game_id TEXT, start_time_utc TEXT, captured_at TEXT,
-                model_probability REAL, market_probability REAL
+            CREATE TABLE IF NOT EXISTS sports (
+                sport_id INTEGER PRIMARY KEY, name TEXT, league TEXT, default_market TEXT
             );
-            CREATE TABLE paper_settlements (
-                trial_id TEXT, game_id TEXT, settled_at TEXT, outcome TEXT,
-                profit_units REAL, clv_points REAL
+            CREATE TABLE IF NOT EXISTS teams (
+                team_id INTEGER PRIMARY KEY, sport_id INTEGER, code TEXT, name TEXT
             );
+            CREATE TABLE IF NOT EXISTS books (book_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE IF NOT EXISTS games (
+                game_id TEXT PRIMARY KEY, sport_id INTEGER, start_time_utc TEXT,
+                home_team_id INTEGER, away_team_id INTEGER, status TEXT
+            );
+            CREATE TABLE IF NOT EXISTS game_results (
+                game_id TEXT PRIMARY KEY, home_score INTEGER, away_score INTEGER,
+                home_moneyline_close REAL, away_moneyline_close REAL, total_close REAL
+            );
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT
+            );
+            CREATE TABLE IF NOT EXISTS odds (
+                snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
+                outcome TEXT, price_american REAL, line REAL
+            );
+            INSERT OR IGNORE INTO sports (sport_id, name, league, default_market)
+            VALUES (1, 'Basketball', 'NBA', 'totals');
+            INSERT OR IGNORE INTO teams (team_id, sport_id, code, name)
+            VALUES (1, 1, 'HOME', 'Home Team'), (2, 1, 'AWAY', 'Away Team');
+            INSERT OR IGNORE INTO books (book_id, name) VALUES (1, 'DraftKings');
         """)
+        conn.executescript(PAPER_SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute(
-            "INSERT INTO paper_trials VALUES (?, '2026-01-01T00:00:00+00:00', ?)",
+            """
+            INSERT INTO paper_trials (trial_id, registered_at, specification)
+            VALUES (?, '2026-01-01T00:00:00+00:00', ?)
+            """,
             (trial_id, json.dumps(specification)),
         )
         for index in range(150):
+            game_id = f"forward{index}"
             captured = datetime(2026, 1, 2, 18, tzinfo=timezone.utc) + timedelta(days=index % 10)
+            start = captured + timedelta(hours=1)
+            entry = f"{game_id}_entry"
+            close = f"{game_id}_close"
+            fetched_at = captured - timedelta(minutes=1)
             conn.execute(
-                "INSERT INTO paper_decisions VALUES (?, ?, ?, ?, 0.8, 0.5)",
-                (trial_id, f"forward{index}", (captured + timedelta(hours=1)).isoformat(), captured.isoformat()),
+                """
+                INSERT INTO games (
+                    game_id, sport_id, start_time_utc, home_team_id, away_team_id, status
+                ) VALUES (?, 1, ?, 1, 2, 'final')
+                """,
+                (game_id, start.isoformat()),
             )
-            won = index < 140
             conn.execute(
-                "INSERT INTO paper_settlements VALUES (?, ?, ?, ?, ?, 0.5)",
-                (trial_id, f"forward{index}", (captured + timedelta(hours=5)).isoformat(),
-                 "win" if won else "loss", 1.0 if won else -1.0),
+                "INSERT INTO game_results (game_id, home_score, away_score) VALUES (?, ?, ?)",
+                (game_id, 120 if index < 140 else 90, 100 if index < 140 else 95),
             )
+            conn.execute(
+                """
+                INSERT INTO paper_decisions (
+                    trial_id, game_id, home_team_id, away_team_id, start_time_utc,
+                    captured_at, predicted_at, odds_source, snapshot_id, odds_fetched_at,
+                    book_id, book, side, line, price, opposite_price,
+                    model_probability, market_probability, edge
+                ) VALUES (?, ?, 1, 2, ?, ?, ?, 'the-odds-api', ?, ?,
+                          1, 'draftkings', 'over', 200.5, 100, 100, 0.8, 0.5, 0.3)
+                """,
+                (
+                    trial_id, game_id, start.isoformat(), captured.isoformat(),
+                    captured.isoformat(), entry, fetched_at.isoformat(),
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source)
+                VALUES (?, ?, 1, 'the-odds-api')
+                """,
+                [
+                    (entry, fetched_at.isoformat()),
+                    (close, (start - timedelta(minutes=30)).isoformat()),
+                ],
+            )
+            conn.executemany(
+                """
+                INSERT INTO odds (
+                    snapshot_id, game_id, book_id, market, outcome, price_american, line
+                ) VALUES (?, ?, 1, 'totals', ?, ?, ?)
+                """,
+                [
+                    (snapshot, game_id, side, price, line)
+                    for snapshot, price, line in [(entry, 100, 200.5), (close, -110, 201.0)]
+                    for side in ("Over", "Under")
+                ],
+            )
+        assert settle_open_trials(conn, datetime(2026, 1, 12, tzinfo=timezone.utc)) == 150
+        conn.commit()
 
 
 def _create_publish_db(path, *, include_history: bool) -> None:
@@ -610,3 +682,56 @@ def test_late_material_grade_changes_revoke_approval_without_rewriting_frozen_me
     assert result["passes_launch_gate"] is False
     assert result["launch_gate_failures"] == ["paper_trial_has_late_grade_changes"]
     assert review["metrics"] == original_metrics
+
+
+def test_source_correction_blocks_promotion_before_and_after_settlement_reconciliation(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    trial_id = "nba_totals_fixture"
+    observed = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text("approved_rules: []\n", encoding="utf-8")
+    original_rules = rules_path.read_bytes()
+    initial = paper_reviews(db_path, observed)[trial_id]
+    canonical = rule_for_trial(initial)
+    frozen_metrics = dict(initial["metrics"])
+    assert initial["unreconciled_grades"] == 0
+    assert paper_rule_result(canonical, initial, QualityGate())["passes_launch_gate"]
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
+        conn.commit()
+
+    stale = paper_reviews(db_path, observed)[trial_id]
+    stale_result = paper_rule_result(canonical, stale, QualityGate())
+
+    assert stale["unreconciled_grades"] == 1
+    assert stale["late_grade_changes"] == 0
+    assert stale["metrics"] == frozen_metrics
+    assert stale_result["launch_gate_failures"] == ["paper_trial_has_unreconciled_grades"]
+    with pytest.raises(RuntimeError, match="paper_trial_has_unreconciled_grades"):
+        promote_paper_trial(
+            trial_id, db_path, rules_path, QualityGate(), observed_at=observed
+        )
+    assert rules_path.read_bytes() == original_rules
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        # Reading approval cannot repair history or silently bless the changed source.
+        assert conn.execute("SELECT COUNT(*) FROM paper_settlement_history").fetchone()[0] == 150
+        assert conn.execute(
+            "SELECT outcome FROM paper_settlements WHERE game_id = 'forward0'"
+        ).fetchone()[0] == "win"
+        assert settle_open_trials(conn, observed) == 1
+        conn.commit()
+
+    reconciled = paper_reviews(db_path, observed + timedelta(hours=1))[trial_id]
+    reconciled_result = paper_rule_result(canonical, reconciled, QualityGate())
+    assert reconciled["unreconciled_grades"] == 0
+    assert reconciled["late_grade_changes"] == 1
+    assert reconciled["metrics"] == frozen_metrics
+    assert reconciled_result["launch_gate_failures"] == ["paper_trial_has_late_grade_changes"]
+    with pytest.raises(RuntimeError, match="paper_trial_has_late_grade_changes"):
+        promote_paper_trial(
+            trial_id, db_path, rules_path, QualityGate(),
+            observed_at=observed + timedelta(hours=1),
+        )
+    assert rules_path.read_bytes() == original_rules
