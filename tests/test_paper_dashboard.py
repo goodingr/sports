@@ -5,9 +5,10 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import yaml
 
 from src.dashboard import app as dashboard
-from src.predict.paper_ledger import SCHEMA_PATH
+from src.predict.paper_ledger import SCHEMA_PATH, load_trial
 
 NOW = datetime(2026, 11, 7, 4, 0, tzinfo=timezone.utc)
 
@@ -43,6 +44,7 @@ def ledger(tmp_path, monkeypatch):
         )
     monkeypatch.setattr(dashboard, "resolve_db_path", lambda: path)
     monkeypatch.setattr(dashboard, "datetime", FixedClock)
+    monkeypatch.setattr(dashboard, "DEFAULT_RULES", tmp_path / "paper_trial.yml")
     return path
 
 
@@ -111,3 +113,61 @@ def test_trial_card_shows_no_attempts_when_coverage_is_initialized(ledger):
     assert "No capture attempts have been recorded." in text
     assert "No fixtures were observed" not in text
     assert "No capture history is available." not in text
+
+
+def test_configured_registration_comes_first_and_retained_review_remains_visible(ledger):
+    config_path = ledger.with_name("paper_trial.yml")
+    specification = {
+        "trial_id": "nba_v2",
+        "league": "NBA",
+        "market": "totals",
+        "model_type": "random_forest",
+        "model_sha256": "a" * 64,
+        "book": "draftkings",
+        "odds_source": "the-odds-api",
+        "min_edge": 0.2,
+        "max_quote_age_minutes": 10,
+        "min_minutes_before_start": 15,
+        "max_hours_before_start": 12,
+        "min_decisions": 180,
+        "min_roi": 0.05,
+        "min_clv_coverage": 0.8,
+        "review_at": (NOW + timedelta(days=120)).isoformat(),
+    }
+    config_path.write_text(yaml.safe_dump(specification), encoding="utf-8")
+    with sqlite3.connect(ledger) as conn:
+        conn.execute(
+            "UPDATE paper_trials SET specification = json_set(specification, '$.review_at', ?) "
+            "WHERE trial_id = 'nba'",
+            ((NOW - timedelta(days=14)).isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO paper_trials VALUES (?, ?, ?)",
+            ("nba_v2", NOW.isoformat(), load_trial(config_path).specification),
+        )
+
+    configured, retained = map(_text, dashboard.show_paper_trials(None))
+    assert "Configured capture trial Collecting" in configured
+    assert "0 / 180" in configured
+    assert "Trial nba_v2" in configured
+    assert "Retained registration Complete" in retained
+    assert "0 / 150" in retained
+    assert "Trial nba · Review verdict fail" in retained
+
+    specification["min_edge"] = 0.3
+    config_path.write_text(yaml.safe_dump(specification), encoding="utf-8")
+    text = _text(dashboard.show_paper_trials(None))
+    assert "No configured capture trial matches the ledger." in text
+    assert text.count("Retained registration") == 2
+    assert "Configured capture trial" not in text
+
+
+@pytest.mark.parametrize("config_content", [None, "trial_id: [", "trial_id: nba"])
+def test_missing_or_invalid_config_leaves_the_ledger_usable(ledger, config_content):
+    if config_content is not None:
+        ledger.with_name("paper_trial.yml").write_text(config_content, encoding="utf-8")
+
+    text = _text(dashboard.show_paper_trials(None))
+    assert "No configured capture trial matches the ledger." in text
+    assert "Retained registration Collecting" in text
+    assert "Trial nba" in text

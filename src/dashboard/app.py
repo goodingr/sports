@@ -12,10 +12,13 @@ from typing import Optional, Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd
+import yaml
 from dash import Dash, Input, Output, State, dcc, html, ctx, no_update
 from dash.exceptions import PreventUpdate
 
+from src.data.config import PROJECT_ROOT
 from src.db.core import resolve_db_path
+from src.predict.paper_ledger import DEFAULT_RULES, load_trial
 from src.predict.paper_report import build_paper_report
 
 from . import components
@@ -870,14 +873,32 @@ def show_paper_trials(_n_clicks: Optional[int]):
             report = build_paper_report(conn, datetime.now(timezone.utc))
     except (sqlite3.Error, ValueError, KeyError):
         return dbc.Alert("Paper trial evidence is temporarily unavailable.", color="warning")
-    if not report["trials"]:
+    trials = report["trials"]
+    if not trials:
         return components.empty_state("No paper trial is registered yet.")
+
+    configured_trial = None
+    try:
+        config = load_trial(PROJECT_ROOT / DEFAULT_RULES)
+        specification = config.specification
+        configured_trial = next(
+            (
+                trial for trial in trials
+                if trial["trial_id"] == config.trial_id
+                and json.dumps(trial["specification"], sort_keys=True) == specification
+            ),
+            None,
+        )
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        pass
 
     def percent(value: Optional[float]) -> str:
         return f"{value:.1%}" if value is not None else "—"
 
     cards = []
-    for trial in report["trials"]:
+    if configured_trial is None:
+        cards.append(dbc.Alert("No configured capture trial matches the ledger.", color="warning"))
+    for trial in sorted(trials, key=lambda trial: trial is not configured_trial):
         spec = trial["specification"]
         metrics = trial["metrics"]
         interval = metrics["bootstrap_roi_interval"]
@@ -951,6 +972,10 @@ def show_paper_trials(_n_clicks: Optional[int]):
                 dbc.CardBody(
                     [
                         html.H4(f"{spec['league']} {spec['market']} at {spec['book'].title()}"),
+                        html.Div(
+                            "Configured capture trial" if trial is configured_trial else "Retained registration",
+                            className="fw-semibold",
+                        ),
                         html.P(
                             f"{trial['review_status'].title()} · "
                             f"Final review {review.strftime('%b %d, %Y %Z')}"
@@ -981,8 +1006,8 @@ def show_paper_trials(_n_clicks: Optional[int]):
                         ),
                         html.Div(coverage_details, className="small text-muted mt-3"),
                         html.Small(
-                            f"Review verdict {trial['review_verdict']}"
-                            if trial["review_verdict"] else f"Trial {trial['trial_id']}",
+                            f"Trial {trial['trial_id']}"
+                            + (f" · Review verdict {trial['review_verdict']}" if trial["review_verdict"] else ""),
                             className="d-block mt-3",
                         ),
                     ]
