@@ -258,6 +258,11 @@ def load_forward_test_data(
         base_query += " WHERE " + " AND ".join(where_clauses)
         
     with connect() as conn:
+        predictions_exist = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'predictions' AND type IN ('table', 'view')"
+        ).fetchone()
+        if predictions_exist is None:
+            return pd.DataFrame()
         df = pd.read_sql_query(base_query, conn, params=params)
         
     if df.empty:
@@ -506,7 +511,7 @@ def _expand_predictions(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd
     
     # 2. Determine Winner (won)
     # Default to None (NaN)
-    bets["won"] = np.nan
+    bets["won"] = pd.Series(np.nan, index=bets.index, dtype=object)
     
     # Only calculate for games with a result
     has_result = bets["result"].notna()
@@ -652,7 +657,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
     totals["actual_total"] = totals["total_points"] # Keep this for internal use if needed, or just use total_points
     
     # Calculate Winner
-    totals["winner"] = np.nan
+    totals["winner"] = pd.Series(np.nan, index=totals.index, dtype=object)
     
     # We only grade as "Over/Under/Push" if the game is FINAL.
     # We use 'result' column (which is only set if status='final') as the flag.
@@ -671,7 +676,7 @@ def _expand_totals(df: pd.DataFrame, *, stake: float = DEFAULT_STAKE) -> pd.Data
         totals.loc[mask_valid & mask_push, "winner"] = "push"
         
     # Calculate Won
-    totals["won"] = np.nan
+    totals["won"] = pd.Series(np.nan, index=totals.index, dtype=object)
     # Only grade Won/Lost for decisive results (Over/Under)
     # Pushes remain won=NaN (Void)
     mask_decided = totals["winner"].isin(["over", "under"])
