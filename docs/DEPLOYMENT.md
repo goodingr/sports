@@ -218,6 +218,10 @@ later cancellations. Regular subscriber access requires a positive paid Stripe
 invoice with an exact recurring line for the configured price and subscription
 item. Access ends at the paid service boundary or an earlier verified cutoff.
 A renewal advances that boundary once the new paid service period starts.
+
+The full-stack Caddy web access log and upstream error log record request paths
+and status codes. They omit query strings and request and response headers
+because checkout returns and sign-in redirects can contain session identifiers.
 Provider-authorized trial access ends at its explicit trial cutoff.
 
 A signed-in subscriber can use **Refresh subscription status** on the account

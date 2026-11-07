@@ -253,6 +253,54 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
 
+      - name: Verify checkout return is forwarded without logging its session ID
+        working-directory: .
+        run: |
+          config=$(mktemp)
+          trap 'rm -f "$config"' EXIT
+          cat Caddyfile > "$config"
+          cat >> "$config" <<'CADDY'
+
+          :3000 {
+            @fail query fail=true
+            abort @fail
+            header Location "/login?redirect_url=%2Faccount%3Fsession_id%3Dcs_test_log_probe"
+            respond "{http.request.uri}"
+          }
+          CADDY
+          proxy=$(docker run -d --rm --add-host web:127.0.0.1 \
+            -e APP_DOMAIN=http://localhost:8080 -e API_DOMAIN=http://localhost:8081 \
+            -e ACME_EMAIL=operator@example.invalid \
+            -v "$config:/etc/caddy/Caddyfile:ro" caddy:2.8-alpine)
+          trap 'docker stop "$proxy" >/dev/null || true; rm -f "$config"' EXIT
+
+          path='/account?success=true&session_id=cs_test_log_probe'
+          for attempt in {1..20}; do
+            if response=$(docker exec "$proxy" wget -T 2 -qO- \
+              --header="Referer: https://app.example.invalid$path" \
+              --header="Next-Url: $path" "http://localhost:8080$path" 2>/dev/null); then
+              break
+            fi
+            sleep 0.5
+          done
+          test "${response:-}" = "$path"
+          if docker exec "$proxy" wget -T 2 -qO- "http://localhost:8080$path&fail=true" 2>/dev/null; then
+            echo 'Expected the upstream to fail on the second checkout return.' >&2
+            exit 1
+          fi
+          logs=$(docker logs "$proxy" 2>&1)
+          if [[ "$logs" == *cs_test_log_probe* ]]; then
+            echo 'Checkout session ID appeared in the Caddy logs.' >&2
+            exit 1
+          fi
+          printf '%s\n' "$logs" | python3 -c '
+          import json, sys
+          entries = [json.loads(line) for line in sys.stdin]
+          account_logs = {(entry["logger"].split(".")[2], entry["status"]) for entry in entries
+                          if entry.get("request", {}).get("uri") == "/account"}
+          assert {("access", 200), ("access", 502), ("error", 502)} <= account_logs, account_logs
+          '
+
       - name: Check private checkout storage across web containers
         working-directory: .
         env:
