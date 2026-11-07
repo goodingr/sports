@@ -588,22 +588,29 @@ def _capture(
     minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
     predictions = None
     engine_returned_predictions = False
+    inference_checked_at = None
     try:
-        now = datetime.now(timezone.utc)
-        eligible = {game_id for game_id, start in quoted.items() if start - now >= minimum_lead}
+        inference_started_at = datetime.now(timezone.utc)
+        eligible = {
+            game_id for game_id, start in quoted.items()
+            if start - inference_started_at >= minimum_lead
+        }
         if eligible:
             predictions = engine.predict_pinned_totals(
                 trial.league, trial.model_sha256, days_ahead=1, fixture_ids=eligible
             )
         if predictions is not None and not predictions.empty:
             engine_returned_predictions = True
-            now = datetime.now(timezone.utc)
-            allowed = {game_id for game_id in eligible if quoted[game_id] - now >= minimum_lead}
-            expected = predictions["game_id"].map(snapshots)
-            predictions = predictions[
-                predictions["game_id"].isin(allowed)
-                & predictions["selected_totals_snapshot_id"].eq(expected).fillna(False)
-            ]
+            inference_checked_at = datetime.now(timezone.utc)
+            allowed = {
+                game_id for game_id in eligible
+                if quoted[game_id] - inference_checked_at >= minimum_lead
+            }
+            games = predictions["game_id"]
+            selected = predictions["selected_totals_snapshot_id"]
+            matches_snapshot = selected.eq(games.map(snapshots)).fillna(False)
+            still_allowed = games.isin(allowed)
+            predictions = predictions[still_allowed & matches_snapshot]
         counts = capture_predictions(
             trial,
             predictions,
@@ -618,6 +625,36 @@ def _capture(
         except Exception:
             LOGGER.exception("Could not record the failed early paper capture")
         raise
+    returned_fixtures: set[str] = set()
+    post_cutoff_rows = wrong_snapshot_rows = 0
+    wrong_snapshot_ids: list[str] = []
+    if engine_returned_predictions:
+        wrong_snapshot = still_allowed & ~matches_snapshot
+        returned_fixtures = set(games[games.isin(eligible)])
+        post_cutoff_rows = int(games.isin(eligible - allowed).sum())
+        wrong_snapshot_rows = int(wrong_snapshot.sum())
+        wrong_snapshot_ids = sorted({str(snapshot) for snapshot in selected[wrong_snapshot].dropna()})
+    LOGGER.info(
+        "Paper entry inference %s",
+        json.dumps(
+            {
+                "pre_inference_checked_at": inference_started_at.isoformat(),
+                "post_inference_checked_at": (
+                    inference_checked_at.isoformat() if inference_checked_at is not None else None
+                ),
+                "target_snapshot_ids": sorted(set(snapshots.values())),
+                "quoted_fixtures": len(quoted),
+                "eligible_fixtures": len(eligible),
+                "pre_inference_cutoff_fixtures": len(quoted) - len(eligible),
+                "engine_missing_fixtures": len(eligible - returned_fixtures),
+                "post_inference_cutoff_rows": post_cutoff_rows,
+                "wrong_snapshot_rows": wrong_snapshot_rows,
+                "wrong_snapshot_ids": wrong_snapshot_ids,
+                "ledger_outcomes": counts,
+            },
+            sort_keys=True,
+        ),
+    )
     if eligible and not engine_returned_predictions and counts.get("prediction_missing"):
         raise RuntimeError(
             "The early paper entry run produced no predictions for the collected quotes"
