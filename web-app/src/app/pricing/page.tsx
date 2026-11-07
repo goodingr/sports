@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
 import { configuredStripeScope, hasScopedPremium } from '@/lib/billing';
+import { isInterestConfigurationReady, isPilotOnly } from '@/lib/pilot';
 import { CheckoutButton } from './CheckoutButton';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,8 @@ export default async function Page() {
     const scope = configuredStripeScope();
     const user = scope ? await currentUser() : null;
     const isPremium = hasScopedPremium(user?.publicMetadata ?? {}, scope);
+    const interestAvailable = !isPilotOnly() && process.env.COMMERCIAL_INTEREST_ENABLED === 'true'
+        && process.env.COMMERCIAL_INTEREST_ENROLLMENT_CLOSED !== 'true' && isInterestConfigurationReady();
     return (
         <Container className="py-12 sm:py-20 px-4">
             <div className="text-center mb-10 sm:mb-16">
@@ -37,7 +40,7 @@ export default async function Page() {
                         <Feature text="Cancel Anytime" />
                     </ul>
 
-                    <CheckoutButton isPremium={isPremium} />
+                    <CheckoutButton isPremium={isPremium} interestAvailable={interestAvailable} />
                 </div>
             </div>
 

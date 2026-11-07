@@ -36,6 +36,7 @@ test.describe('Pricing page', () => {
         await page.goto('/pricing');
         await expect(page.getByText('Subscriptions are currently paused')).toBeVisible();
         await expect(page.getByRole('button', { name: /subscribe/i })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Record price interest' })).toHaveCount(0);
         await page.getByRole('button', { name: 'Check availability again' }).click();
         await expect(page.getByRole('button', { name: 'Check availability again' })).toBeEnabled();
         await expect(page.getByText('Subscriptions are currently paused')).toBeVisible();

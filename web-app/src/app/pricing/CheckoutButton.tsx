@@ -10,7 +10,7 @@ import { readCheckoutAvailability } from '@/lib/api';
 type Availability = 'checking' | 'open' | 'closed' | 'unavailable';
 const AUTOMATIC_RECHECK_INTERVAL_MS = 1000;
 
-export function CheckoutButton({ isPremium }: { isPremium: boolean }) {
+export function CheckoutButton({ isPremium, interestAvailable }: { isPremium: boolean; interestAvailable: boolean }) {
     const [availability, setAvailability] = useState<Availability>('checking');
     const [checkingAvailability, setCheckingAvailability] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -113,6 +113,12 @@ export function CheckoutButton({ isPremium }: { isPremium: boolean }) {
                         <>
                             <p className="font-semibold text-foreground">Subscriptions are currently paused</p>
                             <p className="mt-1">Enrollment opens after the picks pass validation and the service is ready.</p>
+                            {interestAvailable && (
+                                <div className="mt-3">
+                                    <Link href="/interest" className="font-semibold text-primary hover:underline">Record price interest</Link>
+                                    <p className="mt-1 text-xs">Free, with no payment obligation.</p>
+                                </div>
+                            )}
                             <Link href="/#model-history" className="mt-2 inline-block text-primary hover:underline">Explore model tracking</Link>
                         </>
                     )}
