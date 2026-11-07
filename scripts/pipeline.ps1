@@ -61,6 +61,25 @@ function Write-NbaQuoteTiming {
     }
 }
 
+function Complete-NbaEvidence {
+    Write-NbaQuoteTiming
+    if (-not $runBenchmark -or -not $paperEnabled -or $SkipOdds -or $SoccerOnly) { return }
+
+    Write-Host "=== Saving Next-Day NBA Schedule Audit ==="
+    $previousExitCode = $global:LASTEXITCODE
+    try {
+        & poetry run python -m src.data.audit_nba_schedule --next-eastern-day --fetch --save 2>&1 |
+            ForEach-Object { "$_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Next-day NBA schedule audit could not run."
+        }
+    } catch {
+        Write-Warning "Next-day NBA schedule audit could not run."
+    } finally {
+        $global:LASTEXITCODE = $previousExitCode
+    }
+}
+
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $logFile = "logs/pipeline_${timestamp}.log"
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
@@ -113,7 +132,7 @@ if ($LASTEXITCODE -eq 2) {
 } elseif ($LASTEXITCODE -ne 0) {
     $ingestExitCode = $LASTEXITCODE
     Write-Host "ERROR: Data ingestion failed."
-    Write-NbaQuoteTiming
+    Complete-NbaEvidence
     exit $ingestExitCode
 }
 
@@ -132,7 +151,7 @@ if ($runBenchmark -or -not $SkipPublish) {
             if ($LASTEXITCODE -ne 0) {
                 $revokeExitCode = $LASTEXITCODE
                 Write-Error "Failed to revoke the active paid release."
-                Write-NbaQuoteTiming
+                Complete-NbaEvidence
                 exit $revokeExitCode
             }
         }
@@ -159,7 +178,7 @@ if (-not $SkipPrediction) {
     } elseif ($LASTEXITCODE -ne 0) {
         $predictionExitCode = $LASTEXITCODE
         Write-Host "ERROR: Prediction pipeline failed."
-        Write-NbaQuoteTiming
+        Complete-NbaEvidence
         exit $predictionExitCode
     }
 } else {
@@ -180,30 +199,14 @@ if (-not $SkipPublish -and $releaseQualityPassed) {
     if ($LASTEXITCODE -ne 0) {
         $publishExitCode = $LASTEXITCODE
         Write-Host "ERROR: Paid-picks publish gate failed."
-        Write-NbaQuoteTiming
+        Complete-NbaEvidence
         exit $publishExitCode
     }
     if ($nbaQuoteReceipt) { $paidGateFinished = [DateTimeOffset]::UtcNow.ToString("o") }
 } else {
     Write-Host "=== Skipping Paid-Picks Publish Gate ==="
 }
-Write-NbaQuoteTiming
-
-if ($runBenchmark -and $paperEnabled -and -not ($SkipOdds -or $SoccerOnly)) {
-    Write-Host "=== Saving Next-Day NBA Schedule Audit ==="
-    $previousExitCode = $global:LASTEXITCODE
-    try {
-        & poetry run python -m src.data.audit_nba_schedule --next-eastern-day --fetch --save 2>&1 |
-            ForEach-Object { "$_" }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Next-day NBA schedule audit could not run."
-        }
-    } catch {
-        Write-Warning "Next-day NBA schedule audit could not run."
-    } finally {
-        $global:LASTEXITCODE = $previousExitCode
-    }
-}
+Complete-NbaEvidence
 
 # 4. Benchmark after publishing so research does not delay the prediction refresh.
 if ($runBenchmark -and $releaseQualityPassed) {

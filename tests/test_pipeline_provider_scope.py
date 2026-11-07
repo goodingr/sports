@@ -46,7 +46,16 @@ def pipeline(request, tmp_path):
             "    sys.exit(1)\n"
             "if os.getenv('PROVIDER_TEST_FAIL_SCHEDULE') == '1' and args[:2] == "
             "['-m', 'src.data.audit_nba_schedule']:\n"
-            "    sys.exit(23)\n",
+            "    sys.exit(23)\n"
+            "failed = os.getenv('PROVIDER_TEST_FAIL_STEP')\n"
+            "if failed == 'scores' and args[:2] == ['-m', 'src.data.ingest_scores']:\n"
+            "    sys.exit(17)\n"
+            "if failed == 'prediction' and args[:2] == ['-m', 'src.predict.runner'] "
+            "and '--paper-only' not in args:\n"
+            "    sys.exit(17)\n"
+            "if failed in ('publish', 'revoke') and args[:3] == "
+            "['-m', 'src.predict.publishable_bets', failed]:\n"
+            "    sys.exit(17)\n",
             encoding="utf-8",
         )
         wrapper = '@echo off\n"%PROVIDER_TEST_PYTHON%" "%PROVIDER_TEST_STUB%" %*\n'
@@ -95,7 +104,7 @@ export -f python
             "skip_paper": "--skip-paper", "skip_prediction": "--skip-prediction",
         }
 
-    def run(*options, fail_quality=False, fail_schedule=False, daily=False, local_focus=False):
+    def run(*options, fail_quality=False, fail_schedule=False, fail_step="", daily=False, local_focus=False):
         if not daily:
             options += ("skip_benchmark",)
         if local_focus:
@@ -106,6 +115,7 @@ export -f python
                 **environment,
                 "PROVIDER_TEST_FAIL_QUALITY": str(int(fail_quality)),
                 "PROVIDER_TEST_FAIL_SCHEDULE": str(int(fail_schedule)),
+                "PROVIDER_TEST_FAIL_STEP": fail_step,
             },
             capture_output=True, text=True, timeout=45,
         )
@@ -192,6 +202,20 @@ def test_daily_schedule_audit_runs_after_quote_timing_and_is_diagnostic_only(pip
         < modules.index("src.data.audit_nba_schedule")
         < modules.index("src.models.train_betting")
     )
+
+
+@pytest.mark.parametrize("pipeline", ["powershell"], indirect=True)
+@pytest.mark.parametrize(
+    "failed_step,expected_exit", [("scores", 1), ("prediction", 1), ("revoke", 17), ("publish", 17)],
+)
+def test_windows_daily_schedule_audit_survives_fatal_pipeline_step(pipeline, failed_step, expected_exit):
+    result, calls = pipeline(
+        "focus", daily=True, fail_step=failed_step, fail_quality=failed_step == "revoke", fail_schedule=True,
+    )
+    assert result.returncode == expected_exit, result.stdout + result.stderr
+    assert "Next-day NBA schedule audit could not run." in result.stdout
+    assert commands(calls, "src.data.audit_nba_schedule") == [["--next-eastern-day", "--fetch", "--save"]]
+    assert [call[1] for call in calls[-2:]] == ["scripts.nba_quote_timing", "src.data.audit_nba_schedule"]
 
 
 @pytest.mark.parametrize("flag", ["skip", "soccer", "hourly", "skip_paper"])
