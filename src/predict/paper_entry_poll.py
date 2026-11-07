@@ -298,7 +298,10 @@ def _plan_entry_path(
         window_status, fixtures = read_official_fixtures(raw, observed_at, now)
         window = None
         if window_status == "verified":
-            due = anchor_ordinary_clocks(conn, due, fixtures)
+            anchored = anchor_ordinary_clocks(conn, due, fixtures)
+            if anchored.keys() != due.keys():
+                return ("due" if anchored else "fixture_clock_conflict"), anchored, fresh, None
+            due = anchored
             window_status, window = plan_missing_ids(
                 conn, trial, raw, observed_at, now, due, fixtures
             )
@@ -312,6 +315,8 @@ def _reserve(
     trial: PaperTrial,
     official: tuple[bytes, datetime] | None = None,
     free_events: list | None = None,
+    *,
+    probe_safe: bool = True,
 ) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, FallbackPlan | None]:
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -327,7 +332,8 @@ def _reserve(
             lead = timedelta(minutes=trial.min_minutes_before_start)
             evening = datetime.combine(window.eastern_date, _DAILY_CAPTURE_ET, _EASTERN)
             if (
-                probe_status != "absent"
+                not probe_safe
+                or probe_status != "absent"
                 or not known_ids <= starts.keys()
                 or any(not now + lead <= start < evening + lead for start in starts.values())
             ):
@@ -341,6 +347,8 @@ def _reserve(
             from src.predict.paper_entry_fallback import anchor_ordinary_clocks
 
             due = anchor_ordinary_clocks(conn, due, free_events=free_events)
+            if not due:
+                return "fixture_clock_conflict", {}, {}, None
         if status in {"due", "window_due"}:
             conn.execute(
                 """
@@ -656,6 +664,7 @@ def poll_entry(
     key = None
     probe_evidence = None
     probe_payload = None
+    probe_safe = True
     if status in {"due", "window_due"}:
         probe: list[requests.Response] = []
         key = _budgeted_key(request_credits=_REQUEST_CREDITS, on_free_events=probe.append)
@@ -666,32 +675,33 @@ def poll_entry(
                 return {**result, "status": "unverified_zero_credit_probe"}
         if probe:
             fetched = datetime.now(timezone.utc)
-            probe_safe = True
-            if official is not None and (window is not None or due):
+            if official_window_fallback and (window is not None or due):
                 from src.predict.paper_entry_fallback import classify_probe
 
                 try:
                     probe_payload = probe[0].json()
                 except ValueError:
                     probe_payload = None
-                if not isinstance(probe_payload, list):
-                    probe_status = "invalid_zero_credit_probe"
-                elif window is not None and classify_probe(probe_payload, window)[0] == "conflict":
-                    probe_status = "provider_probe_conflict"
-                else:
+                if isinstance(probe_payload, list):
                     probe_status = None
-                if probe_status is not None:
-                    if not due:
-                        return {**result, "status": probe_status}
-                    probe_payload = None
-                    probe_safe = False
-                else:
+                    if (
+                        window is not None
+                        and classify_probe(probe_payload, window)[0] == "conflict"
+                    ):
+                        probe_status = "provider_probe_conflict"
                     probe_evidence = {
                         "url": f"{_BASE_URL}/events",
                         "observed_at": fetched.isoformat(),
                         "request_credits": 0,
                         "results": probe_payload,
                     }
+                else:
+                    probe_payload = None
+                    probe_status = "invalid_zero_credit_probe"
+                if probe_status is not None:
+                    if not due:
+                        return {**result, "status": probe_status}
+                    probe_safe = False
             local_day = fetched.astimezone(_EASTERN).date()
             evening = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
             minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
@@ -709,11 +719,12 @@ def poll_entry(
                         LOGGER.info("NBA entry quota probe discovered fixtures: %s", counts)
                 except (RuntimeError, OSError, sqlite3.Error):
                     LOGGER.warning("Could not retain the optional NBA entry event response")
-                    if window is not None:
-                        if not due:
-                            return {**result, "status": "zero_credit_probe_retention_failed"}
-                        probe_payload = None
-        status, due, fresh, window = _reserve(path, trial, official, probe_payload)
+                    if window is not None and not due:
+                        return {**result, "status": "zero_credit_probe_retention_failed"}
+                    probe_safe = False
+        status, due, fresh, window = _reserve(
+            path, trial, official, probe_payload, probe_safe=probe_safe
+        )
         result.update(status=status, due_events=len(window.targets) if window else len(due))
     if status == "reusable":
         quoted = {game_id: start for game_id, (_, start) in fresh.items()}
@@ -777,16 +788,15 @@ def poll_entry(
         "rate_limit_reset": response.headers.get("x-requests-reset"),
     }
     try:
-        if window is not None or (
-            official is not None
-            and any(fixture.start < fixture.latest_start for fixture in due.values())
+        if window is not None or any(
+            fixture.start < fixture.latest_start for fixture in due.values()
         ):
-            from src.predict.paper_entry_fallback import archive_official_slate
+            if official is not None:
+                from src.predict.paper_entry_fallback import archive_official_slate
 
-            assert official is not None
-            archive["official_schedule"] = archive_official_slate(
-                directory, official[0], entry_day, official[1], window
-            )
+                archive["official_schedule"] = archive_official_slate(
+                    directory, official[0], entry_day, official[1], window
+                )
             if probe_evidence is not None:
                 archive["provider_events_probe"] = probe_evidence
         raw_path = write_snapshot(archive, directory)

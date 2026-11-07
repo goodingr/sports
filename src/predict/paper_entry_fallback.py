@@ -198,7 +198,7 @@ def anchor_ordinary_clocks(
     *,
     free_events: list | None = None,
 ) -> dict[str, _ClosingFixture]:
-    """Retain earlier clocks for unambiguous ordinary fixtures."""
+    """Use compatible earlier clocks and omit fixtures with conflicting ones."""
     if not due:
         return due
     sport_id = next(iter(due.values())).sport_id
@@ -230,9 +230,10 @@ def anchor_ordinary_clocks(
             and (event.home_code, event.away_code) == pair
         ):
             starts.append(event.start)
-        if fixture.latest_start - min(starts) <= _START_TOLERANCE:
-            fixture = replace(fixture, start=min(starts))
-        projected[provider_id] = fixture
+        earliest = min(starts)
+        if fixture.latest_start - earliest > _START_TOLERANCE:
+            continue
+        projected[provider_id] = replace(fixture, start=earliest)
     return projected
 
 

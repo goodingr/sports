@@ -934,12 +934,13 @@ def test_mixed_paid_response_cannot_replace_known_provider_identity(entry_runtim
 
 
 @pytest.mark.parametrize("earlier_source", ["official", "free"])
+@pytest.mark.parametrize(("opt_in", "gap"), [(True, 10), (True, 11), (False, 11)])
 def test_targeted_downgrade_still_uses_an_earlier_verified_clock(
-    entry_runtime, monkeypatch, earlier_source
+    entry_runtime, monkeypatch, earlier_source, opt_in, gap
 ):
     path, raw, clock, _ = entry_runtime
     clock.current = PHI_START - timedelta(minutes=10)
-    first = PHI_START + timedelta(minutes=10)
+    first = PHI_START + timedelta(minutes=gap)
     second = PHI_START + timedelta(minutes=30)
     third = DET_START + timedelta(hours=1)
     cutoff_source = PHI_START if earlier_source == "official" else PHI_START + timedelta(minutes=5)
@@ -955,19 +956,22 @@ def test_targeted_downgrade_still_uses_an_earlier_verified_clock(
     free_first = PHI_START if earlier_source == "free" else first
     free = [_quote("a" * 32, free_first, "CHI", "PHI"), paid[1]]
     calls = _mock_sources(monkeypatch, paid, events=free, official=official)
-    assert _collect_window() == {
+    blocked = opt_in and gap > 10
+    assert entry.poll_entry(collect=True, official_window_fallback=opt_in) == {
         "status": "collected",
-        "due_events": 2,
-        "events_loaded": 1,
-        "decisions_recorded": 1,
+        "due_events": 1 if blocked else 2,
+        "events_loaded": 1 if opt_in else 2,
+        "decisions_recorded": 1 if opt_in else 2,
     }
-    assert calls[-1][1]["eventIds"] == f'{"a" * 32},{"b" * 32}'
+    assert calls[-1][1]["eventIds"] == ("b" * 32 if blocked else f'{"a" * 32},{"b" * 32}')
+    assert any(url.startswith("https://www.nba.com") for url, _ in calls) is opt_in
     with connect(path) as conn:
-        assert [row[0] for row in conn.execute("SELECT game_id FROM paper_decisions")] == [
-            "on-time"
-        ]
-    [archive] = raw.rglob("official_schedule.html")
-    assert archive.read_bytes() == official
+        decisions = {row[0] for row in conn.execute("SELECT game_id FROM paper_decisions")}
+        assert decisions == ({"on-time"} if opt_in else {"on-time", "too-late"})
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+    if opt_in and gap == 10:
+        [archive] = raw.rglob("official_schedule.html")
+        assert archive.read_bytes() == official
 
 
 def test_mixed_dispatch_rechecks_the_earlier_verified_free_clock(entry_runtime, monkeypatch):
@@ -988,3 +992,59 @@ def test_mixed_dispatch_rechecks_the_earlier_verified_free_clock(entry_runtime, 
     assert len(calls) == 2
     with connect(path) as conn:
         assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("earlier_source", ["official", "free"])
+def test_only_clock_conflict_does_not_reserve_paid_slot(entry_runtime, monkeypatch, earlier_source):
+    path, _, clock, _ = entry_runtime
+    clock.current = PHI_START - timedelta(minutes=20)
+    canonical = PHI_START + timedelta(minutes=11)
+    official_start = PHI_START if earlier_source == "official" else PHI_START + timedelta(minutes=5)
+    official = _official().replace(
+        PHI_START.isoformat().encode(), official_start.isoformat().encode(), 1
+    )
+    with connect(path) as conn:
+        _game(conn, "known", canonical, "CHI", "PHI", "a" * 32)
+    paid = [_quote("a" * 32, canonical, "CHI", "PHI")]
+    free = [_quote("a" * 32, PHI_START, "CHI", "PHI")]
+    calls = _mock_sources(monkeypatch, paid, events=free, official=official)
+    assert _collect_window() == {"status": "fixture_clock_conflict", "due_events": 0}
+    assert len(calls) == (1 if earlier_source == "official" else 2)
+    assert not any(url.endswith("/odds") for url, _ in calls)
+    with connect(path) as conn:
+        assert not entry._has_table(conn, "paper_entry_requests")
+        assert conn.execute("SELECT count(*) FROM paper_decisions").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("gap", [10, 11])
+def test_free_clock_still_applies_if_the_official_page_is_unavailable(
+    entry_runtime, monkeypatch, gap
+):
+    path, _, clock, _ = entry_runtime
+    clock.current = PHI_START - timedelta(minutes=25)
+    canonical = PHI_START + timedelta(minutes=gap)
+    with connect(path) as conn:
+        _game(conn, "known", canonical, "CHI", "PHI", "a" * 32)
+
+    def unavailable(day):
+        raise RuntimeError("offline official schedule")
+
+    monkeypatch.setattr(fallback, "fetch_official_slate", unavailable)
+    paid = [_quote("a" * 32, canonical, "CHI", "PHI")]
+    free = [_quote("a" * 32, PHI_START, "CHI", "PHI")]
+    calls = _mock_sources(monkeypatch, paid, events=free)
+    result = _collect_window()
+    with connect(path) as conn:
+        if gap == 11:
+            assert result == {"status": "fixture_clock_conflict", "due_events": 0}
+            assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["events"]
+            assert not entry._has_table(conn, "paper_entry_requests")
+        else:
+            assert result["decisions_recorded"] == 1
+            assert (
+                conn.execute("SELECT start_time_utc FROM paper_decisions").fetchone()[0]
+                == PHI_START.isoformat()
+            )
+            [raw_path] = conn.execute("SELECT raw_path FROM odds_snapshots").fetchone()
+            receipt = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+            assert receipt["provider_events_probe"]["results"] == free
