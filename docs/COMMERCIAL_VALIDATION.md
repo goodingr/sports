@@ -85,6 +85,13 @@ Run the pilot on one persistent Node app instance. Interest requests for the sam
 
 The isolated production build and `next start` browser check passed on November 6, 2026 using the development Clerk instance. The open, closed-enrollment, and disabled page states were verified at mobile width, along with unauthenticated mutation rejection. A separate development browser check verified attributed view, opt-in, reload, and withdrawal. The disposable account was deleted. A subsequent aggregate query returned zero development offer viewers and opt-ins.
 
+On November 7, 2026, the packaged pilot at commit `46e74f3` passed 30 loopback
+checks through Caddy with a trusted internal TLS certificate and synthetic
+Clerk credentials. Both enrollment states stayed healthy and served the
+$29 offer. The checks covered the referral redirect, the contact links, the
+signed-out and cross-origin consent responses, and closed billing endpoints.
+Production Clerk sign-in and public certificate issuance remain launch checks.
+
 After the release gates clear, export live Stripe Billing cohorts and the itemized Balance report for the same time zone and dates. Use the subscription price ID to isolate this product, reconcile charges, fees, refunds, and disputes by transaction, and calculate monthly contribution and operating result. Reconcile paid invoices to actual funds collected. Review two completed renewal cohorts before increasing acquisition spend. Keep customer-level exports out of the repository. [Stripe Billing analytics](https://docs.stripe.com/billing/subscriptions/analytics) · [Stripe Balance report](https://docs.stripe.com/reports/balance) · [Stripe event types](https://docs.stripe.com/api/events/types)
 
 The [cash report](../scripts/commercial_cash_report.py) checks whether a paid
