@@ -53,12 +53,19 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
 
     assert result["population"] == "signed_in_price_offer_viewers"
     assert "qualified_cohort" not in result
-    assert result["totals"] == {"viewed": 3, "active": 1, "withdrawn": 1, "never_opted_in": 1}
+    assert result["totals"] == {
+        "viewed": 3,
+        "active": 1,
+        "withdrawn": 1,
+        "never_opted_in": 1,
+        "first_opt_ins_in_window": 0,
+    }
     assert result["by_source"]["community"] == {
         "viewed": 2,
         "active": 1,
         "withdrawn": 1,
         "never_opted_in": 0,
+        "first_opt_ins_in_window": 0,
     }
     assert result["by_source"]["email"]["viewed"] == 0
     assert result["invalid_offer_records"] == 2
@@ -66,6 +73,58 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
     serialized = json.dumps(result)
     assert "private@example.test" not in serialized
     assert "arbitrary account data" not in serialized
+
+
+def test_first_window_opt_ins_stay_fixed_after_late_join_and_withdrawal():
+    window = {
+        "viewed_from": datetime.fromisoformat(FIRST_VIEW),
+        "viewed_before": datetime.fromisoformat("2026-12-01T00:00:00Z"),
+        "qualified_user_ids": {"user_first", "user_last", "user_late", "user_outside"},
+    }
+    final_in_window = "2026-12-01T00:59:59.999999+01:00"
+    at_exclusive_end = "2026-11-30T19:00:00-05:00"
+    stable_records = [
+        user("user_first", source="referral", joined=FIRST_VIEW),
+        user("user_unscreened", source="email", joined=JOIN),
+        user("user_outside", source="email", viewed=at_exclusive_end, joined=at_exclusive_end),
+    ]
+    before = report.build_report(
+        [
+            *stable_records,
+            user("user_last", source="referral", joined=final_in_window),
+            user("user_late", source="community"),
+        ],
+        **window,
+    )
+    after = report.build_report(
+        [
+            *stable_records,
+            user(
+                "user_last",
+                source="referral",
+                joined=final_in_window,
+                withdrawn="2026-12-02T12:00:00Z",
+            ),
+            user("user_late", source="community", joined=at_exclusive_end),
+        ],
+        **window,
+    )
+
+    for result in (before, after):
+        assert result["totals"]["viewed"] == 4
+        assert result["totals"]["first_opt_ins_in_window"] == 3
+        assert result["by_source"]["email"]["first_opt_ins_in_window"] == 1
+        qualified = result["qualified_cohort"]
+        assert qualified["totals"]["viewed"] == 3
+        assert qualified["totals"]["first_opt_ins_in_window"] == 2
+        assert qualified["by_source"]["referral"]["first_opt_ins_in_window"] == 2
+        assert qualified["by_source"]["community"]["first_opt_ins_in_window"] == 0
+        assert qualified["by_source"]["email"]["first_opt_ins_in_window"] == 0
+
+    assert before["qualified_cohort"]["by_source"]["community"]["never_opted_in"] == 1
+    assert after["qualified_cohort"]["by_source"]["community"]["active"] == 1
+    assert before["qualified_cohort"]["by_source"]["referral"]["active"] == 2
+    assert after["qualified_cohort"]["by_source"]["referral"]["withdrawn"] == 1
 
 
 def test_cli_paginates_and_prints_only_aggregates(monkeypatch, capsys):
@@ -88,6 +147,7 @@ def test_cli_paginates_and_prints_only_aggregates(monkeypatch, capsys):
     assert json.loads(output.out)["clerk_mode"] == "live"
     assert json.loads(output.out)["totals"]["viewed"] == 2
     assert json.loads(output.out)["totals"]["active"] == 1
+    assert json.loads(output.out)["totals"]["first_opt_ins_in_window"] == 1
     assert [call.kwargs["params"]["offset"] for call in session.get.call_args_list] == [0, 2]
     assert all(call.args[0] == report.CLERK_USERS_URL for call in session.get.call_args_list)
 
@@ -126,11 +186,23 @@ def test_cli_reports_screened_accounts_separately_from_raw_exposure(monkeypatch,
     ) == 0
     output = capsys.readouterr()
     result = json.loads(output.out)
-    assert result["totals"] == {"viewed": 3, "active": 2, "withdrawn": 1, "never_opted_in": 0}
+    assert result["totals"] == {
+        "viewed": 3,
+        "active": 2,
+        "withdrawn": 1,
+        "never_opted_in": 0,
+        "first_opt_ins_in_window": 3,
+    }
     qualified = result["qualified_cohort"]
     assert qualified["eligible_roster_accounts"] == 4
     assert qualified["matched_accounts"] == 3
-    assert qualified["totals"] == {"viewed": 2, "active": 1, "withdrawn": 1, "never_opted_in": 0}
+    assert qualified["totals"] == {
+        "viewed": 2,
+        "active": 1,
+        "withdrawn": 1,
+        "never_opted_in": 0,
+        "first_opt_ins_in_window": 2,
+    }
     assert qualified["by_source"]["referral"] == qualified["totals"]
     assert qualified["by_source"]["direct"]["viewed"] == 0
     assert all(

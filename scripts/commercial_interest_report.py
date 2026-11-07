@@ -1,4 +1,4 @@
-"""Count signed-in users' current interest in the $29 monthly offer."""
+"""Count first opt-ins and current interest in the $29 monthly offer."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from src.data.config import _load_dotenv_if_available  # noqa: E402
 
 OFFER_VERSION = "premium-29-usd-monthly-v1"
 SOURCES = ("direct", "community", "referral", "email", "other")
-METRICS = ("viewed", "active", "withdrawn", "never_opted_in")
+METRICS = ("viewed", "active", "withdrawn", "never_opted_in", "first_opt_ins_in_window")
 CLERK_USERS_URL = "https://api.clerk.com/v1/users"
 PAGE_SIZE = 500
 
@@ -132,7 +132,7 @@ def build_report(
     exclude_user_ids: Set[str] = frozenset(),
     qualified_user_ids: Set[str] | None = None,
 ) -> dict[str, Any]:
-    """Aggregate current states for an optional half-open cohort of first views."""
+    """Aggregate current states and first opt-ins for a half-open first-view cohort."""
     by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
     qualified_by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
     eligible_ids = qualified_user_ids - exclude_user_ids if qualified_user_ids is not None else None
@@ -179,11 +179,17 @@ def build_report(
             state = "active"
         else:
             state = "never_opted_in"
+        # Valid opt-ins are at or after the cohort-eligible first view.
+        first_opt_in = int(
+            joined_at is not None and (viewed_before is None or joined_at < viewed_before)
+        )
         by_source[source]["viewed"] += 1
         by_source[source][state] += 1
+        by_source[source]["first_opt_ins_in_window"] += first_opt_in
         if eligible_ids is not None and user_id in eligible_ids:
             qualified_by_source[source]["viewed"] += 1
             qualified_by_source[source][state] += 1
+            qualified_by_source[source]["first_opt_ins_in_window"] += first_opt_in
 
     result: dict[str, Any] = {
         "offer_version": OFFER_VERSION,
