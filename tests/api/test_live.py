@@ -260,9 +260,18 @@ def test_premium_upcoming_only_returns_gated_paid_picks(api_client, monkeypatch)
     assert bet["recommended_bet"] == "Over 222.5"
 
 
-def test_premium_upcoming_drops_rows_not_in_gated_set(api_client, monkeypatch):
+def test_premium_upcoming_uses_gated_release_without_raw_predictions(api_client, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: {"public_metadata": {"is_premium": True}}
-    monkeypatch.setattr(bets, "get_totals_data", lambda model_type="ensemble": _sample_bets())
+    monkeypatch.setattr(
+        bets, "get_totals_data", lambda **kwargs: pytest.fail("raw predictions must not enter the paid feed")
+    )
+    odds_game_ids = []
+
+    def load_odds(game_ids):
+        odds_game_ids.extend(game_ids)
+        return {}
+
+    monkeypatch.setattr(bets, "_build_batch_odds_map", load_odds)
     monkeypatch.setattr(
         bets,
         "_load_gated_publishable_bets",
@@ -281,6 +290,7 @@ def test_premium_upcoming_drops_rows_not_in_gated_set(api_client, monkeypatch):
     assert body["is_premium"] is True
     assert body["count"] == 1
     assert body["data"][0]["game_id"] == "some-other-game"
+    assert odds_game_ids == ["some-other-game"]
 
 
 def test_premium_history_excludes_unsettled_games(api_client, monkeypatch):
