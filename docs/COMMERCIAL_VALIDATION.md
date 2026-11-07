@@ -117,7 +117,39 @@ credit. Excluded adjustments appear as `unmatched_charge_adjustments` or
 `unreconciled_adjustment_credits` in the audit. Reconcile those exceptions,
 excluded invoices, standalone fees, and taxes separately before relying on the
 totals. The report measures Stripe balance activity. [Stripe refund failures](https://docs.stripe.com/refunds#failed-refunds) · [Stripe dispute resolution](https://docs.stripe.com/disputes/how-disputes-work#dispute-resolution)
-Use billing periods for renewals and actual business costs for operating profit.
+Use actual business costs for operating profit.
+
+### Measure first and second renewals
+
+Use the [renewal report](../scripts/commercial_renewal_report.py) with the same
+private invoice and Balance exports and a cycles CSV with one row per invoice.
+The CSV header is
+`invoice_id,subscription_id,billing_reason,period_start_utc,period_end_utc,proration,renewal_1_due_utc,renewal_2_due_utc`.
+Copy the subscription ID and billing reason recorded on that invoice. Use the target
+recurring invoice line's service period and proration flag. Use timestamps
+with UTC offsets and `true` or `false` for proration. [Stripe invoice lines](https://docs.stripe.com/api/invoice-line-item/object)
+
+Fill both due dates on each customer's first cash-matched invoice. The first
+due date is the end of that invoice line's service period. Set the second
+from the original monthly billing anchor and retain both dates after
+cancellation. Leave the due fields blank on later invoices. [Stripe billing cycles](https://docs.stripe.com/billing/subscriptions/billing-cycle)
+
+Verify that all exports come from the same live account and cover the history
+from launch through `--observed-through`, including all invoice pages and
+relevant Balance activity. The report relies on the operator's coverage declaration.
+Choose `--as-of` within the export coverage and set the grace window before
+reviewing results. Keep customer-level exports outside the repository.
+
+```powershell
+poetry run python -m scripts.commercial_renewal_report --invoices C:/private/invoices.csv --balance C:/private/balance.csv --cycles C:/private/cycles.csv --price-id price_replace_me --history-start 2027-01-01T00:00:00Z --as-of 2027-04-08T00:00:00Z --observed-through 2027-04-09T00:00:00Z --grace-days 7
+```
+
+The cohort month is the first collected charge's UTC month.
+Each rate uses the original first-payer cohort members whose scheduled slot
+and grace window have elapsed, including cancellations. The report counts one
+cash-matched payment per original subscription and service period and shows
+late recoveries separately. Reconcile missing schedules and other audit
+exceptions before using the rates. An incomplete report suppresses rates.
 
 ## Paid launch evidence
 

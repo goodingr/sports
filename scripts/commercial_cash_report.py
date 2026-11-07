@@ -62,6 +62,14 @@ class BalanceRow:
     source_id: str
 
 
+@dataclass(frozen=True)
+class CashMatch:
+    invoice_id: str
+    invoice: Invoice
+    charge: BalanceRow
+    activity: tuple[BalanceRow, ...]
+
+
 @dataclass
 class Month:
     first_observed_paying_customers: int = 0
@@ -186,14 +194,14 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
     return [row for _, row in ordered], duplicates
 
 
-def build_report(
+def match_paid_invoices(
     invoices_path: Path,
     balance_path: Path,
     *,
     price_id: str,
     exclude_customer_ids: Collection[str] = (),
-) -> dict:
-    """Measure matched cash and its first observed payers, grouped by posting month."""
+) -> tuple[list[CashMatch], dict[str, int]]:
+    """Match eligible invoices to a single actual Stripe charge."""
     if not re.fullmatch(r"price_[A-Za-z0-9_]+", price_id):
         raise ValueError("A Stripe price ID is required")
     invoices = _invoices(invoices_path)
@@ -228,8 +236,7 @@ def build_report(
         elif row.category == "fee":
             audit["unallocated_fee_rows"] += 1
 
-    months: dict[str, Month] = defaultdict(Month)
-    first_paid_at: dict[str, datetime] = {}
+    matches = []
     for invoice_id, invoice in invoices.items():
         if (
             not invoice.livemode
@@ -248,13 +255,34 @@ def build_report(
             audit["unreconciled_paid_invoices"] += 1
             continue
 
-        charge = charges[0]
+        matches.append(CashMatch(invoice_id, invoice, charges[0], tuple(rows)))
+    return matches, audit
+
+
+def build_report(
+    invoices_path: Path,
+    balance_path: Path,
+    *,
+    price_id: str,
+    exclude_customer_ids: Collection[str] = (),
+) -> dict:
+    """Measure matched cash and its first observed payers, grouped by posting month."""
+    matches, audit = match_paid_invoices(
+        invoices_path,
+        balance_path,
+        price_id=price_id,
+        exclude_customer_ids=exclude_customer_ids,
+    )
+    months: dict[str, Month] = defaultdict(Month)
+    first_paid_at: dict[str, datetime] = {}
+    for match in matches:
+        invoice, charge = match.invoice, match.charge
         first_paid_at[invoice.customer_id] = min(
             charge.created_at, first_paid_at.get(invoice.customer_id, charge.created_at)
         )
         months[charge.created_at.strftime("%Y-%m")].add(charge)
         unreversed: dict[tuple[str, str], tuple[int, int]] = {}
-        for row in rows:
+        for row in match.activity:
             if row is charge:
                 continue
             if row.category not in _ACTIVITY:
