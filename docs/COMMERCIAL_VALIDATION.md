@@ -111,7 +111,15 @@ checks through Caddy with a trusted internal TLS certificate and synthetic
 Clerk credentials. Both enrollment states stayed healthy and served the
 $29 offer. The checks covered the referral redirect, the contact links, the
 signed-out and cross-origin consent responses, and closed billing endpoints.
-Production Clerk sign-in and public certificate issuance remain launch checks.
+
+Run `npm run test:pilot:production` from `web-app` in a clean checkout for
+the offline production smoke. It builds the app for a reserved HTTPS origin
+and sends loopback requests with the proxy headers. The app verifies a signed
+synthetic session and reads and writes a local Clerk fixture. The smoke checks
+referral attribution, the no-charge offer, separate price and email consent,
+withdrawal after enrollment closes, and closed billing routes. Complete the
+production Clerk account and public TLS checks on the final domain before
+recruiting.
 
 After the release gates clear, export live Stripe Billing cohorts and the itemized Balance report for the same time zone and dates. Use the subscription price ID to isolate this product, reconcile charges, fees, refunds, and disputes by transaction, and calculate monthly contribution and operating result. Reconcile paid invoices to actual funds collected. Review two completed renewal cohorts before increasing acquisition spend. Keep customer-level exports out of the repository. [Stripe Billing analytics](https://docs.stripe.com/billing/subscriptions/analytics) · [Stripe Balance report](https://docs.stripe.com/reports/balance) · [Stripe event types](https://docs.stripe.com/api/events/types)
 
