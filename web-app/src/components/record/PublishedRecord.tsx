@@ -29,14 +29,21 @@ export function PublishedRecord({ summary = false }: { summary?: boolean }) {
         fetchAPI<PublishedRecordResponse>(`/api/bets/record?page=${request.page}&limit=${limit}`, {
             cache: 'no-store', signal: AbortSignal.timeout(10000),
         }).then((data) => {
-            if (active) {
-                setRecord(data);
-                setLoadedAt(new Date().toISOString());
+            if (!active) return;
+            const lastPage = Math.max(1, Math.ceil(data.total / limit));
+            // A grade correction can remove a page between requests.
+            if (request.page > lastPage) {
+                setRequest({ page: lastPage });
+                return;
             }
+            setRecord(data);
+            setLoadedAt(new Date().toISOString());
+            setLoading(false);
         }).catch(() => {
-            if (active) setError(true);
-        }).finally(() => {
-            if (active) setLoading(false);
+            if (active) {
+                setError(true);
+                setLoading(false);
+            }
         });
         return () => { active = false; };
     }, [limit, request]);

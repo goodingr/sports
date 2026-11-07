@@ -73,3 +73,44 @@ test('retries a failed ledger request without inventing a record', async ({ page
     await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByText('No settled published picks yet')).toBeVisible();
 });
+
+test('recovers when a retracted grade removes the last results page', async ({ page }) => {
+    const settledPicks = Array.from({ length: 21 }, (_, index) => ({
+        ...pick, game_id: `settled-${index + 1}`, home_team: `Settled Home ${index + 1}`,
+    }));
+    let retracted = false;
+    const requestedPages: number[] = [];
+    await page.route('**/api/bets/record?**', (route) => {
+        const currentPage = Number(new URL(route.request().url()).searchParams.get('page'));
+        requestedPages.push(currentPage);
+        const settled = retracted ? settledPicks.slice(1) : settledPicks;
+        return route.fulfill({ json: {
+            ...emptyRecord,
+            page: currentPage,
+            total: settled.length,
+            published_picks: settledPicks.length,
+            pending_picks: retracted ? 1 : 0,
+            grading_corrections: retracted ? 1 : 0,
+            graded_picks: settled.length,
+            wins: settled.length,
+            profit_units: settled.reduce((total, row) => total + row.profit_units, 0),
+            data: settled.slice((currentPage - 1) * emptyRecord.limit, currentPage * emptyRecord.limit),
+        } });
+    });
+    await page.goto('/record');
+
+    const picks = page.getByRole('list', { name: 'Settled published picks' });
+    const next = page.getByRole('button', { name: 'Next', exact: true });
+    await expect(picks.getByRole('heading', { name: 'Record Away at Settled Home 1', exact: true })).toBeVisible();
+    await expect(next).toBeEnabled();
+
+    retracted = true;
+    await next.click();
+
+    await expect(picks.getByRole('listitem')).toHaveCount(20);
+    await expect(picks.getByRole('heading', { name: 'Record Away at Settled Home 2', exact: true })).toBeVisible();
+    await expect(picks.getByRole('heading', { name: 'Record Away at Settled Home 1', exact: true })).toHaveCount(0);
+    await expect(page.getByText(/published picks awaiting settlement/)).toBeVisible();
+    await expect(next).toHaveCount(0);
+    expect(requestedPages.slice(-2)).toEqual([2, 1]);
+});
