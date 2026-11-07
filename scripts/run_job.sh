@@ -17,6 +17,22 @@
 set -uo pipefail
 
 JOB=${1:?job name required}
+
+validate_live_odds_jobs() {
+	case "${WORKER_LIVE_ODDS_JOBS:-}" in
+		""|predict|train|predict,train|train,predict) return 0 ;;
+		*)
+			echo "Invalid WORKER_LIVE_ODDS_JOBS. Use predict and/or train separated by a comma." >&2
+			return 64
+			;;
+	esac
+}
+
+if [[ "$JOB" == --validate-live-odds-jobs ]]; then
+	validate_live_odds_jobs
+	exit $?
+fi
+
 cd /app || exit 1
 
 # Load env that was captured by worker_entrypoint.sh.
@@ -43,6 +59,13 @@ run() {
 	"$@"
 }
 
+run_scheduled_pipeline() {
+	if [[ ",${WORKER_LIVE_ODDS_JOBS:-}," != *",$JOB,"* ]]; then
+		set -- "$@" --skip-odds
+	fi
+	run /app/scripts/pipeline.sh "$@"
+}
+
 write_heartbeat() {
 	local kind=$1 status=$2
 	# Atomic write: rename a sibling temp file so a partial write can never
@@ -59,17 +82,18 @@ write_heartbeat() {
 }
 
 dispatch() {
+	validate_live_odds_jobs || return $?
 	case "$JOB" in
 		predict)
 			# Hourly fast path: ingest + predict, no retraining.
 			log "Starting hourly predict pipeline"
-			run /app/scripts/pipeline.sh --skip-training
+			run_scheduled_pipeline --skip-training
 			;;
 
 		train)
 			# Daily full path: ingest + quality benchmark + predict + publish gate.
 			log "Starting daily paid-picks readiness pipeline"
-			run /app/scripts/pipeline.sh
+			run_scheduled_pipeline
 			;;
 
 		benchmark)

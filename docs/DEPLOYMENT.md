@@ -69,17 +69,35 @@ user that runs cron jobs. [Backup and restore](BACKUP_RESTORE.md)
 
 ```bash
 docker compose run --rm --no-deps --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
+```
+
+Scheduled `predict` and `train` jobs skip broad Odds API odds and scores by
+default, even with provider credentials installed. Set
+`WORKER_LIVE_ODDS_JOBS=train` in `.env` for one broad refresh per day at the
+default cron. Set `WORKER_TRAIN_CRON` in UTC to match the intended collection
+window, including Eastern daylight-saving changes. Adding `predict` also
+enables the hourly refresh, for 25 broad passes per day at the default crons.
+Budget for both markets per available league and scores. The paper reserve
+and request caps cover supplemental collection only.
+[Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
+
+```bash
 docker compose up -d api worker
 ```
 
-Check the data plan and worker cadence before supplying a live odds key.
-The default hourly refresh and daily pipeline can run 25 broad odds and
-score passes per day. The paper entry and closing caps apply to the
-supplemental collectors. [Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
+The default readiness window for odds is three hours. With one daily
+refresh, start the dependent services while the required leagues have
+recent priced receipts. If the warehouse needs a fresh receipt, wait for
+an opted-in broad job or run one manual refresh in its place. The command
+below fetches live odds and scores. Count it against the same daily budget
+and run it only on the collection owner.
 
-Wait for an ordinary scheduled refresh if the restored odds or predictions
-are stale. Once the API passes `/ready`, start the web app and proxy. The
-proxy binds ports 80 and 443 and requests certificates once DNS resolves.
+```bash
+docker compose run --rm --no-deps --user app --entrypoint /app/scripts/pipeline.sh worker --skip-training
+```
+
+Once the API passes `/ready`, start the web app and proxy. The proxy binds
+ports 80 and 443 and requests certificates once DNS resolves.
 
 ```bash
 docker compose exec api curl -fsS http://localhost:8000/ready
@@ -91,12 +109,16 @@ docker compose exec worker cat /etc/cron.d/sports
 
 When moving the paper trial to this worker, pause the Windows prediction,
 fixture discovery, early entry and closing jobs before taking the warehouse
-snapshot. Restore it and the pinned model, then set `WORKER_PAPER_CLOSE_ENABLED`,
+snapshot. Restore it and the pinned model, opt in to one broad job with
+`WORKER_LIVE_ODDS_JOBS=train`, and set `WORKER_PAPER_CLOSE_ENABLED`,
 `WORKER_PAPER_ENTRY_ENABLED` and `WORKER_PAPER_EVENTS_ENABLED` to `1` in `.env`
 on one worker. Closing checks start on each UTC quarter hour. Early entry and
 fixture discovery checks start five and ten minutes later. Each job writes
-its own log and health heartbeat. The same trial cutoffs, quota reserve and
-request caps apply on both platforms.
+its own log and health heartbeat. The independently enabled supplemental jobs
+use the same trial cutoffs and caps on both platforms. Entry reserves 200
+credits and can spend up to two credits per Eastern date. Closing reserves
+200 and can spend up to three credits per UTC date. Discovery uses the
+zero-credit events endpoint.
 
 ## Rebuild / redeploy
 
