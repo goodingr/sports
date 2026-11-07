@@ -36,7 +36,8 @@ test.describe('Pricing page', () => {
         await page.goto('/pricing');
         await expect(page.getByText('Subscriptions are currently paused')).toBeVisible();
         await expect(page.getByRole('button', { name: /subscribe/i })).toHaveCount(0);
-        await expect(page.getByRole('link', { name: 'Explore model tracking' })).toHaveAttribute('href', '/');
+        await expect(page.getByRole('link', { name: 'Explore model tracking' })).toHaveAttribute('href', '/#model-history');
+        await expect(page.getByRole('link', { name: 'View the published pick record' })).toHaveAttribute('href', '/record');
     });
 
     test('canceled checkout returns to pricing without errors', async ({ page }) => {

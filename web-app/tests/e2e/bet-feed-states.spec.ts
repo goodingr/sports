@@ -37,9 +37,8 @@ test.describe('Bet feed loading & error states', () => {
         });
 
         await page.goto('/');
-        // Either a partial banner appears, or upcoming content / empty state appears
-        // without the full "Unable to load picks" error overtaking the page.
-        await expect(page.getByText(/Unable to load picks/i)).toHaveCount(0, { timeout: 15_000 });
-        await expect(page.getByText(/Model results are temporarily unavailable/i)).toBeVisible();
+        await expect(page.getByText('Model history is temporarily unavailable. Upcoming picks are available.')).toBeVisible();
+        await expect(page.getByText('No upcoming picks right now')).toBeVisible();
+        await expect(page.getByText(/Unable to load picks/i)).toHaveCount(0);
     });
 });
