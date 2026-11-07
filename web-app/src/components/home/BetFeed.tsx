@@ -30,8 +30,7 @@ export function BetFeed() {
     const [upcoming, setUpcoming] = useState<Bet[]>([]);
     const [history, setHistory] = useState<Bet[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [partialError, setPartialError] = useState<string | null>(null);
+    const [unavailable, setUnavailable] = useState({ upcoming: false, history: false });
     const [loadingMore, setLoadingMore] = useState(false);
     const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
@@ -65,6 +64,11 @@ export function BetFeed() {
             setApiPremium(data.is_premium ?? null);
         }
 
+        function clearUpcoming() {
+            setUpcoming([]);
+            setApiPremium(null);
+        }
+
         async function refreshUpcoming() {
             if (cancelled || upcomingInFlight || document.visibilityState !== 'visible') return;
             upcomingInFlight = true;
@@ -78,14 +82,12 @@ export function BetFeed() {
                 });
                 if (!cancelled) {
                     acceptUpcoming(data);
-                    setError(null);
-                    setPartialError((previous) => previous?.startsWith('Upcoming picks') ? null : previous);
+                    setUnavailable((current) => ({ ...current, upcoming: false }));
                 }
             } catch {
                 if (!cancelled) {
-                    setUpcoming([]);
-                    setApiPremium(null);
-                    setPartialError('Upcoming picks are temporarily unavailable. Model history is available.');
+                    clearUpcoming();
+                    setUnavailable((current) => ({ ...current, upcoming: true }));
                 }
             } finally {
                 upcomingInFlight = false;
@@ -100,8 +102,6 @@ export function BetFeed() {
 
         async function loadBets() {
             upcomingInFlight = true;
-            setError(null);
-            setPartialError(null);
             setPage(1);
             setLoadMoreError(null);
             setLoadingMore(false);
@@ -126,38 +126,29 @@ export function BetFeed() {
                 if (upcomingResult.status === 'fulfilled') {
                     acceptUpcoming(upcomingResult.value);
                 } else {
-                    setUpcoming([]);
-                    setApiPremium(null);
+                    console.error('Failed to load upcoming bets:', upcomingResult.reason);
+                    clearUpcoming();
                 }
                 if (historyResult.status === 'fulfilled') {
                     setHistory((historyResult.value.data ?? []).map(normalizeBet));
                     setTotalHistory(historyResult.value.total ?? 0);
                 } else {
+                    console.error('Failed to load history:', historyResult.reason);
                     setHistory([]);
                     setTotalHistory(0);
                 }
 
-                if (
-                    upcomingResult.status === 'rejected' &&
-                    historyResult.status === 'rejected'
-                ) {
-                    console.error('Failed to load bets:', upcomingResult.reason);
-                    setError("We couldn't load picks right now. Please try again in a moment.");
-                } else if (upcomingResult.status === 'rejected') {
-                    console.error('Failed to load upcoming bets:', upcomingResult.reason);
-                    setPartialError(
-                        "Upcoming picks are temporarily unavailable. Model history is available.",
-                    );
-                } else if (historyResult.status === 'rejected') {
-                    console.error('Failed to load history:', historyResult.reason);
-                    setPartialError(
-                        "Model history is temporarily unavailable. Upcoming picks are available.",
-                    );
-                }
+                setUnavailable({
+                    upcoming: upcomingResult.status === 'rejected',
+                    history: historyResult.status === 'rejected',
+                });
             } catch (err) {
                 if (!cancelled) {
                     console.error('Failed to load bets:', err);
-                    setError("We couldn't load picks right now. Please try again in a moment.");
+                    clearUpcoming();
+                    setHistory([]);
+                    setTotalHistory(0);
+                    setUnavailable({ upcoming: true, history: true });
                 }
             } finally {
                 upcomingInFlight = false;
@@ -240,7 +231,9 @@ export function BetFeed() {
         );
     }
 
-    if (error) {
+    const retry = () => setReloadKey((key) => key + 1);
+
+    if (unavailable.upcoming && unavailable.history) {
         return (
             <div
                 role="alert"
@@ -248,10 +241,10 @@ export function BetFeed() {
             >
                 <AlertCircle className="h-8 w-8 text-danger mx-auto mb-3" aria-hidden="true" />
                 <p className="text-foreground font-medium mb-2">Unable to load picks</p>
-                <p className="text-sm text-muted-foreground mb-4">{error}</p>
+                <p className="text-sm text-muted-foreground mb-4">We couldn&apos;t load picks right now. Please try again in a moment.</p>
                 <button
                     type="button"
-                    onClick={() => setReloadKey((k) => k + 1)}
+                    onClick={retry}
                     className="inline-flex items-center justify-center px-4 py-2 border border-white/10 rounded-full text-sm font-medium hover:bg-white/5 transition-colors"
                 >
                     Retry
@@ -262,16 +255,25 @@ export function BetFeed() {
 
     const upcomingGroups = groupByDate(upcoming);
     const historyGroups = groupByDate(history);
+    const partialError = unavailable.upcoming
+        ? 'Upcoming picks are temporarily unavailable.'
+        : unavailable.history ? 'Model history is temporarily unavailable.' : null;
 
     return (
         <div className="space-y-6">
             {partialError && (
                 <div
-                    role="status"
-                    className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
+                    className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
                 >
-                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
-                    <span>{partialError}</span>
+                    <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span role="status" className="flex-1">{partialError}</span>
+                    <button
+                        type="button"
+                        onClick={retry}
+                        className="shrink-0 rounded-full border border-white/20 px-3 py-1.5 font-medium hover:bg-white/5"
+                    >
+                        Retry
+                    </button>
                 </div>
             )}
             {/* Tabs */}
@@ -335,7 +337,7 @@ export function BetFeed() {
                                     </div>
                                 </div>
                             ))
-                        ) : (
+                        ) : !unavailable.upcoming && (
                             <div className="text-center py-12 px-4 text-muted-foreground bg-white/5 rounded-xl border border-white/10">
                                 <p className="font-medium mb-1">No upcoming picks right now</p>
                                 <p className="text-sm">Picks appear here after they pass our validation checks.</p>
@@ -392,7 +394,7 @@ export function BetFeed() {
                                 </div>
                             )}
                         </>
-                    ) : (
+                    ) : !unavailable.history && (
                         <div className="text-center py-12 px-4 text-muted-foreground bg-white/5 rounded-xl border border-white/10">
                             <p className="font-medium mb-1">No model results yet</p>
                             <p className="text-sm">Settled model selections will appear here.</p>

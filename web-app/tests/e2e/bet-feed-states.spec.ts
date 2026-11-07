@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { MOCK_HISTORY, mockBetsRoutes } from './_fixtures/mocks';
 
 test.describe('Bet feed loading & error states', () => {
     test('shows error UI with retry when both APIs are down', async ({ page }) => {
@@ -37,8 +38,35 @@ test.describe('Bet feed loading & error states', () => {
         });
 
         await page.goto('/');
-        await expect(page.getByText('Model history is temporarily unavailable. Upcoming picks are available.')).toBeVisible();
+        await expect(page.getByText('Model history is temporarily unavailable.', { exact: true })).toBeVisible();
         await expect(page.getByText('No upcoming picks right now')).toBeVisible();
         await expect(page.getByText(/Unable to load picks/i)).toHaveCount(0);
+    });
+
+    test('keeps the history outage visible when upcoming picks recover independently', async ({ page }) => {
+        await mockBetsRoutes(page);
+        let upcomingAvailable = false;
+        let historyAvailable = false;
+        await page.route('**/api/bets/upcoming**', (route) => route.fulfill(upcomingAvailable
+            ? { json: { data: [], is_premium: false } }
+            : { status: 503 }));
+        await page.route('**/api/bets/history**', (route) => route.fulfill(historyAvailable
+            ? { json: { data: MOCK_HISTORY, total: MOCK_HISTORY.length } }
+            : { status: 503 }));
+
+        await page.goto('/');
+        await expect(page.getByText('Unable to load picks')).toBeVisible();
+
+        upcomingAvailable = true;
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await expect(page.getByText('No upcoming picks right now')).toBeVisible();
+        await page.getByRole('tab', { name: 'Model history' }).click();
+        await expect(page.getByText('Model history is temporarily unavailable.', { exact: true })).toBeVisible();
+        await expect(page.getByText('No model results yet')).toHaveCount(0);
+
+        historyAvailable = true;
+        await page.getByRole('button', { name: 'Retry', exact: true }).click();
+        await expect(page.getByText('Past Home')).toBeVisible();
+        await expect(page.getByText('Model history is temporarily unavailable.', { exact: true })).toHaveCount(0);
     });
 });

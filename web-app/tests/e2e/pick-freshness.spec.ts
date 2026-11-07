@@ -110,15 +110,15 @@ test('revalidates a paid feed in the background without replacing it with loadin
     await expect(page.getByText('No upcoming picks right now')).toBeVisible();
 });
 
-test('withdraws a legacy quote when the next required refresh fails', async ({ page }) => {
+test('withdraws a paid quote when refresh fails and recovers on retry', async ({ page }) => {
     await page.clock.install();
     await mockBetsRoutes(page, { premium: true });
     let requests = 0;
     await page.route('**/api/bets/upcoming**', async (route) => {
         requests += 1;
-        await route.fulfill(requests === 1
-            ? { json: { data: [MOCK_UPCOMING[0]], is_premium: true } }
-            : { status: 503, body: 'unavailable' });
+        await route.fulfill(requests === 2
+            ? { status: 503, body: 'unavailable' }
+            : { json: { data: [MOCK_UPCOMING[0]], is_premium: true } });
     });
     await page.goto('/');
     await expect(page.getByText('Mock Home FC')).toBeVisible();
@@ -128,6 +128,11 @@ test('withdraws a legacy quote when the next required refresh fails', async ({ p
     await expect.poll(() => requests).toBe(2);
     await expect(page.getByText('Mock Home FC')).toHaveCount(0);
     await expect(page.getByText(/Upcoming picks are temporarily unavailable/)).toBeVisible();
+    await expect(page.getByText('No upcoming picks right now')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(page.getByText('Mock Home FC')).toBeVisible();
+    await expect(page.getByText(/Upcoming picks are temporarily unavailable/)).toHaveCount(0);
 });
 
 test('revalidates free previews when the page regains focus', async ({ page }) => {
