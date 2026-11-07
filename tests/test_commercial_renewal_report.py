@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts import commercial_renewal_report
-from scripts.commercial_renewal_report import build_renewal_report
+from scripts.commercial_renewal_report import Cycle, _original_schedule, build_renewal_report
 
 PRICE_ID = "price_pro_monthly"
 HISTORY_START = datetime.fromisoformat("2027-01-01T00:00:00Z")
@@ -31,7 +31,9 @@ def write_rows(path: Path, header: str, rows: list[tuple[str, ...]]) -> None:
         writer.writerows(rows)
 
 
-def sample_exports(tmp_path: Path, *, missing: str = "") -> tuple[Path, Path, Path]:
+def sample_exports(
+    tmp_path: Path, *, missing: str = "", duplicate_second: bool = False
+) -> tuple[Path, Path, Path]:
     invoices: list[tuple[str, ...]] = []
     balance: list[tuple[str, ...]] = []
     cycles: list[tuple[str, ...]] = []
@@ -67,6 +69,7 @@ def sample_exports(tmp_path: Path, *, missing: str = "") -> tuple[Path, Path, Pa
         )
         if label == "canceled_origin" and missing == "record":
             return
+        first_due = stamp(period_end) if second_due else ""
         if label == "canceled_origin" and missing == "schedule":
             second_due = None
         cycles.append(
@@ -77,7 +80,7 @@ def sample_exports(tmp_path: Path, *, missing: str = "") -> tuple[Path, Path, Pa
                 stamp(period_start),
                 stamp(period_end),
                 "false",
-                stamp(period_end) if second_due else "",
+                first_due,
                 stamp(second_due) if second_due else "",
             )
         )
@@ -98,6 +101,8 @@ def sample_exports(tmp_path: Path, *, missing: str = "") -> tuple[Path, Path, Pa
     payment("retry_r1", "retried", "retried", feb, mar, collected="2027-03-03")
     balance.append(balance[-1])
     payment("retry_r2", "retried", "retried", mar, apr, collected="2027-04-03")
+    if duplicate_second:
+        payment("extra_r2", "retried", "retried", mar, apr, collected="2027-04-04")
     payment("late_r1", "late", "late", feb, mar, collected="2027-03-20")
     payment("restart", "late", "replacement", mar, apr, reason="subscription_create")
     payment(
@@ -213,3 +218,96 @@ def test_missing_canceled_origin_evidence_suppresses_rates(tmp_path, missing, au
     for cohort in report["cohorts"].values():
         assert cohort["renewal_1"]["rate_within_grace"] is None
         assert cohort["renewal_2"]["rate_within_grace"] is None
+
+
+@pytest.mark.parametrize(
+    ("year", "day", "february_day", "april_day"),
+    [(2027, 29, 28, 29), (2027, 30, 28, 30), (2027, 31, 28, 30), (2028, 31, 29, 30)],
+)
+def test_origin_uses_original_monthly_anchor_through_february(year, day, february_day, april_day):
+    origin = datetime.fromisoformat(f"{year}-01-{day}T15:23:01Z")
+    first = origin.replace(month=2, day=february_day)
+    second = origin.replace(month=3)
+    third = origin.replace(month=4, day=april_day)
+    cycle = Cycle("sub_test", "subscription_create", origin, first, False, first, second)
+
+    assert _original_schedule(cycle) == (first, second, third)
+
+
+def change_cycle(path: Path, invoice_id: str, **values: str) -> None:
+    with path.open(encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        fields = reader.fieldnames
+        rows = list(reader)
+    assert fields is not None
+    for row in rows:
+        if row["invoice_id"] == invoice_id:
+            row.update(values)
+    write_rows(path, ",".join(fields), [tuple(row[field] for field in fields) for row in rows])
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"billing_reason": "subscription_cycle"},
+        {"period_end_utc": "2027-02-27T15:00:00Z", "renewal_1_due_utc": "2027-02-27T15:00:00Z"},
+        {"renewal_2_due_utc": "2027-03-28T15:00:00Z"},
+        {"renewal_1_due_utc": ""},
+    ],
+)
+def test_unsupported_first_collected_invoice_cannot_prove_original_renewals(tmp_path, values):
+    paths = sample_exports(tmp_path)
+    change_cycle(paths[2], "in_canceled_origin", **values)
+    report = report_at(paths)
+
+    assert report["status"] == "incomplete"
+    assert report["audit"]["invalid_origin_schedules"] == 1
+    january = report["cohorts"]["2027-01"]
+    assert january["first_payers"] == 3
+    assert january["renewal_1"]["mature"] == january["renewal_2"]["mature"] == 2
+    assert january["renewal_1"]["rate_within_grace"] is None
+    assert january["renewal_2"]["rate_within_grace"] is None
+
+
+def test_proven_origin_can_derive_both_due_dates(tmp_path):
+    paths = sample_exports(tmp_path)
+    expected = report_at(paths)
+    for customer in ("canceled", "retried", "late", "younger"):
+        change_cycle(paths[2], f"in_{customer}_origin", renewal_1_due_utc="", renewal_2_due_utc="")
+
+    assert report_at(paths) == expected
+
+
+@pytest.mark.parametrize(
+    ("invoice_id", "values", "slot", "unpaid"),
+    [
+        ("in_retry_r1", {"period_start_utc": "2027-03-01T15:00:00Z"}, "renewal_1", 1),
+        ("in_retry_r1", {"proration": "true"}, "renewal_1", 1),
+        ("in_retry_r2", {"billing_reason": "subscription_update"}, "renewal_2", 2),
+        ("in_retry_r2", {"period_end_utc": "2027-04-29T15:00:00Z"}, "renewal_2", 2),
+    ],
+)
+def test_unsupported_linked_period_is_neither_renewal_nor_churn(tmp_path, invoice_id, values, slot, unpaid):
+    paths = sample_exports(tmp_path)
+    change_cycle(paths[2], invoice_id, **values)
+    report = report_at(paths)
+
+    assert report["status"] == "incomplete"
+    assert report["audit"]["unsupported_linked_cycle_records"] == 1
+    january = report["cohorts"]["2027-01"]
+    assert january["first_payers"] == 3
+    assert january[slot]["mature"] == 2
+    assert january[slot]["paid_within_grace"] == 0
+    assert january[slot]["no_payment"] == unpaid
+    assert january[slot]["rate_within_grace"] is None
+
+
+def test_multiple_collected_invoices_for_one_slot_withhold_renewal_rates(tmp_path):
+    report = report_at(sample_exports(tmp_path, duplicate_second=True))
+
+    assert report["status"] == "incomplete"
+    assert report["audit"]["extra_collected_invoices_for_slot"] == 1
+    second = report["cohorts"]["2027-01"]["renewal_2"]
+    assert second["mature"] == second["no_payment"] == 2
+    assert second["paid_within_grace"] == 0
+    assert second["rate_within_grace"] is None

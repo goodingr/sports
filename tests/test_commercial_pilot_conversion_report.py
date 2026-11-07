@@ -200,6 +200,30 @@ def test_missing_cycle_withholds_only_renewal_rates(private_exports):
     assert report["renewals"]["renewal_1"]["rate_within_grace"] is None
 
 
+def test_conflicting_linked_cycle_preserves_verified_pilot_conversion(private_exports):
+    _, _, _, cycles = private_exports
+    lines = cycles.read_text(encoding="utf-8").splitlines()
+    cycles.write_text(
+        "\n".join(
+            line.replace("2026-07-02T00:00:00Z", "2026-07-01T00:00:00Z")
+            if line.startswith("in_community_r1,") else line
+            for line in lines
+        ),
+        encoding="utf-8",
+    )
+    report = build_conversion_report(*private_exports)
+
+    assert report["status"] == "incomplete"
+    assert report["conversion_complete"] is True
+    assert report["totals"]["first_payers"] == 2
+    assert report["totals"]["viewer_to_first_payment_rate"] == pytest.approx(1 / 3)
+    assert report["renewal_complete"] is False
+    assert report["renewal_audit"]["unsupported_linked_cycle_records"] == 1
+    first = report["renewals_by_source"]["community"]["renewal_1"]
+    assert first["mature"] == first["paid_within_grace"] == first["no_payment"] == 0
+    assert first["rate_within_grace"] is None
+
+
 def test_unsupported_target_cash_is_not_zero_conversion(private_exports):
     _, invoices, *_ = private_exports
     rows = invoices.read_text(encoding="utf-8").splitlines()

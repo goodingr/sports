@@ -114,15 +114,17 @@ activity. Use the full live history from launch through the last month under
 review. That history lets the report attribute later adjustments and find each
 customer's first observed payment. Keep both exports outside the repository.
 
-- Prepare one invoice-register CSV row per Stripe invoice. Include
+- Prepare one invoice-register CSV row per Stripe invoice from the live Invoices
+  API and the full paginated invoice lines. Include
   `invoice_id,customer_id,price_ids,livemode,status,currency,amount_paid_cents,tax_cents`.
   Use all invoice lines and join their price IDs with `|`, retaining an empty
   entry for any unpriced line. Copy the live flag and paid amount from the
-  invoice. Enter tax in cents from the invoice's tax totals.
-- Export itemized USD Stripe Balance activity with
-  `balance_transaction_id,created_utc,currency,gross,fee,net,reporting_category,invoice_id,charge_id`.
-  Use a decimal point for the USD amounts. Export all activity categories so
-  refunds, reversals, and disputes stay visible. Include `source_id` to track
+  invoice. Enter tax in cents from the invoice's tax totals. [Stripe invoices](https://docs.stripe.com/api/invoices/object) · [Invoice lines](https://docs.stripe.com/api/invoices/invoice_lines)
+- Export itemized USD Stripe Balance activity. For the Reporting API, use
+  `balance_change_from_activity.itemized.7` with UTC, USD, a decimal point, and
+  all activity categories. Select `balance_transaction_id,created_utc,currency,gross,fee,net,reporting_category,invoice_id,charge_id,source_id`
+  explicitly. Stripe offers `created_utc`, `invoice_id`, `charge_id`, and
+  `source_id` as additional columns in this version. The source ID helps track
   separate refunds or disputes on the same charge. [Stripe Balance columns](https://docs.stripe.com/reports/report-types/balance)
 
 ```powershell
@@ -186,17 +188,29 @@ private invoice and Balance exports and a cycles CSV with one row per invoice.
 The CSV header is
 `invoice_id,subscription_id,billing_reason,period_start_utc,period_end_utc,proration,renewal_1_due_utc,renewal_2_due_utc`.
 Copy the subscription ID and billing reason recorded on that invoice. Use the target
-recurring invoice line's service period and proration flag. Use timestamps
-with UTC offsets and `true` or `false` for proration. [Stripe invoice lines](https://docs.stripe.com/api/invoice-line-item/object)
+recurring line's service period and proration flag. Use timestamps with UTC offsets
+and `true` or `false` for proration. [Stripe invoice lines](https://docs.stripe.com/api/invoice-line-item/object)
 
-Fill both due dates on each customer's first cash-matched invoice. The first
-due date is the end of that invoice line's service period. Set the second
-from the original monthly billing anchor and retain both dates after
-cancellation. Leave the due fields blank on later invoices. [Stripe billing cycles](https://docs.stripe.com/billing/subscriptions/billing-cycle)
+Freeze the original hosted checkout terms for the cohort before accepting paid
+customers. This report supports the single monthly price with one-month billing,
+no initial trial, and the original service start as the billing anchor. For each
+customer's first cash-matched invoice, require a non-prorated `subscription_create`
+and a full original calendar month. Leave both due cells blank to derive the due
+dates one and two calendar months from the original service start in UTC. The
+calculation retains its time of day and clamps the day only when the destination
+month is shorter. A January 31 anchor in a non-leap year gives February 28 and
+March 31. If recording due dates in the export, supply both and match the derived
+values exactly. Leave those cells blank on later invoices. Keep the original
+invoice and line after cancellation or later subscription changes. [Stripe billing cycles](https://docs.stripe.com/billing/subscriptions/billing-cycle)
 
 Verify that all exports come from the same live account and cover the history
 from launch through `--observed-through`, including all invoice pages and
-relevant Balance activity. The report relies on the operator's coverage declaration.
+relevant Balance activity. Retain the verified Stripe account ID, export
+times, source file checksums, and the successful live Balance Report Run with
+its interval parameters alongside the private exports. Base the coverage
+declaration on the actual report interval and the available-through time for
+its report type. The report relies on the operator to verify that coverage and
+the original checkout terms. [Stripe Report Run](https://docs.stripe.com/api/reporting/report_run/object) · [Stripe Report Type](https://docs.stripe.com/api/reporting/report_type/object)
 Choose `--as-of` within the export coverage and set the grace window before
 reviewing results. Keep customer-level exports outside the repository.
 
@@ -207,9 +221,11 @@ poetry run python -m scripts.commercial_renewal_report --invoices C:/private/inv
 The cohort month is the first collected charge's UTC month.
 Each rate uses the original first-payer cohort members whose scheduled slot
 and grace window have elapsed, including cancellations. The report counts one
-cash-matched payment per original subscription and service period and shows
-late recoveries separately. Reconcile missing schedules and other audit
-exceptions before using the rates. An incomplete report suppresses rates.
+cash-matched, non-prorated `subscription_cycle` invoice per original subscription
+and exact service period, including the end of the second renewal period. It shows
+late recoveries separately. Conflicting overlapping periods or multiple collected
+invoices for a slot leave that slot unresolved. An incomplete report suppresses
+renewal rates while retaining first-payer counts.
 
 ### Attribute conversion and renewals to the pilot
 

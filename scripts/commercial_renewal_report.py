@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from calendar import monthrange
 from collections import defaultdict
 from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, field
@@ -23,7 +24,6 @@ _CYCLE_COLUMNS = (
     "renewal_1_due_utc",
     "renewal_2_due_utc",
 )
-_RECURRING_REASONS = {"subscription_create", "subscription_cycle"}
 
 
 @dataclass(frozen=True)
@@ -114,13 +114,25 @@ def _cycles(path: Path) -> dict[str, Cycle]:
     return cycles
 
 
-def _original_schedule(cycle: Cycle | None) -> tuple[datetime, datetime] | None:
-    if cycle is None or cycle.proration or cycle.billing_reason not in _RECURRING_REASONS:
+def _monthly_boundary(anchor: datetime, months: int) -> datetime:
+    year, month_index = divmod(anchor.year * 12 + anchor.month - 1 + months, 12)
+    month = month_index + 1
+    return anchor.replace(year=year, month=month, day=min(anchor.day, monthrange(year, month)[1]))
+
+
+def _original_schedule(cycle: Cycle | None) -> tuple[datetime, datetime, datetime] | None:
+    if cycle is None or cycle.proration or cycle.billing_reason != "subscription_create":
         return None
-    first, second = cycle.first_due, cycle.second_due
-    if first is None or second is None or first != cycle.ends_at or second <= first:
+    try:
+        first = _monthly_boundary(cycle.starts_at, 1)
+        second = _monthly_boundary(cycle.starts_at, 2)
+        third = _monthly_boundary(cycle.starts_at, 3)
+    except ValueError:
         return None
-    return first, second
+    declared_due = (cycle.first_due, cycle.second_due)
+    if cycle.ends_at != first or declared_due not in ((None, None), (first, second)):
+        return None
+    return first, second, third
 
 
 def _measure_renewals(
@@ -136,13 +148,15 @@ def _measure_renewals(
         "missing_cycle_records": 0,
         "invalid_origin_schedules": 0,
         "ambiguous_first_payments": 0,
+        "unsupported_linked_cycle_records": 0,
         "extra_collected_invoices_for_slot": 0,
     }
 
     cohorts: dict[str, Cohort] = defaultdict(Cohort)
     for payments in by_customer.values():
         payments.sort(key=lambda item: (item.charge.created_at, item.invoice_id))
-        audit["missing_cycle_records"] += sum(payment.invoice_id not in cycles for payment in payments)
+        missing_cycles = sum(payment.invoice_id not in cycles for payment in payments)
+        audit["missing_cycle_records"] += missing_cycles
         first = payments[0]
         cohort = cohorts[cohort_for(first)]
         cohort.first_payers += 1
@@ -154,24 +168,36 @@ def _measure_renewals(
         if original is None or schedule is None:
             audit["invalid_origin_schedules"] += 1
             continue
+        if missing_cycles:
+            continue
 
+        first_due, second_due, third_due = schedule
+        slots = ((first_due, second_due), (second_due, third_due))
         slot_payments: dict[datetime, list[datetime]] = defaultdict(list)
+        unsupported_slots: set[datetime] = set()
         for payment in payments[1:]:
-            cycle = cycles.get(payment.invoice_id)
+            cycle = cycles[payment.invoice_id]
+            if cycle.subscription_id != original.subscription_id:
+                continue
             if (
-                cycle is not None
-                and cycle.subscription_id == original.subscription_id
-                and cycle.billing_reason == "subscription_cycle"
+                cycle.billing_reason == "subscription_cycle"
                 and not cycle.proration
-                and cycle.starts_at in schedule
-                and (cycle.starts_at != schedule[0] or cycle.ends_at == schedule[1])
+                and (cycle.starts_at, cycle.ends_at) in slots
             ):
                 slot_payments[cycle.starts_at].append(payment.charge.created_at)
+                continue
+            overlaps = {due for due, end in slots if cycle.starts_at < end and due < cycle.ends_at}
+            if overlaps:
+                audit["unsupported_linked_cycle_records"] += 1
+                unsupported_slots.update(overlaps)
 
-        for due, renewal in zip(schedule, (cohort.renewal_1, cohort.renewal_2), strict=True):
+        for (due, _), renewal in zip(slots, (cohort.renewal_1, cohort.renewal_2), strict=True):
             received = slot_payments[due]
-            audit["extra_collected_invoices_for_slot"] += max(0, len(received) - 1)
-            renewal.observe(due, min(received, default=None), as_of, grace)
+            if len(received) > 1:
+                audit["extra_collected_invoices_for_slot"] += len(received) - 1
+                continue
+            if due not in unsupported_slots:
+                renewal.observe(due, received[0] if received else None, as_of, grace)
 
     return dict(cohorts), audit
 
@@ -181,6 +207,8 @@ def _renewals_have_evidence(audit: dict[str, int]) -> bool:
         audit["missing_cycle_records"]
         or audit["invalid_origin_schedules"]
         or audit["ambiguous_first_payments"]
+        or audit["unsupported_linked_cycle_records"]
+        or audit["extra_collected_invoices_for_slot"]
     )
 
 
