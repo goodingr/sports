@@ -94,6 +94,13 @@ def _connect_readonly(db_path: Path) -> sqlite3.Connection:
 def run_readiness_checks(settings: APISettings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
     checks: dict[str, Any] = {}
+    try:
+        interrupted_restore = any(settings.models_dir.glob(".restore-*"))
+        checks["restore"] = {"ok": not interrupted_restore}
+        if interrupted_restore:
+            checks["restore"]["error"] = "an interrupted restore requires recovery"
+    except OSError as error:
+        checks["restore"] = {"ok": False, "error": str(error)}
 
     db_path = settings.db_path
     conn: sqlite3.Connection | None = None

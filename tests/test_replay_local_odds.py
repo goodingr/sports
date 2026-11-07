@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.backup_evidence import create_evidence_zip
 from src.data.replay_local_odds import replay_plan
 
 
@@ -131,3 +132,24 @@ def test_replay_rejects_poststart_or_forged_quote(archive_plan):
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(ValueError, match="not observed before"):
         replay_plan(plan_path, db_path=db_path)
+
+
+@pytest.mark.parametrize("storage", ["relocated", "zip"])
+def test_replay_reads_relocated_or_archived_raw_bytes_without_rewriting_provenance(archive_plan, tmp_path, storage):
+    db_path, plan_path, raw_path, plan = archive_plan
+    original = tmp_path / "original" / "data" / "raw" / "odds" / "quote.json"
+    original.parent.mkdir(parents=True)
+    original.write_bytes(raw_path.read_bytes())
+    plan["snapshots"][0]["raw_path"] = str(original)
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    if storage == "zip":
+        create_evidence_zip(db_path.parent / "source_evidence.zip", [("raw", original.parents[1])])
+    else:
+        relocated = db_path.parent / "raw" / "odds" / "quote.json"
+        relocated.parent.mkdir(parents=True)
+        relocated.write_bytes(original.read_bytes())
+    original.unlink()
+    result = replay_plan(plan_path, db_path=db_path, write=True, manifest_path=tmp_path / "replay.json")
+    assert result["new_quote_rows"] == 2
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT raw_path FROM odds_snapshots").fetchone()[0] == str(original)

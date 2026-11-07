@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scripts.backup_evidence import read_raw_evidence
 from src.data.team_mappings import normalize_team_code
 from src.db.loaders import _american_to_decimal, _get_or_create_book, _implied_probability
 
@@ -62,8 +63,8 @@ def _validate_fixtures(conn: sqlite3.Connection, fixtures: list[dict]) -> dict[s
     return verified
 
 
-def _validate_raw(snapshot: dict, fixtures: dict[str, dict]) -> None:
-    raw = Path(snapshot["raw_path"]).read_bytes()
+def _validate_raw(snapshot: dict, fixtures: dict[str, dict], data_dir: Path) -> None:
+    raw = read_raw_evidence(snapshot["raw_path"], data_dir)
     if hashlib.sha256(raw).hexdigest() != snapshot["raw_sha256"]:
         raise ValueError("Archive file changed after its recovery plan was reviewed")
     data = json.loads(raw.decode("utf-8-sig"))
@@ -138,7 +139,7 @@ def replay_plan(
         actions = []
         headers = {}
         for snapshot in plan["snapshots"]:
-            _validate_raw(snapshot, fixtures)
+            _validate_raw(snapshot, fixtures, db_path.resolve().parent)
             snapshot_id = snapshot["snapshot_id"]
             if snapshot_id is None:
                 existing = conn.execute(

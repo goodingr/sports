@@ -121,6 +121,28 @@ def test_health_endpoint_is_dependency_free(api_client, monkeypatch):
     assert response.json() == {"status": "healthy"}
 
 
+def test_readiness_rejects_an_interrupted_restore(tmp_path):
+    db_path = tmp_path / "betting.db"
+    _create_ready_db(db_path)
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "nba_ensemble.pkl").write_bytes(b"model")
+    marker = models_dir / ".restore-interrupted"
+    marker.mkdir()
+    settings = APISettings(
+        db_path=db_path,
+        models_dir=models_dir,
+        release_leagues=("NBA",),
+        min_disk_free_mb=0,
+        cors_origins=(),
+    )
+    result = readiness.run_readiness_checks(settings)
+    assert result["status"] == "not_ready"
+    assert result["checks"]["restore"]["ok"] is False
+    marker.rmdir()
+    assert readiness.run_readiness_checks(settings)["status"] == "ready"
+
+
 def test_ready_returns_503_when_database_unreachable(api_client, monkeypatch, tmp_path):
     """`/ready` is the staging gate — it must reject when the DB is gone."""
     settings = APISettings(

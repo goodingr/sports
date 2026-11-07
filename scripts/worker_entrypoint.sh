@@ -8,6 +8,13 @@
 
 set -euo pipefail
 
+for recovery in "${MODELS_DIR:-/app/models}"/.restore-*; do
+	if [[ -e "$recovery" ]]; then
+		echo "[worker] interrupted restore requires recovery before jobs can start" >&2
+		exit 1
+	fi
+done
+
 LOG_DIR=${LOG_DIR:-/app/logs}
 HEARTBEAT_DIR=${HEARTBEAT_DIR:-/app/logs/heartbeat}
 mkdir -p "$LOG_DIR" "$HEARTBEAT_DIR"
@@ -33,7 +40,7 @@ ENV_FILE=/app/scripts/.worker_env
 WORKER_ENV_KEEP=(
 	PYTHONPATH PATH TZ LOG_LEVEL
 	SPORTS_DB_PATH DATABASE_PATH DB_PATH MODELS_DIR MODEL_DIR
-	BACKUP_DIR REMOTE_BACKUP_RETENTION_DAYS
+	BACKUP_DIR BACKUP_RETENTION_DAYS REMOTE_BACKUP_RETENTION_DAYS
 	RELEASE_LEAGUES PAID_RELEASE_LEAGUES SCORE_BACKFILL_LOOKBACK_DAYS
 	ODDS_FRESHNESS_MINUTES PREDICTIONS_FRESHNESS_MINUTES MIN_DISK_FREE_MB
 	HEARTBEAT_DIR LOG_DIR
