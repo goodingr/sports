@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
+import sqlite3
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user, is_user_premium
+from src.api.settings import get_settings
 from src.dashboard.data import (
     _expand_totals,
     filter_by_version,
@@ -21,25 +21,22 @@ from src.dashboard.data import (
 )
 from src.data.sportsbook_urls import get_sportsbook_url
 from src.data.team_mappings import get_full_team_name
-from src.predict.publishable_bets import DEFAULT_OUTPUT as PUBLISHABLE_BETS_PATH
+from src.predict.published_ledger import load_active_release, published_record
 
 router = APIRouter(prefix="/api/bets", tags=["bets"])
 PUBLISHABLE_BETS_MAX_AGE = pd.Timedelta(hours=30)
 
 
 def _load_gated_publishable_bets() -> dict[tuple[str, str, str], dict[str, Any]]:
-    """Read the gated paid-pick output if a passing approved rule produced it.
+    """Read the committed paid release if a passing approved rule produced it.
 
     Returns an empty mapping when the file is missing, malformed, or the gate
     has not been satisfied. Keys are (game_id, market, side) tuples; the value
     is the serialized bet record from src.predict.publishable_bets.
     """
-    path: Path = PUBLISHABLE_BETS_PATH
-    if not path.exists() or not path.is_file():
-        return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        payload = load_active_release(get_settings().db_path)
+    except (sqlite3.Error, OSError, ValueError):
         return {}
     if not isinstance(payload, dict):
         return {}
@@ -517,6 +514,20 @@ def get_access(response: Response) -> AccessResponse:
     """Expose checkout availability without revealing any pick details."""
     response.headers["Cache-Control"] = "no-store"
     return AccessResponse(checkout_available=not _upcoming_publishable_bets().empty)
+
+
+@router.get("/record")
+def get_published_record(
+    response: Response,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Return settled picks issued through the paid publication gate."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return published_record(get_settings().db_path, page=page, limit=limit)
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Published record unavailable") from exc
 
 
 @router.get(

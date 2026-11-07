@@ -12,6 +12,7 @@ from src.models.prediction_quality import (
     expand_moneyline_bets,
     expand_totals_bets,
     filter_bets_for_rule,
+    load_moneyline_model_input,
     load_totals_model_input,
     settle_total_side,
     summarize_bets,
@@ -119,6 +120,23 @@ def test_totals_model_input_uses_latest_pre_game_prediction(tmp_path):
     assert row["prediction_id"] == 2
     assert row["over_prob"] == 0.60
     assert row["predicted_total_points"] == 226.0
+
+
+def test_quality_loaders_exclude_voided_games_with_retained_scores(tmp_path):
+    db_path = tmp_path / "quality.db"
+    _create_quality_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE predictions SET home_prob = 0.6, away_prob = 0.4, "
+            "home_moneyline = -110, away_moneyline = 120"
+        )
+    assert len(load_totals_model_input(db_path=db_path, leagues=["NBA"])) == 1
+    assert len(load_moneyline_model_input(db_path=db_path, leagues=["NBA"])) == 1
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE games SET status = 'voided'")
+    assert load_totals_model_input(db_path=db_path, leagues=["NBA"]).empty
+    assert load_moneyline_model_input(db_path=db_path, leagues=["NBA"]).empty
 
 
 def test_expand_totals_bets_excludes_pushes_and_calculates_roi(tmp_path):

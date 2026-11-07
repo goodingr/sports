@@ -269,8 +269,9 @@ and the historical quality summary that justified publishing the rule.
 
 ## Promotion Workflow
 
-Promotion requires a passing report for the current rule and launch thresholds.
-A locked rule's sample begins at its recorded lock time.
+Promotion requires a locked candidate with a pinned model SHA-256 and a passing
+report for its current rule and launch thresholds. The qualifying source is
+`existing_predictions`, and its sample begins at the recorded lock time.
 
 ```powershell
 poetry run python -m src.predict.publishable_bets promote `
@@ -283,6 +284,33 @@ If the candidate does not pass, the command exits non-zero and does not edit the
 rules file. Approved rules that later fail the gate produce no paid bets; add
 `disabled: true` or set `status: disabled` in `config/published_rules.yml` to
 turn one off intentionally.
+
+## Issued Pick Record
+
+The publisher commits the active release and the first issued pick per fixture
+and market to SQLite in one transaction. The API reads this committed release.
+The JSON output remains an export for operations.
+
+A paid pick requires model artifact identity and retained quote provenance.
+The observed quote must be an intact pair from the same book and provider
+snapshot, must match the predicted line and price, and must be at most 15 minutes
+old when issued. Untraced legacy rows cannot be issued. Quarter-point totals
+are excluded because the current grader supports integer and half-point totals.
+
+The original price and line remain fixed in the record. Changed prices or
+opposite signals cannot replace an issued selection. Provider aliases representing
+the same ordered teams and nearby start cannot create a second issued bet.
+An active pick expires when its quoted price is stale or superseded.
+
+The publisher grades final results at one unit per issued pick, includes pushes
+in total stake, and excludes voids from ROI. Reschedules, fixture identity
+changes, and quarantined fixtures are voided. Corrected official results update
+the public return while retaining the previous grade in the audit history.
+
+The public `/record` page and `GET /api/bets/record` endpoint use this issued
+ledger. The model-results history remains separate. To revoke the active release
+while preserving previously issued picks, run
+`poetry run python -m src.predict.publishable_bets revoke`.
 
 ## Prospective NBA Paper Trial
 

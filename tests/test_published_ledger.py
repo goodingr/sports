@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from src.db.core import initialize
+from src.predict.published_ledger import load_active_release, publish_release, published_record
+
+
+@pytest.fixture
+def warehouse(tmp_path: Path):
+    path = tmp_path / "published.db"
+    initialize(path)
+    start = datetime.now(timezone.utc) + timedelta(hours=2)
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO sports (sport_id, name, league, default_market) VALUES (1,'NBA','NBA','totals')")
+        conn.execute("INSERT INTO teams (team_id,sport_id,code,name) VALUES (1,1,'H','Home'),(2,1,'A','Away')")
+        conn.execute(
+            "INSERT INTO games (game_id,sport_id,home_team_id,away_team_id,start_time_utc) VALUES ('g',1,1,2,?)",
+            (start.isoformat(),),
+        )
+        conn.execute("INSERT INTO books (book_id,name) VALUES (1,'DraftKings')")
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('quote',?,1,'the-odds-api',NULL)",
+            ((start - timedelta(hours=2, minutes=1)).isoformat(),),
+        )
+        conn.executemany(
+            """
+            INSERT INTO odds (snapshot_id,game_id,book_id,market,outcome,price_american,line)
+            VALUES ('quote','g',1,'totals',?,100,220)
+            """,
+            [("Over",), ("Under",)],
+        )
+    return path, start
+
+
+def release(start):
+    return {
+        "generated_at": (start - timedelta(hours=2)).isoformat(),
+        "passing_approved_rule_ids": ["validated"],
+        "publishable_profitable_list_exists": True,
+        "bets": [{
+            "rule_id": "validated", "game_id": "g", "league": "NBA", "market": "totals",
+            "home_team": "Home", "away_team": "Away", "start_time_utc": start.isoformat(),
+            "side": "over", "total_line": 220.0, "moneyline": 100, "book": "DraftKings",
+            "edge": 0.1, "quality_summary": {"passes_launch_gate": True},
+            "model_probability": 0.6, "market_probability": 0.5,
+            "quote_snapshot_id": "quote", "quote_book_id": 1,
+            "predicted_at": (start - timedelta(hours=2)).isoformat(),
+        }],
+    }
+
+
+def test_published_quote_is_immutable_and_retries_do_not_add_bets(warehouse):
+    path, start = warehouse
+    original = release(start)
+    assert len(publish_release(original, path)["bets"]) == 1
+    assert len(publish_release(original, path)["bets"]) == 1
+    revised = deepcopy(original)
+    revised["bets"][0]["total_line"] = 218.5
+    assert publish_release(revised, path)["bets"] == []
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone() == (1,)
+    assert load_active_release(path)["bets"] == []
+    assert published_record(path)["data"] == []
+
+
+@pytest.mark.parametrize(
+    ("home", "away", "status", "outcome", "profit"),
+    [(115, 110, "final", "win", 1.0), (100, 110, "final", "loss", -1.0),
+     (112, 108, "final", "push", 0.0), (None, None, "voided", "void", 0.0)],
+)
+def test_grading_uses_the_original_quote_and_includes_all_outcomes(
+    warehouse, home, away, status, outcome, profit
+):
+    path, start = warehouse
+    publish_release(release(start), path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = ?", (status,))
+        conn.execute(
+            "INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',?,?)",
+            (home, away),
+        )
+    closed = {"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}
+    publish_release(closed, path)
+    publish_release(closed, path)
+    record = published_record(path)
+    assert record["total"] == 1
+    assert record["data"][0]["total_line"] == 220.0
+    assert record["data"][0]["outcome"] == outcome
+    assert record["profit_units"] == profit
+    assert record["graded_picks"] == int(outcome != "void")
+    assert load_active_release(path)["bets"] == []
+
+
+def test_concurrent_publications_record_one_pick(warehouse):
+    path, start = warehouse
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: publish_release(release(start), path), range(2)))
+    assert all(len(result["bets"]) == 1 for result in results)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone() == (1,)
+
+
+def test_voided_games_disappear_immediately_before_the_next_publish(warehouse):
+    path, start = warehouse
+    publish_release(release(start), path)
+    assert len(load_active_release(path)["bets"]) == 1
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = 'voided'")
+    assert load_active_release(path)["bets"] == []
+
+
+def test_score_corrections_update_returns_and_keep_prior_grading(warehouse):
+    path, start = warehouse
+    publish_release(release(start), path)
+    closed = {"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = 'final'")
+        conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',115,110)")
+    publish_release(closed, path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE game_results SET home_score = 100")
+    publish_release(closed, path)
+    publish_release(closed, path)
+
+    record = published_record(path)
+    assert record["data"][0]["outcome"] == "loss"
+    assert record["profit_units"] == -1.0
+    assert record["grading_corrections"] == 1
+    with sqlite3.connect(path) as conn:
+        assert conn.execute(
+            "SELECT outcome FROM published_settlement_history ORDER BY revision_id"
+        ).fetchall() == [("win",), ("loss",)]
+
+
+def test_quote_provenance_and_half_point_line_required(warehouse):
+    path, start = warehouse
+    missing = release(start)
+    missing["bets"][0].pop("quote_snapshot_id")
+    assert publish_release(missing, path)["bets"] == []
+    quarter_line = release(start)
+    quarter_line["bets"][0]["total_line"] = 220.25
+    assert publish_release(quarter_line, path)["bets"] == []
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM odds")
+    assert publish_release(release(start), path)["bets"] == []
+    assert published_record(path)["published_picks"] == 0
+
+
+def test_alias_fixture_is_not_published_twice(warehouse):
+    path, start = warehouse
+    publish_release(release(start), path)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO games (game_id,sport_id,home_team_id,away_team_id,start_time_utc) VALUES ('alias',1,1,2,?)",
+            (start.isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id,game_id,book_id,market,outcome,price_american,line)
+            SELECT snapshot_id,'alias',book_id,market,outcome,price_american,line FROM odds
+            """
+        )
+    alias = release(start)
+    alias["bets"][0]["game_id"] = "alias"
+    assert publish_release(alias, path)["bets"] == []
+    assert published_record(path)["published_picks"] == 1
+
+
+def test_invalid_nba_final_and_future_corrected_start_do_not_grade(warehouse):
+    path, start = warehouse
+    publish_release(release(start), path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status='final'")
+        conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',0,0)")
+    publish_release({"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}, path)
+    assert published_record(path)["pending_picks"] == 1
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE game_results SET home_score=115, away_score=110")
+        conn.execute("UPDATE games SET start_time_utc=?", ((start + timedelta(minutes=5)).isoformat(),))
+    publish_release({"generated_at": (start + timedelta(minutes=1)).isoformat(), "bets": []}, path)
+    assert published_record(path)["pending_picks"] == 1
+
+
+def test_two_way_moneyline_tie_is_a_push(warehouse):
+    path, start = warehouse
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE sports SET league='NFL'")
+        conn.executemany(
+            """
+            INSERT INTO odds (snapshot_id,game_id,book_id,market,outcome,price_american)
+            VALUES ('quote','g',1,'h2h',?,100)
+            """,
+            [("home",), ("away",)],
+        )
+    moneyline = release(start)
+    moneyline["bets"][0].update(market="moneyline", side="home", total_line=None)
+    assert len(publish_release(moneyline, path)["bets"]) == 1
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status='final'")
+        conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',21,21)")
+    publish_release({"generated_at": (start + timedelta(hours=6)).isoformat(), "bets": []}, path)
+    assert published_record(path)["data"][0]["outcome"] == "push"

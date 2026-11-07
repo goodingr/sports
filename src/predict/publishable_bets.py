@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any, Iterable, Optional
 import pandas as pd
 import yaml
 
-from src.db.core import DB_PATH
+from src.db.core import DB_PATH, resolve_db_path
 from src.models.prediction_quality import (
     DEFAULT_RELEASE_LEAGUES,
     _json_default,
@@ -26,12 +27,14 @@ from src.models.prediction_quality import (
     no_vig_pair,
     rule_is_disabled,
 )
+from src.predict.published_ledger import publish_release
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT = Path("reports/publishable_bets/latest_publishable_bets.json")
 DEFAULT_QUALITY_OUTPUT = Path("reports/publishable_bets/latest_quality_report.json")
 BENCHMARK_METADATA_FIELDS = (
+    "model_sha256",
     "prediction_variant",
     "feature_contract",
     "feature_variant",
@@ -39,6 +42,11 @@ BENCHMARK_METADATA_FIELDS = (
     "timing_bucket",
 )
 LIVE_RULE_ID_FIELDS = ("rule_id", "source_rule_id", "published_rule_id")
+QUOTE_METADATA_FIELDS = (
+    "selected_totals_snapshot_id", "selected_totals_book_id",
+    "selected_h2h_snapshot_id", "selected_h2h_book_id",
+    "totals_model_sha256", "moneyline_model_sha256",
+)
 
 QUALITY_SUMMARY_FIELDS = (
     "bets",
@@ -110,6 +118,7 @@ def load_current_prediction_output(
             "price_mode",
             "timing_bucket",
             "feature_contract",
+            *QUOTE_METADATA_FIELDS,
             *LIVE_RULE_ID_FIELDS,
         )
         if column in prediction_columns
@@ -214,6 +223,9 @@ def _expand_current_totals(predictions: pd.DataFrame) -> pd.DataFrame:
     )
     frame["over_no_vig_market_prob"] = no_vig[0]
     frame["under_no_vig_market_prob"] = no_vig[1]
+    frame["quote_snapshot_id"] = frame.get("selected_totals_snapshot_id")
+    frame["quote_book_id"] = frame.get("selected_totals_book_id")
+    frame["model_sha256"] = frame.get("totals_model_sha256")
 
     rows: list[pd.DataFrame] = []
     for side in ("over", "under"):
@@ -250,6 +262,9 @@ def _expand_current_moneyline(predictions: pd.DataFrame) -> pd.DataFrame:
     )
     frame["home_no_vig_market_prob"] = no_vig[0]
     frame["away_no_vig_market_prob"] = no_vig[1]
+    frame["quote_snapshot_id"] = frame.get("selected_h2h_snapshot_id")
+    frame["quote_book_id"] = frame.get("selected_h2h_book_id")
+    frame["model_sha256"] = frame.get("moneyline_model_sha256")
 
     rows: list[pd.DataFrame] = []
     for side in ("home", "away"):
@@ -299,13 +314,16 @@ def _serialize_bet(
         "league": row.get("league"),
         "game_id": row.get("game_id"),
         "start_time_utc": row.get("start_time_utc"),
+        "predicted_at": row.get("predicted_at"),
+        "quote_snapshot_id": row.get("quote_snapshot_id"),
+        "quote_book_id": _safe_float(row.get("quote_book_id")),
         "home_team": row.get("home_team"),
         "away_team": row.get("away_team"),
         "side": row.get("side"),
         "odds": _safe_float(row.get("moneyline")),
         "moneyline": _safe_float(row.get("moneyline")),
-        "total_line": _safe_float(row.get("total_line", row.get("line"))),
-        "predicted_total_points": _safe_float(row.get("predicted_total_points")),
+        "total_line": _safe_float(row.get("total_line", row.get("line"))) if row.get("market") == "totals" else None,
+        "predicted_total_points": _safe_float(row.get("predicted_total_points")) if row.get("market") == "totals" else None,
         "book": row.get("book"),
         "edge": _safe_float(row.get("edge")),
         "model_probability": _safe_float(row.get("predicted_prob")),
@@ -337,6 +355,8 @@ def _live_metadata_mismatches(current_bets: pd.DataFrame, rule: dict[str, Any]) 
 def _matching_live_rows(
     current_bets: pd.DataFrame, rule: dict[str, Any]
 ) -> tuple[pd.DataFrame, list[str], bool]:
+    if not re.fullmatch(r"[0-9a-f]{64}", str(rule.get("model_sha256", ""))):
+        return current_bets.iloc[0:0], ["model_sha256"], False
     rows = current_bets
     present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in rows]
     missing_matching_id = False
@@ -346,7 +366,7 @@ def _matching_live_rows(
         conflicting_id = (tagged.notna() & ~id_matches.fillna(False)).any(axis=1)
         rows = rows[id_matches.any(axis=1) & ~conflicting_id]
         missing_matching_id = rows.empty
-    elif _required_live_metadata(rule):
+    elif any(field != "model_sha256" for field in _required_live_metadata(rule)):
         missing_matching_id = True
 
     mismatches = _live_metadata_mismatches(rows, rule)
@@ -374,6 +394,28 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
+
+
+def _persist_release(
+    status: dict[str, Any], db_path: Path, output_path: Path
+) -> dict[str, Any]:
+    payload = json.loads(json.dumps(status, default=_json_default, allow_nan=False))
+    released = publish_release(payload, db_path)
+    if released["publishable_profitable_list_exists"]:
+        _write_json(output_path, released)
+    else:
+        _remove_paid_output(output_path)
+    return released
+
+
+def revoke_release(
+    db_path: Path, output_path: Path = DEFAULT_OUTPUT, *, reason: str = "release_revoked"
+) -> dict[str, Any]:
+    return _persist_release({
+        "generated_at": _normalize_now(None).isoformat(),
+        "bets": [], "passing_approved_rule_ids": [],
+        "publishable_profitable_list_exists": False, "reason": reason,
+    }, db_path, output_path)
 
 
 def publishable_bets(
@@ -413,7 +455,7 @@ def publishable_bets(
     ]
 
     status: dict[str, Any] = {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "generated_at": _normalize_now(now).isoformat(),
         "rules_path": str(rules_path),
         "quality_report_path": str(quality_output_path),
         "output_path": str(output_path),
@@ -426,16 +468,14 @@ def publishable_bets(
     }
 
     if not passing_rules:
-        _remove_paid_output(output_path)
         status["reason"] = "no_passing_approved_rule"
-        return status
+        return _persist_release(status, db_path, output_path)
 
     current_predictions = load_current_prediction_output(db_path=db_path, leagues=leagues, now=now)
     current_bets = expand_current_predictions(current_predictions)
     if current_bets.empty:
-        _remove_paid_output(output_path)
         status["reason"] = "no_current_prediction_bets"
-        return status
+        return _persist_release(status, db_path, output_path)
 
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
@@ -463,18 +503,19 @@ def publishable_bets(
             publish_rows.append(_serialize_bet(row, rule, quality_result))
 
     if not publish_rows:
-        _remove_paid_output(output_path)
         if status["skipped_passing_rule_ids"]:
             status["reason"] = "passing_rules_require_benchmarked_live_metadata"
         else:
             status["reason"] = "no_current_bets_matching_passing_rules"
-        return status
+        return _persist_release(status, db_path, output_path)
 
     status["publishable_profitable_list_exists"] = True
     status["bets"] = publish_rows
     status["bet_count"] = len(publish_rows)
-    _write_json(output_path, status)
-    return status
+    released = _persist_release(status, db_path, output_path)
+    if not released["bets"]:
+        released["reason"] = "no_current_bets_matching_original_quotes"
+    return released
 
 
 def _load_or_build_report(
@@ -521,6 +562,10 @@ def promote_candidate_rule(
     )
     if candidate is None:
         raise ValueError(f"Candidate rule not found: {rule_id}")
+    if candidate.get("status") != "locked_candidate" or not candidate.get("locked_at"):
+        raise RuntimeError("Lock the candidate before collecting forward evidence for promotion.")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(candidate.get("model_sha256", ""))):
+        raise RuntimeError("A promotable rule must pin the model artifact by SHA-256.")
 
     report = _load_or_build_report(
         quality_report_path=quality_report_path,
@@ -533,6 +578,8 @@ def promote_candidate_rule(
         raise RuntimeError("Quality report does not use the current launch gate. Regenerate it.")
     passing_sources: list[str] = []
     for source in report.get("evaluation_sources", []):
+        if source.get("source_id") != "existing_predictions":
+            continue
         for result in source.get("rule_results", []):
             if result.get("rule") == candidate and result.get("passes_launch_gate") is True:
                 passing_sources.append(str(source.get("source_id")))
@@ -570,6 +617,7 @@ def _candidate_from_lock_report(report: dict[str, Any], rule_id: str) -> Optiona
         return None
     return {
         "id": rule_id,
+        **({"model_sha256": match["model_sha256"]} if match.get("model_sha256") else {}),
         "status": "locked_candidate",
         "market": match.get("market"),
         "league": match.get("league"),
@@ -647,7 +695,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     publish = subparsers.add_parser("publish", help="Write latest publishable bet list.")
-    publish.add_argument("--db", type=Path, default=DB_PATH)
+    publish.add_argument("--db", type=Path)
     publish.add_argument("--rules", type=Path, default=Path("config/published_rules.yml"))
     publish.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     publish.add_argument("--quality-output", type=Path, default=DEFAULT_QUALITY_OUTPUT)
@@ -691,18 +739,28 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     )
+    revoke = subparsers.add_parser("revoke", help="Revoke active picks while preserving the record.")
+    revoke.add_argument("--db", type=Path)
+    revoke.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    revoke.add_argument("--reason", default="release_revoked")
+    revoke.add_argument("--log-level", default="INFO")
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"publish", "promote", "lock"}:
+    if not raw_args or raw_args[0] not in {"publish", "promote", "lock", "revoke"}:
         raw_args = ["publish", *raw_args]
 
     parser = _build_parser()
     args = parser.parse_args(raw_args)
     logging.basicConfig(level=getattr(logging, args.log_level))
     leagues = _parse_leagues(args.leagues) if hasattr(args, "leagues") else []
+
+    if args.command == "revoke":
+        result = revoke_release(resolve_db_path(args.db), args.output, reason=args.reason)
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
 
     if args.command == "promote":
         try:
@@ -734,15 +792,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(result, indent=2, default=_json_default))
         return 0
 
-    result = publishable_bets(
-        db_path=args.db,
-        rules_path=args.rules,
-        output_path=args.output,
-        quality_output_path=args.quality_output,
-        leagues=leagues,
-        now=args.now,
-        benchmark_prediction_paths=args.benchmark_predictions,
-    )
+    db_path = resolve_db_path(args.db)
+    try:
+        result = publishable_bets(
+            db_path=db_path,
+            rules_path=args.rules,
+            output_path=args.output,
+            quality_output_path=args.quality_output,
+            leagues=leagues,
+            now=args.now,
+            benchmark_prediction_paths=args.benchmark_predictions,
+        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error):
+        LOGGER.exception("Paid-pick publication failed")
+        revoke_release(db_path, args.output, reason="publication_failed")
+        return 1
     if result.get("publishable_profitable_list_exists"):
         LOGGER.info("Wrote %d publishable bets to %s", result.get("bet_count", 0), args.output)
         return 0

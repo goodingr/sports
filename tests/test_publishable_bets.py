@@ -125,6 +125,30 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             """,
             (prediction_id,),
         )
+        conn.executescript(
+            """
+            ALTER TABLE predictions ADD COLUMN selected_totals_snapshot_id TEXT;
+            ALTER TABLE predictions ADD COLUMN selected_totals_book_id INTEGER;
+            ALTER TABLE predictions ADD COLUMN totals_model_sha256 TEXT;
+            UPDATE predictions SET totals_model_sha256 =
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+            CREATE TABLE books (book_id INTEGER PRIMARY KEY, name TEXT);
+            INSERT INTO books VALUES (1, 'DraftKings');
+            CREATE TABLE odds_snapshots (
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT
+            );
+            INSERT INTO odds_snapshots VALUES ('current', '2026-02-01T11:55:00+00:00', 1, 'the-odds-api');
+            CREATE TABLE odds (
+                snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
+                outcome TEXT, price_american REAL, line REAL
+            );
+            INSERT INTO odds VALUES ('current','CUR1',1,'totals','Over',100,210.5);
+            INSERT INTO odds VALUES ('current','CUR1',1,'totals','Under',100,210.5);
+            UPDATE predictions SET selected_totals_snapshot_id = 'current',
+                selected_totals_book_id = 1, predicted_at = '2026-02-01T11:56:00+00:00'
+            WHERE game_id = 'CUR1';
+            """
+        )
 
 
 def _write_rules(path) -> None:
@@ -143,6 +167,7 @@ approved_rules:
     market: totals
     league: NBA
     model_type: ensemble
+    model_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     side: over
     min_edge: 0.05
 candidate_rules: []
@@ -168,6 +193,7 @@ candidate_rules:
     market: totals
     league: NBA
     model_type: ensemble
+    model_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     side: over
     min_edge: 0.05
 """,
@@ -304,6 +330,7 @@ def test_publish_guardrail_blocks_legacy_rows_for_benchmarked_rule(
     output_path = tmp_path / "latest_publishable_bets.json"
     quality_path = tmp_path / "quality.json"
     _write_metadata_approved_rules(rules_path)
+    _create_publish_db(tmp_path / "unused.db", include_history=False)
     output_path.write_text("stale paid list", encoding="utf-8")
 
     monkeypatch.setattr(
@@ -372,9 +399,10 @@ def test_live_matching_requires_contract_and_rule_id_on_each_pick():
             {"game_id": "matched", "rule_id": "current", "feature_contract": "canonical"},
         ]
     )
+    frame["model_sha256"] = "a" * 64
 
     matching, mismatches, missing_id = publisher._matching_live_rows(
-        frame, {"id": "current", "feature_contract": "canonical"}
+        frame, {"id": "current", "feature_contract": "canonical", "model_sha256": "a" * 64}
     )
 
     assert matching["game_id"].tolist() == ["matched"]
@@ -392,6 +420,13 @@ def test_locked_rule_evidence_excludes_prelock_predictions():
     assert publisher.filter_bets_for_rule(bets, rule)["game_id"].tolist() == ["after"]
 
 
+def test_retrospective_candidate_cannot_be_promoted_without_a_forward_lock(tmp_path):
+    rules = tmp_path / "rules.yml"
+    _write_candidate_rules(rules)
+    with pytest.raises(RuntimeError, match="Lock the candidate"):
+        promote_candidate_rule(rule_id="nba_totals_candidate", rules_path=rules)
+
+
 def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     failing_db = tmp_path / "failing.db"
     passing_db = tmp_path / "passing.db"
@@ -399,6 +434,12 @@ def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     _create_publish_db(failing_db, include_history=False)
     _create_publish_db(passing_db, include_history=True)
     _write_candidate_rules(rules_path)
+    config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    config["locked_candidate_rules"] = [
+        {**config["candidate_rules"][0], "status": "locked_candidate", "locked_at": "2026-01-01T00:00:00Z"}
+    ]
+    config["candidate_rules"] = []
+    rules_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     with pytest.raises(RuntimeError):
         promote_candidate_rule(
@@ -409,7 +450,7 @@ def test_promote_candidate_rule_requires_passing_gate(tmp_path):
         )
     failed_config = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
     assert failed_config["approved_rules"] == []
-    assert failed_config["candidate_rules"][0]["id"] == "nba_totals_candidate"
+    assert failed_config["locked_candidate_rules"][0]["id"] == "nba_totals_candidate"
 
     result = promote_candidate_rule(
         rule_id="nba_totals_candidate",

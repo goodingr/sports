@@ -137,6 +137,12 @@ def _league_filter_sql(leagues: Optional[Iterable[str]]) -> tuple[str, list[str]
     return f" AND UPPER(s.league) IN ({placeholders})", normalized
 
 
+def _prediction_digest_column(db_path: Path, column: str) -> str:
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(predictions)")}
+    return f"p.{column}" if column in columns else "NULL"
+
+
 def _coerce_prediction_times(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["predicted_at"] = pd.to_datetime(df["predicted_at"], utc=True, errors="coerce")
@@ -163,11 +169,13 @@ def load_totals_model_input(
     before game start.
     """
     league_sql, params = _league_filter_sql(leagues)
+    digest = _prediction_digest_column(db_path, "totals_model_sha256")
     query = f"""
         SELECT
             p.prediction_id,
             p.game_id,
             p.model_type,
+            {digest} AS model_sha256,
             p.predicted_at,
             p.total_line,
             p.over_prob,
@@ -190,6 +198,7 @@ def load_totals_model_input(
         JOIN game_results gr ON p.game_id = gr.game_id
         WHERE gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
+          AND g.status = 'final'
           AND p.total_line IS NOT NULL
           AND p.over_prob IS NOT NULL
           AND p.under_prob IS NOT NULL
@@ -243,11 +252,13 @@ def load_moneyline_model_input(
 ) -> pd.DataFrame:
     """Load canonical settled moneyline model input from SQLite."""
     league_sql, params = _league_filter_sql(leagues)
+    digest = _prediction_digest_column(db_path, "moneyline_model_sha256")
     query = f"""
         SELECT
             p.prediction_id,
             p.game_id,
             p.model_type,
+            {digest} AS model_sha256,
             p.predicted_at,
             p.home_prob,
             p.away_prob,
@@ -269,6 +280,7 @@ def load_moneyline_model_input(
         JOIN game_results gr ON p.game_id = gr.game_id
         WHERE gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
+          AND g.status = 'final'
           AND p.home_prob IS NOT NULL
           AND p.away_prob IS NOT NULL
           AND p.home_moneyline IS NOT NULL
@@ -558,6 +570,7 @@ def _empty_like(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 RULE_EXACT_MATCH_FIELDS = (
+    "model_sha256",
     "prediction_variant",
     "price_mode",
     "timing_bucket",

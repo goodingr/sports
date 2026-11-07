@@ -298,28 +298,24 @@ def test_premium_history_excludes_unsettled_games(api_client, monkeypatch):
     assert "completed-game" in game_ids
 
 
-def test_loader_returns_empty_when_publishable_file_absent(monkeypatch, tmp_path):
-    missing_path = tmp_path / "missing.json"
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", missing_path)
+def test_loader_returns_empty_without_a_committed_release(monkeypatch):
+    monkeypatch.setattr(bets, "load_active_release", lambda _: {})
 
     assert bets._load_gated_publishable_bets() == {}
 
 
-def test_loader_returns_empty_when_gate_did_not_pass(monkeypatch, tmp_path):
-    path = tmp_path / "latest_publishable_bets.json"
-    path.write_text(
-        json.dumps({"publishable_profitable_list_exists": False, "bets": []}),
-        encoding="utf-8",
+def test_loader_returns_empty_when_gate_did_not_pass(monkeypatch):
+    monkeypatch.setattr(
+        bets, "load_active_release",
+        lambda _: {"publishable_profitable_list_exists": False, "bets": []},
     )
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
 
     assert bets._load_gated_publishable_bets() == {}
 
 
-def test_loader_keys_bets_by_game_market_side(monkeypatch, tmp_path):
-    path = tmp_path / "latest_publishable_bets.json"
-    path.write_text(
-        json.dumps(
+def test_loader_keys_bets_by_game_market_side(monkeypatch):
+    monkeypatch.setattr(
+        bets, "load_active_release", lambda _:
             {
                 "publishable_profitable_list_exists": True,
                 "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
@@ -335,10 +331,7 @@ def test_loader_keys_bets_by_game_market_side(monkeypatch, tmp_path):
                     },
                 ],
             }
-        ),
-        encoding="utf-8",
     )
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
 
     keyed = bets._load_gated_publishable_bets()
     assert ("G1", "totals", "over") in keyed
@@ -363,9 +356,7 @@ def test_checkout_availability_uses_current_passing_feed(
             "quality_summary": {"passes_launch_gate": True},
         }],
     }
-    path = tmp_path / "latest_publishable_bets.json"
-    path.write_text(json.dumps(artifact), encoding="utf-8")
-    monkeypatch.setattr(bets, "PUBLISHABLE_BETS_PATH", path)
+    monkeypatch.setattr(bets, "load_active_release", lambda _: artifact)
 
     response = api_client.get("/api/bets/access")
 
