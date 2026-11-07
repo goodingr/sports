@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import Stripe from "stripe";
+import { paidInvoiceFixture } from "@/lib/stripe-paid-invoice.fixture";
 
 vi.mock("server-only", () => ({}));
 
@@ -42,12 +43,22 @@ function makeStripeWithMocks(opts: {
     subscriptions?: Record<string, Stripe.Subscription>;
     customers?: Record<string, Stripe.Customer | Stripe.DeletedCustomer>;
     account?: string;
+    invoices?: ReturnType<typeof paidInvoiceFixture>[];
 }): Stripe {
     const real = new Stripe("sk_test_dummy", { typescript: true });
     const subs = opts.subscriptions ?? {};
     const customers = opts.customers ?? { cus_test: makeCustomer() };
     Object.assign(real, {
         accounts: { retrieve: async () => ({ id: opts.account ?? 'acct_fixture' }) },
+        invoices: {
+            list: async ({ subscription, status }: Stripe.InvoiceListParams) => {
+                expect(status).toBe("paid");
+                if (opts.invoices) return { data: opts.invoices, has_more: false };
+                const sub = subs[subscription ?? ""];
+                const item = sub?.items.data.find(({ price }) => price.id === PRICE_ID);
+                return { data: sub && item ? [paidInvoiceFixture(sub, item)] : [], has_more: false };
+            },
+        },
         subscriptions: {
             retrieve: async (id: string) => {
                 if (!subs[id]) throw new Error(`subscription not found: ${id}`);
@@ -152,6 +163,39 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("POST /api/webhooks/stripe", () => {
+    it("does not extend an active subscription on a signed failed live renewal", async () => {
+        vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_webhook_fixture");
+        try {
+            const users = makeUsers();
+            setClerkForTests(makeFakeClerk(users) as never);
+            const now = Date.now() / 1000;
+            Object.assign(users.user_clerk_1.publicMetadata, {
+                is_premium: true, subscription_current_period_end: now,
+                stripe_customer_account_id: "acct_fixture", stripe_customer_livemode: true,
+                stripe_entitlement: { account_id: "acct_fixture", customer_id: "cus_test", livemode: true, price_id: PRICE_ID },
+            });
+            const sub = makeSubscription({ livemode: true, latest_invoice: "in_failed_renewal" });
+            const item = sub.items.data[0];
+            const previous = paidInvoiceFixture(sub, item, now - 3600, now);
+            const open = { ...paidInvoiceFixture(sub, item, now), id: sub.latest_invoice as string, status: "open", amount_paid: 0 };
+            const stripe = makeStripeWithMocks({
+                subscriptions: { sub_test: sub },
+                customers: { cus_test: makeCustomer({ livemode: true }) },
+                invoices: [open, previous],
+            });
+            setStripeForTests(stripe);
+
+            const response = await POST(signedRequest(stripe, {
+                id: "evt_failed_renewal", livemode: true, type: "invoice.payment_failed", data: { object: open },
+            }));
+            expect(response.status).toBe(200);
+            expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
+            expect(users.user_clerk_1.publicMetadata.subscription_current_period_end).toBeUndefined();
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("rejects requests with an invalid signature", async () => {
         setStripeForTests(makeStripeWithMocks({}));
         const body = JSON.stringify({ id: "evt_x", type: "checkout.session.completed" });

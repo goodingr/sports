@@ -13,6 +13,7 @@ import {
     setStripeForTests,
     type StripeScope,
     snapshotFromSubscription,
+    subscriptionItemForPrice,
 } from "./billing";
 
 const scope: StripeScope = { account: 'acct_test', livemode: false, priceId: 'price_test' };
@@ -61,12 +62,17 @@ function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.
             data: [
                 {
                     id: "si_1",
+                    price: { id: scope.priceId },
                     current_period_end: 1_800_000_000,
                 } as unknown as Stripe.SubscriptionItem,
             ],
         },
         ...overrides,
     } as unknown as Stripe.Subscription;
+}
+
+function paidSnapshot(sub: Stripe.Subscription, price = scope.priceId) {
+    return snapshotFromSubscription(sub, subscriptionItemForPrice(sub, price), 1_800_000_000);
 }
 
 beforeEach(() => {
@@ -148,18 +154,18 @@ describe("isPremiumStatus", () => {
 
 describe("snapshotFromSubscription", () => {
     it("captures status, customer, period end", () => {
-        const snap = snapshotFromSubscription(makeSubscription());
+        const snap = paidSnapshot(makeSubscription());
         expect(snap.is_premium).toBe(true);
         expect(snap.subscription_status).toBe("active");
         expect(snap.stripe_customer_id).toBe("cus_abc");
         expect(snap.subscription_current_period_end).toBe(1_800_000_000);
     });
     it("returns is_premium=false for past_due", () => {
-        const snap = snapshotFromSubscription(makeSubscription({ status: "past_due" }));
+        const snap = paidSnapshot(makeSubscription({ status: "past_due" }));
         expect(snap.is_premium).toBe(false);
     });
     it('retains access through a scheduled cancellation and records the end date', () => {
-        const snap = snapshotFromSubscription(makeSubscription({
+        const snap = paidSnapshot(makeSubscription({
             cancel_at_period_end: true,
             cancel_at: 1_790_000_000,
         }));
@@ -170,24 +176,24 @@ describe("snapshotFromSubscription", () => {
 
     it("limits an authorized trial to its explicit end", () => {
         const trial = makeSubscription({ status: "trialing", trial_end: NOW + 100 });
-        expect(snapshotFromSubscription(trial)).toMatchObject({
+        expect(paidSnapshot(trial)).toMatchObject({
             is_premium: true, subscription_current_period_end: NOW + 100,
         });
         vi.setSystemTime((NOW + 100) * 1000);
-        expect(snapshotFromSubscription(trial).is_premium).toBe(false);
-        expect(snapshotFromSubscription(makeSubscription({ status: "trialing", trial_end: null })).is_premium).toBe(false);
+        expect(paidSnapshot(trial).is_premium).toBe(false);
+        expect(paidSnapshot(makeSubscription({ status: "trialing", trial_end: null })).is_premium).toBe(false);
     });
 
     it("needs the exact product item with a valid end", () => {
         const sub = makeSubscription();
         sub.items.data[0].price = { id: "price_other" } as Stripe.Price;
         Object.assign(sub, { current_period_end: NOW + 1000 });
-        expect(snapshotFromSubscription(sub, scope.priceId)).toMatchObject({
+        expect(paidSnapshot(sub, scope.priceId)).toMatchObject({
             is_premium: false, subscription_current_period_end: null,
         });
         sub.items.data[0].price.id = scope.priceId;
         sub.items.data[0].current_period_end = Infinity;
-        expect(snapshotFromSubscription(sub, scope.priceId)).toMatchObject({
+        expect(paidSnapshot(sub, scope.priceId)).toMatchObject({
             is_premium: false, subscription_current_period_end: null,
         });
     });
@@ -219,7 +225,7 @@ describe("applySnapshot", () => {
         setClerkForTests(makeFakeClerk(users) as never);
         const changed = await applySnapshot(
             "user_clerk_1",
-            snapshotFromSubscription(makeSubscription()),
+            paidSnapshot(makeSubscription()),
             "evt_1", scope,
         );
         expect(changed).toBe(true);
@@ -238,7 +244,7 @@ describe("applySnapshot", () => {
             user_clerk_1: {
                 id: "user_clerk_1",
                 publicMetadata: {
-                    ...snapshotFromSubscription(makeSubscription()),
+                    ...paidSnapshot(makeSubscription()),
                     stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
                     stripe_entitlement: { customer_id: 'cus_abc', account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId },
                 },
@@ -248,7 +254,7 @@ describe("applySnapshot", () => {
         setClerkForTests(makeFakeClerk(users) as never);
         const changed = await applySnapshot(
             "user_clerk_1",
-            snapshotFromSubscription(makeSubscription()),
+            paidSnapshot(makeSubscription()),
             "evt_dup", scope,
         );
         expect(changed).toBe(false);
@@ -290,7 +296,7 @@ describe("applySnapshot", () => {
             user_clerk_1: {
                 id: 'user_clerk_1',
                 publicMetadata: {
-                    ...snapshotFromSubscription(makeSubscription()),
+                    ...paidSnapshot(makeSubscription()),
                     stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
                     stripe_entitlement: { customer_id: 'cus_abc', account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId },
                 },

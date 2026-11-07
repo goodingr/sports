@@ -116,7 +116,7 @@ function isStripeCustomerId(value: unknown): value is string {
     return typeof value === "string" && /^cus_[A-Za-z0-9_]+$/.test(value);
 }
 
-function isBillingEnd(value: unknown): value is number {
+export function isBillingTimestamp(value: unknown): value is number {
     return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
@@ -131,7 +131,7 @@ function hasScopedProof(metadata: Record<string, unknown>, scope: StripeScope): 
 
 export function hasScopedPremium(metadata: Record<string, unknown>, scope: StripeScope | null): boolean {
     const periodEnd = metadata.subscription_current_period_end;
-    return !!scope && metadata.is_premium === true && isBillingEnd(periodEnd)
+    return !!scope && metadata.is_premium === true && isBillingTimestamp(periodEnd)
         && periodEnd > Date.now() / 1000 && hasScopedProof(metadata, scope);
 }
 
@@ -188,19 +188,25 @@ function customerIdOf(sub: Stripe.Subscription): string | null {
     return typeof sub.customer === "string" ? sub.customer : sub.customer.id;
 }
 
-function periodEndOf(sub: Stripe.Subscription, priceId?: string): number | null {
-    const items = sub.items?.data;
-    const item = priceId ? items?.find(({ price }) => price?.id === priceId) : items?.[0];
-    const periodEnd = item?.current_period_end;
-    if (!isBillingEnd(periodEnd)) return null;
-    const cancelAt = sub.cancel_at ?? periodEnd;
-    const trialEnd = sub.status === "trialing" ? sub.trial_end : periodEnd;
-    if (!isBillingEnd(cancelAt) || !isBillingEnd(trialEnd)) return null;
-    return Math.min(periodEnd, cancelAt, trialEnd);
+export function subscriptionItemForPrice(sub: Stripe.Subscription, priceId: string): Stripe.SubscriptionItem | undefined {
+    const items = sub.items?.data.filter(({ price }) => price?.id === priceId);
+    const item = sub.items?.has_more !== true && items?.length === 1 ? items[0] : undefined;
+    return item && /^si_[A-Za-z0-9_]+$/.test(item.id) ? item : undefined;
 }
 
-export function snapshotFromSubscription(sub: Stripe.Subscription, priceId?: string): PremiumSnapshot {
-    const periodEnd = periodEndOf(sub, priceId);
+function periodEndOf(sub: Stripe.Subscription, item: Stripe.SubscriptionItem | undefined, paidThrough: number | null): number | null {
+    const periodEnd = item?.current_period_end;
+    if (!isBillingTimestamp(periodEnd)) return null;
+    const cancelAt = sub.cancel_at ?? periodEnd;
+    const verifiedEnd = sub.status === "trialing" ? sub.trial_end : paidThrough;
+    if (!isBillingTimestamp(cancelAt) || !isBillingTimestamp(verifiedEnd)) return null;
+    return Math.min(periodEnd, cancelAt, verifiedEnd);
+}
+
+export function snapshotFromSubscription(
+    sub: Stripe.Subscription, item: Stripe.SubscriptionItem | undefined, paidThrough: number | null,
+): PremiumSnapshot {
+    const periodEnd = periodEndOf(sub, item, paidThrough);
     return {
         is_premium: isPremiumStatus(sub.status) && periodEnd !== null && periodEnd > Date.now() / 1000,
         subscription_status: sub.status,

@@ -7,12 +7,17 @@ import {
     configuredStripeScope,
     getStoredCustomerId,
     getVerifiedStripeAccount,
+    isBillingTimestamp,
     ownsStripeCustomer,
     revokedSnapshot,
     snapshotFromSubscription,
+    subscriptionItemForPrice,
     type PremiumSnapshot,
     type StripeScope,
 } from "./billing";
+
+const PAID_INVOICE_LIMIT = 12;
+const INVOICE_LINE_LIMIT = 100;
 
 export function resourceId(resource: string | { id: string } | null): string | null {
     return typeof resource === "string" ? resource : resource?.id ?? null;
@@ -23,7 +28,78 @@ export function isCheckoutSessionId(value: unknown): value is string {
 }
 
 function hasPrice(sub: Stripe.Subscription, priceId: string): boolean {
-    return sub.items.data.some((item) => item.price.id === priceId);
+    return subscriptionItemForPrice(sub, priceId) !== undefined;
+}
+
+function hasPositiveLineAmount(line: Stripe.InvoiceLineItem): boolean {
+    let remaining = line.amount;
+    if (!Number.isSafeInteger(remaining) || remaining <= 0) return false;
+    for (const discount of line.discount_amounts ?? []) {
+        if (!Number.isSafeInteger(discount.amount) || discount.amount < 0) return false;
+        remaining -= discount.amount;
+        if (remaining <= 0) return false;
+    }
+    return true;
+}
+
+function paidServiceLineEnd(
+    line: Stripe.InvoiceLineItem, invoice: Stripe.Invoice, sub: Stripe.Subscription,
+    item: Stripe.SubscriptionItem, now: number,
+): number | null {
+    const parent = line.parent?.type === "subscription_item_details" ? line.parent.subscription_item_details : null;
+    const subscription = resourceId(line.subscription);
+    const { start, end } = line.period ?? {};
+    if (
+        // Embedded lines and the invoice-specific lines endpoint establish membership.
+        // Stripe can omit redundant references, but contradictory ones invalidate the line.
+        (line.invoice != null && line.invoice !== invoice.id)
+        || line.livemode !== sub.livemode || line.currency !== CHECKOUT_CURRENCY
+        || !hasPositiveLineAmount(line)
+        || parent?.proration !== false || parent.subscription_item !== item.id
+        || (parent.subscription != null && parent.subscription !== sub.id)
+        || (subscription !== null && subscription !== sub.id)
+        || line.pricing?.type !== "price_details" || line.pricing.price_details?.price !== item.price.id
+        || !isBillingTimestamp(start) || !isBillingTimestamp(end) || start > now || end <= now
+    ) return null;
+    return end;
+}
+
+async function verifiedPaidThrough(
+    stripe: Stripe, sub: Stripe.Subscription, item: Stripe.SubscriptionItem, customerId: string,
+): Promise<number | null> {
+    const invoices = await stripe.invoices.list({
+        customer: customerId, subscription: sub.id, status: "paid", limit: PAID_INVOICE_LIMIT,
+    });
+    const now = Date.now() / 1000;
+    let paidThrough: number | null = null;
+    for (const invoice of invoices.data) {
+        const subscription = invoice.parent?.type === "subscription_details"
+            ? resourceId(invoice.parent.subscription_details?.subscription ?? null) : null;
+        const paidAt = invoice.status_transitions?.paid_at;
+        if (
+            !/^in_[A-Za-z0-9_]+$/.test(invoice.id)
+            || invoice.status !== "paid" || invoice.currency !== CHECKOUT_CURRENCY
+            || !Number.isSafeInteger(invoice.amount_paid) || invoice.amount_paid <= 0
+            || !isBillingTimestamp(paidAt) || paidAt > now
+            || invoice.livemode !== sub.livemode || resourceId(invoice.customer) !== customerId
+            || subscription !== sub.id
+            || !invoice.lines || typeof invoice.lines.has_more !== "boolean"
+        ) continue;
+        const lines = invoice.lines.has_more
+            ? await stripe.invoices.listLineItems(invoice.id, { limit: INVOICE_LINE_LIMIT })
+                .autoPagingToArray({ limit: INVOICE_LINE_LIMIT + 1 })
+            : invoice.lines.data;
+        if (lines.length > INVOICE_LINE_LIMIT) throw new Error("Stripe invoice line verification exceeded its limit");
+        for (const line of lines) {
+            const end = paidServiceLineEnd(line, invoice, sub, item, now);
+            if (end !== null) paidThrough = Math.max(paidThrough ?? end, end);
+        }
+        if (paidThrough !== null && paidThrough >= item.current_period_end) break;
+    }
+    if (paidThrough === null && invoices.has_more) {
+        throw new Error("Stripe paid invoice verification exceeded its limit");
+    }
+    return paidThrough;
 }
 
 export async function reconcilePaidCheckoutReturn(
@@ -154,7 +230,14 @@ async function currentCustomerState(
         }
     }
     subscriptions.sort((left, right) => right.created - left.created);
-    const snapshots = subscriptions.map((sub) => ({ sub, snapshot: snapshotFromSubscription(sub, priceId) }));
+    const snapshots = [];
+    for (const sub of subscriptions) {
+        const item = subscriptionItemForPrice(sub, priceId);
+        const paidThrough = sub.status === "active" && item
+            && isBillingTimestamp(item.current_period_end) && item.current_period_end > Date.now() / 1000
+            ? await verifiedPaidThrough(stripe, sub, item, customerId) : null;
+        snapshots.push({ sub, snapshot: snapshotFromSubscription(sub, item, paidThrough) });
+    }
     const current = snapshots.find(({ snapshot }) => snapshot.is_premium) ?? snapshots[0];
     return {
         snapshot: current?.snapshot ?? revokedSnapshot(customerId, "canceled"),

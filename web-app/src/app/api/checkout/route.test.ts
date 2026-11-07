@@ -9,6 +9,7 @@ import { POST as billingPortal } from '@/app/api/billing/portal/route';
 import { POST as stripeWebhook } from '@/app/api/webhooks/stripe/route';
 import { configuredStripeScope, getClerk, getStripe, hasScopedPremium, setClerkForTests } from '@/lib/billing';
 import { CheckoutStore, type CheckoutSessionParams } from '@/lib/checkout-store';
+import { paidInvoiceFixture } from '@/lib/stripe-paid-invoice.fixture';
 import { POST } from './route';
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: vi.fn(), currentUser: vi.fn() }));
@@ -55,6 +56,7 @@ const retrieveSession = vi.fn();
 const listSessions = vi.fn();
 const listSubscriptions = vi.fn();
 const retrieveSubscription = vi.fn();
+const listInvoices = vi.fn();
 const createPortalSession = vi.fn();
 const updateMetadata = vi.fn();
 const sessions = new Map<string, Session>();
@@ -101,11 +103,12 @@ async function completeCheckout() {
     const sub = {
         id: 'sub_test', customer: session.customer, status: 'active', livemode: session.livemode,
         created: 1_800_000_000, metadata: session.metadata,
-        items: { data: [{ price: { id: validPrice.id }, current_period_end: 1_803_000_000 }] },
+        items: { data: [{ id: 'si_test', price: { id: validPrice.id }, current_period_end: 1_803_000_000 }] },
     };
     Object.assign(session, { status: 'complete', subscription: sub.id, payment_status: 'paid' });
     retrieveSubscription.mockResolvedValue(sub);
     listSubscriptions.mockImplementation(({ customer }) => records(customer === sub.customer ? [sub] : []));
+    listInvoices.mockResolvedValue({ data: [paidInvoiceFixture(sub, sub.items.data[0])], has_more: false });
     return { session, sub };
 }
 
@@ -148,6 +151,7 @@ beforeEach(() => {
         customers: { create: createCustomer, retrieve: retrieveCustomer },
         checkout: { sessions: { create: createSession, retrieve: retrieveSession, list: listSessions } },
         subscriptions: { list: listSubscriptions, retrieve: retrieveSubscription },
+        invoices: { list: listInvoices },
         billingPortal: { sessions: { create: createPortalSession } },
         webhooks,
     } as unknown as ReturnType<typeof getStripe>);
@@ -168,6 +172,7 @@ beforeEach(() => {
     retrieveSession.mockImplementation(async (id) => sessions.get(id));
     listSessions.mockImplementation(({ customer }) => records([...sessions.values()].filter((session) => session.customer === customer)));
     listSubscriptions.mockImplementation(() => records([]));
+    listInvoices.mockResolvedValue({ data: [], has_more: false });
     createPortalSession.mockResolvedValue({ url: 'https://billing.stripe.com/session/fixture' });
 });
 
@@ -377,9 +382,10 @@ describe('POST /api/checkout', () => {
         const sub = {
             id: 'sub_existing', customer: 'cus_legacy', status: 'active', livemode: true,
             created: 1_800_000_000, metadata: { userId: scope.userId },
-            items: { data: [{ price: { id: 'price_live' }, current_period_end: 1_803_000_000 }] },
+            items: { data: [{ id: 'si_legacy', price: { id: 'price_live' }, current_period_end: 1_803_000_000 }] },
         };
         listSubscriptions.mockImplementation(() => records([sub]));
+        listInvoices.mockResolvedValue({ data: [paidInvoiceFixture(sub, sub.items.data[0])], has_more: false });
 
         expect((await POST()).status).toBe(409);
         expect(retrieveCustomer).toHaveBeenCalledWith('cus_legacy');
@@ -527,6 +533,17 @@ describe('authenticated Checkout return', () => {
         const { session, sub } = await completeCheckout();
         listSubscriptions.mockImplementation(() => records([{ ...sub, id: 'sub_other' }]));
 
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+        expect(metadata.is_premium).toBeUndefined();
+    });
+
+    it('does not let an old paid Checkout session substitute for current paid service', async () => {
+        const { session, sub } = await completeCheckout();
+        const item = sub.items.data[0];
+        listInvoices.mockResolvedValue({
+            data: [paidInvoiceFixture(sub, item, 1_770_000_000, 1_780_000_000)],
+            has_more: false,
+        });
         expect(await reconcileCheckoutReturn(session.id)).toBe(false);
         expect(metadata.is_premium).toBeUndefined();
     });
