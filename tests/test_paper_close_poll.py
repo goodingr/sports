@@ -135,6 +135,12 @@ def test_quota_reserve_fails_closed(warehouse, monkeypatch, quota):
         assert not paper_close_poll._has_table(conn, "paper_close_requests")
 
 
+@pytest.mark.parametrize(("remaining", "expected"), [("201", None), ("202", "test-key")])
+def test_two_credit_entry_quote_preserves_reserve(warehouse, monkeypatch, remaining, expected):
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: FakeResponse(remaining))
+    assert paper_close_poll._budgeted_key(request_credits=2) == expected
+
+
 def test_low_active_key_uses_another_budget_without_changing_active_index(warehouse, monkeypatch):
     keys = ["healthy-first", "low-active", "later-healthy"]
     monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: keys)

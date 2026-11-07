@@ -183,7 +183,7 @@ def _provider_get(
     return response
 
 
-def _budgeted_key() -> str | None:
+def _budgeted_key(*, request_credits: int = 1) -> str | None:
     keys = OddsAPIKeyManager.get_available_keys()
     index = OddsAPIKeyManager.get_current_index()
     if not 0 <= index < len(keys):
@@ -199,7 +199,7 @@ def _budgeted_key() -> str | None:
             return None
         if remaining < 0:
             return None
-        if remaining >= _CREDIT_RESERVE + 1:
+        if remaining >= _CREDIT_RESERVE + request_credits:
             return key
     return None
 
