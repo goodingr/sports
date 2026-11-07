@@ -8,8 +8,10 @@ export default function Home() {
       <Container className="mt-12">
         <div className="max-w-3xl mx-auto space-y-8">
           <PublishedRecord summary />
-          <div id="model-history" className="scroll-mt-20">
-            <BetFeed />
+          <div id="upcoming-picks" className="scroll-mt-20">
+            <div id="model-history" className="scroll-mt-20">
+              <BetFeed />
+            </div>
           </div>
         </div>
       </Container>

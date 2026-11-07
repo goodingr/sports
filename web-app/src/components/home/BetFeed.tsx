@@ -46,12 +46,13 @@ export function BetFeed() {
     const isPremium = apiPremium === true;
 
     useEffect(() => {
-        function openModelHistory() {
+        function openLinkedTab() {
             if (window.location.hash === '#model-history') setActiveTab('history');
+            else if (window.location.hash === '#upcoming-picks') setActiveTab('upcoming');
         }
-        openModelHistory();
-        window.addEventListener('hashchange', openModelHistory);
-        return () => window.removeEventListener('hashchange', openModelHistory);
+        openLinkedTab();
+        window.addEventListener('hashchange', openLinkedTab);
+        return () => window.removeEventListener('hashchange', openLinkedTab);
     }, []);
 
     useEffect(() => {

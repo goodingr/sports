@@ -62,6 +62,20 @@ test.describe('Homepage', () => {
         await expect(published.getByText('4.8%', { exact: true })).toHaveCount(0);
     });
 
+    test('opens the subscriber pick destination after model history', async ({ page }) => {
+        await mockBetsRoutes(page, { premium: true });
+        await page.route('**/api/bets/record?**', route => route.fulfill({ json: emptyPublishedRecord }));
+        await page.goto('/#model-history');
+        await expect(page.getByRole('tab', { name: 'Model history' })).toHaveAttribute('aria-selected', 'true');
+
+        await page.evaluate(() => { window.location.hash = 'upcoming-picks'; });
+
+        const picks = page.locator('#upcoming-picks');
+        await expect(picks.getByRole('tab', { name: 'Upcoming picks' })).toHaveAttribute('aria-selected', 'true');
+        await expect(picks.getByRole('tab', { name: 'Upcoming picks' })).toBeInViewport();
+        await expect(picks.getByText('Mock Home FC')).toBeVisible();
+    });
+
     test('distinguishes an unavailable issued record from an empty record', async ({ page }) => {
         await mockBetsRoutes(page);
         await page.route('**/api/bets/record?**', route => route.fulfill({ status: 503, body: 'Unavailable' }));

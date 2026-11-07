@@ -72,17 +72,27 @@ describe("account checkout return", () => {
         const stale = renderToStaticMarkup(await AccountPage(props));
         expect(stale).toContain("No active subscription");
         expect(stale).toContain("Billing confirmation is pending");
+        expect(stale).not.toContain("View upcoming picks");
 
         publicMetadata.stripe_customer_livemode = true;
         Object.assign(publicMetadata.stripe_entitlement, { livemode: true, price_id: "price_live" });
         const current = renderToStaticMarkup(await AccountPage(props));
         expect(current).toContain("Subscription confirmed.");
         expect(current).toContain("Pro Access");
+        expect(current).toContain('href="/#upcoming-picks"');
+        expect(current).toContain("View upcoming picks");
+
+        const checkoutReturn = renderToStaticMarkup(await AccountPage({
+            searchParams: Promise.resolve({ success: "true", session_id: "cs_live_checkout" }),
+        }));
+        expect(checkoutReturn).toContain('href="/#upcoming-picks"');
+        expect(reconcileCheckoutReturn).not.toHaveBeenCalled();
 
         publicMetadata.subscription_current_period_end = Math.floor(Date.now() / 1000);
         const expired = renderToStaticMarkup(await AccountPage(props));
         expect(expired).toContain("No active subscription");
         expect(expired).toContain("Refresh subscription status");
         expect(expired).not.toContain("Pro Access");
+        expect(expired).not.toContain("View upcoming picks");
     });
 });

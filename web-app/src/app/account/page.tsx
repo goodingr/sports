@@ -105,6 +105,14 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 </dl>
 
                 <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                    {isPremium && (
+                        <Link
+                            href="/#upcoming-picks"
+                            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-white/20 px-6 py-3 font-bold text-foreground hover:bg-white/5 transition-colors"
+                        >
+                            View upcoming picks
+                        </Link>
+                    )}
                     {hasCustomer ? (
                         <ManageSubscriptionButton />
                     ) : (
