@@ -225,16 +225,9 @@ jobs:
           PLAYWRIGHT_PILOT: '1'
         run: npm run test:e2e
 
-      - name: Interest pilot production build
-        env:
-          COMMERCIAL_PILOT_ONLY: 'true'
-          COMMERCIAL_PILOT_MODE: preview
-          COMMERCIAL_INTEREST_ENABLED: 'true'
-          COMMERCIAL_INTEREST_ENROLLMENT_CLOSED: 'false'
-          COMMERCIAL_PILOT_CONTACT_EMAIL: pilot-contact@example.invalid
-          NEXT_PUBLIC_APP_URL: https://pilot.example.invalid
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
-        run: npm run build
+      - name: Interest pilot production consent smoke
+        timeout-minutes: 5
+        run: npm run test:pilot:production
 
       - name: Validate interest pilot Compose configuration
         working-directory: .
