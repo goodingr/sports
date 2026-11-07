@@ -154,6 +154,24 @@ def test_push_loss_void_and_pending_are_distinct(ledger):
     }
 
 
+@pytest.mark.parametrize("previously_graded", [False, True])
+def test_explicitly_voided_fixture_gets_a_void_grade(ledger, previously_graded):
+    _decision(ledger, "game")
+    first = START + timedelta(hours=3)
+    if previously_graded:
+        assert settle_open_trials(ledger, first) == 1
+    ledger.execute("UPDATE games SET status = 'voided' WHERE game_id = 'game'")
+
+    observed = first + timedelta(hours=1)
+    assert settle_open_trials(ledger, observed) == 1
+    grade = grades_as_of(ledger, "pilot", observed)["game"]
+    assert (grade["outcome"], grade["profit_units"]) == ("void", 0.0)
+    current = ledger.execute("SELECT outcome, profit_units FROM paper_settlements").fetchone()
+    assert tuple(current) == ("void", 0.0)
+    if previously_graded:
+        assert grades_as_of(ledger, "pilot", first)["game"]["outcome"] == "win"
+
+
 @pytest.mark.parametrize("change", ["nonfinal", "missing_scores", "tied_scores", "missing_result"])
 def test_retracts_invalid_final_to_pending_and_can_restore_a_corrected_grade(ledger, change):
     _decision(ledger, "game")

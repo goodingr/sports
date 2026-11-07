@@ -17,7 +17,7 @@ from src.predict.paper_settlement_history import (
 _CLOSE_WINDOW = timedelta(minutes=90)
 _START_TOLERANCE = timedelta(minutes=10)
 _MIN_LEAD = timedelta(minutes=15)
-_CANCELLED_STATUSES = {"canceled", "cancelled"}
+_VOID_STATUSES = {"canceled", "cancelled", "voided"}
 
 
 def _utc_timestamp(value: object) -> datetime | None:
@@ -186,7 +186,7 @@ def expected_grade(
         for field in ("home_team_id", "away_team_id")
     )
     status = str(decision["status"] or "").lower()
-    if identity_changed or status in _CANCELLED_STATUSES:
+    if identity_changed or status in _VOID_STATUSES:
         grade["outcome"] = "void"
         return grade
     if observed <= max(start, current_start):
