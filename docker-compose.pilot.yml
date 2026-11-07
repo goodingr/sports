@@ -14,6 +14,7 @@ services:
     restart: unless-stopped
     environment:
       COMMERCIAL_PILOT_ONLY: "true"
+      COMMERCIAL_PILOT_MODE: "${COMMERCIAL_PILOT_MODE:-live}"
       COMMERCIAL_INTEREST_ENABLED: "true"
       COMMERCIAL_INTEREST_ENROLLMENT_CLOSED: "${COMMERCIAL_INTEREST_ENROLLMENT_CLOSED:-false}"
       COMMERCIAL_PILOT_CONTACT_EMAIL: ${PILOT_CONTACT_EMAIL:?Set a working pilot contact email}
@@ -25,7 +26,7 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/interest', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/interest', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 5

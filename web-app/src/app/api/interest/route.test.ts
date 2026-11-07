@@ -91,6 +91,56 @@ describe("price-interest API", () => {
         expect(updateUserMetadata).not.toHaveBeenCalled();
     });
 
+    it.each([
+        ["test keys in default live mode", undefined, origin, "pk_test_fixture", "sk_test_fixture"],
+        ["mixed key modes", undefined, origin, "pk_live_fixture", "sk_test_fixture"],
+        ["empty key suffix", undefined, origin, "pk_live_fixture", "sk_live_"],
+        ["missing configured origin", undefined, undefined, "pk_live_fixture", "sk_live_fixture"],
+        ["HTTP live origin", undefined, "http://sports.example", "pk_live_fixture", "sk_live_fixture"],
+        ["loopback HTTPS live origin", undefined, "https://localhost", "pk_live_fixture", "sk_live_fixture"],
+        ["origin with a path", undefined, `${origin}/interest`, "pk_live_fixture", "sk_live_fixture"],
+        ["origin with user info", undefined, "https://person@sports.example", "pk_live_fixture", "sk_live_fixture"],
+        ["unknown mode", "staging", origin, "pk_live_fixture", "sk_live_fixture"],
+        ["preview with live keys", "preview", origin, "pk_live_fixture", "sk_live_fixture"],
+        ["preview with public HTTP", "preview", "http://sports.example", "pk_test_fixture", "sk_test_fixture"],
+    ])("rejects %s before any Clerk calls in production", async (_, mode, appUrl, publicKey, secretKey) => {
+        vi.stubEnv("NODE_ENV", "production");
+        vi.stubEnv("COMMERCIAL_PILOT_MODE", mode);
+        vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
+        vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", publicKey);
+        vi.stubEnv("CLERK_SECRET_KEY", secretKey);
+
+        const result = await POST(request({ action: "join" }));
+
+        expect(result.status).toBe(503);
+        expect(result.headers.get("cache-control")).toBe("no-store");
+        expect(await result.text()).toBe("Interest is currently unavailable.");
+        expect(auth).not.toHaveBeenCalled();
+        expect(getUser).not.toHaveBeenCalled();
+        expect(updateUserMetadata).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["default live", undefined, origin, "live"],
+        ["HTTPS preview", "preview", origin, "test"],
+        ["loopback HTTP preview", "preview", "http://127.0.0.1:3100", "test"],
+    ])("records interest in a configured %s environment", async (_, mode, appUrl, keyMode) => {
+        vi.stubEnv("NODE_ENV", "production");
+        vi.stubEnv("COMMERCIAL_PILOT_MODE", mode);
+        vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
+        vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", `pk_${keyMode}_fixture`);
+        vi.stubEnv("CLERK_SECRET_KEY", `sk_${keyMode}_fixture`);
+        updateUserMetadata.mockResolvedValue(clerkUser({
+            ...view, joinedAt: view.viewedAt, contactConsent: { active: false },
+        }));
+
+        const result = await POST(request({ action: "join" }, appUrl));
+
+        expect(result.status).toBe(200);
+        expect(await result.json()).toEqual({ joined: true, contactAllowed: false });
+        expect(updateUserMetadata).toHaveBeenCalledTimes(1);
+    });
+
     it("records a first view and preserves source on repeat visits", async () => {
         updateUserMetadata.mockResolvedValue(clerkUser(view));
         const first = await POST(request({ action: "view", source: "community" }));

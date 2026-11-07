@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { interestConfigurationUnavailable, isInterestConfigurationReady } from "@/lib/pilot";
 
 const OFFER_VERSION = "premium-29-usd-monthly-v1";
 const METADATA_KEY = "commercialPriceInterest";
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
     if (process.env.COMMERCIAL_INTEREST_ENABLED !== "true") {
         return new NextResponse("Not found", { status: 404 });
     }
+    if (!isInterestConfigurationReady()) return interestConfigurationUnavailable();
     if (!allowsOrigin(request)) return new NextResponse("Forbidden", { status: 403 });
 
     const { userId } = await auth();

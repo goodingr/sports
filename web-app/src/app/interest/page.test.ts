@@ -26,6 +26,18 @@ describe("commercial interest page", () => {
         expect(auth).not.toHaveBeenCalled();
     });
 
+    it("keeps the offer hidden when production is misconfigured", async () => {
+        vi.stubEnv("NODE_ENV", "production");
+        vi.stubEnv("COMMERCIAL_INTEREST_ENABLED", "true");
+        vi.stubEnv("COMMERCIAL_PILOT_MODE", undefined);
+        vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pilot.example.invalid");
+        vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_fixture");
+        vi.stubEnv("CLERK_SECRET_KEY", "sk_test_fixture");
+
+        await expect(InterestPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Not found");
+        expect(auth).not.toHaveBeenCalled();
+    });
+
     it("shows the exact price and no-payment offer with an attributed login link", async () => {
         vi.stubEnv("COMMERCIAL_INTEREST_ENABLED", "true");
         vi.stubEnv("COMMERCIAL_INTEREST_ENROLLMENT_CLOSED", "false");
