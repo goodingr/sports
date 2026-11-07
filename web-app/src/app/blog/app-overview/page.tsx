@@ -9,7 +9,9 @@ export default function AppOverviewPage() {
 
             <h1>App Overview &amp; Stats Guide</h1>
             <p className="lead">
-                The app shows current pregame picks, the record of picks issued to subscribers, and historical totals model tracking.
+                The upcoming feed shows eligible pregame picks when available. The app keeps a
+                record of picks made available in the subscriber feed and a separate history of
+                simulated totals model results.
             </p>
 
             <h2>Upcoming picks</h2>

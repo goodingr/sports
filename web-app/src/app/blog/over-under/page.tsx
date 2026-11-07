@@ -63,10 +63,14 @@ export default function OverUnderPage() {
                 <li><strong>Recent trends</strong>: Teams on scoring streaks or slumps</li>
             </ul>
 
-            <h2>Our Prediction Approach</h2>
+            <h2>Evaluating a totals estimate</h2>
 
             <p>
-                Our system analyzes these factors and more to predict the actual total score. When we identify a significant difference between our prediction and the sportsbook&apos;s line, we flag it as a potential betting opportunity.
+                A projected combined score can differ from the sportsbook&apos;s line. Estimating
+                an edge also requires the chance of finishing over or under that line and the
+                price offered. We evaluate model estimates against game results and closing prices.
+                {' '}<Link href="/record">View the published pick record</Link> for selections
+                that passed publication checks.
             </p>
 
             <div className="mt-8 pt-8 border-t border-gray-700">
