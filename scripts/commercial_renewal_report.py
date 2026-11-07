@@ -6,7 +6,7 @@ import argparse
 import csv
 import json
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -123,6 +123,67 @@ def _original_schedule(cycle: Cycle | None) -> tuple[datetime, datetime] | None:
     return first, second
 
 
+def _measure_renewals(
+    by_customer: dict[str, list[CashMatch]],
+    cycles: dict[str, Cycle],
+    *,
+    as_of: datetime,
+    grace: timedelta,
+    cohort_for: Callable[[CashMatch], str],
+) -> tuple[dict[str, Cohort], dict[str, int]]:
+    """Measure original renewal slots for customers with known collected payments."""
+    audit = {
+        "missing_cycle_records": 0,
+        "invalid_origin_schedules": 0,
+        "ambiguous_first_payments": 0,
+        "extra_collected_invoices_for_slot": 0,
+    }
+
+    cohorts: dict[str, Cohort] = defaultdict(Cohort)
+    for payments in by_customer.values():
+        payments.sort(key=lambda item: (item.charge.created_at, item.invoice_id))
+        audit["missing_cycle_records"] += sum(payment.invoice_id not in cycles for payment in payments)
+        first = payments[0]
+        cohort = cohorts[cohort_for(first)]
+        cohort.first_payers += 1
+        if len(payments) > 1 and payments[1].charge.created_at == first.charge.created_at:
+            audit["ambiguous_first_payments"] += 1
+            continue
+        original = cycles.get(first.invoice_id)
+        schedule = _original_schedule(original)
+        if original is None or schedule is None:
+            audit["invalid_origin_schedules"] += 1
+            continue
+
+        slot_payments: dict[datetime, list[datetime]] = defaultdict(list)
+        for payment in payments[1:]:
+            cycle = cycles.get(payment.invoice_id)
+            if (
+                cycle is not None
+                and cycle.subscription_id == original.subscription_id
+                and cycle.billing_reason == "subscription_cycle"
+                and not cycle.proration
+                and cycle.starts_at in schedule
+                and (cycle.starts_at != schedule[0] or cycle.ends_at == schedule[1])
+            ):
+                slot_payments[cycle.starts_at].append(payment.charge.created_at)
+
+        for due, renewal in zip(schedule, (cohort.renewal_1, cohort.renewal_2), strict=True):
+            received = slot_payments[due]
+            audit["extra_collected_invoices_for_slot"] += max(0, len(received) - 1)
+            renewal.observe(due, min(received, default=None), as_of, grace)
+
+    return dict(cohorts), audit
+
+
+def _renewals_have_evidence(audit: dict[str, int]) -> bool:
+    return not (
+        audit["missing_cycle_records"]
+        or audit["invalid_origin_schedules"]
+        or audit["ambiguous_first_payments"]
+    )
+
+
 def build_renewal_report(
     invoices_path: Path,
     balance_path: Path,
@@ -154,60 +215,19 @@ def build_renewal_report(
         exclude_customer_ids=exclude_customer_ids,
     )
     by_customer: dict[str, list[CashMatch]] = defaultdict(list)
-    audit = {
-        "missing_cycle_records": 0,
-        "invalid_origin_schedules": 0,
-        "ambiguous_first_payments": 0,
-        "extra_collected_invoices_for_slot": 0,
-    }
     for match in matches:
         paid = match.charge.created_at
         if paid < history_start:
             raise ValueError("A matched payment predates the declared history start")
         if paid <= as_of:
             by_customer[match.invoice.customer_id].append(match)
-            if match.invoice_id not in cycles:
-                audit["missing_cycle_records"] += 1
 
-    cohorts: dict[str, Cohort] = defaultdict(Cohort)
-    for payments in by_customer.values():
-        payments.sort(key=lambda item: (item.charge.created_at, item.invoice_id))
-        first = payments[0]
-        cohort = cohorts[first.charge.created_at.strftime("%Y-%m")]
-        cohort.first_payers += 1
-        if len(payments) > 1 and payments[1].charge.created_at == first.charge.created_at:
-            audit["ambiguous_first_payments"] += 1
-            continue
-        original = cycles.get(first.invoice_id)
-        schedule = _original_schedule(original)
-        if original is None or schedule is None:
-            audit["invalid_origin_schedules"] += 1
-            continue
-
-        slot_payments: dict[datetime, list[datetime]] = defaultdict(list)
-        for payment in payments[1:]:
-            cycle = cycles.get(payment.invoice_id)
-            if (
-                cycle is not None
-                and cycle.subscription_id == original.subscription_id
-                and cycle.billing_reason == "subscription_cycle"
-                and not cycle.proration
-                and cycle.starts_at in schedule
-                and (cycle.starts_at != schedule[0] or cycle.ends_at == schedule[1])
-            ):
-                slot_payments[cycle.starts_at].append(payment.charge.created_at)
-
-        for due, renewal in zip(schedule, (cohort.renewal_1, cohort.renewal_2), strict=True):
-            received = slot_payments[due]
-            audit["extra_collected_invoices_for_slot"] += max(0, len(received) - 1)
-            renewal.observe(due, min(received, default=None), as_of, grace)
-
-    complete = not (
-        audit["missing_cycle_records"]
-        or audit["invalid_origin_schedules"]
-        or audit["ambiguous_first_payments"]
-        or cash_audit["unreconciled_paid_invoices"]
-        or cash_audit["unsupported_target_invoices"]
+    cohorts, audit = _measure_renewals(
+        by_customer, cycles, as_of=as_of, grace=grace,
+        cohort_for=lambda first: first.charge.created_at.strftime("%Y-%m"),
+    )
+    complete = _renewals_have_evidence(audit) and not (
+        cash_audit["unreconciled_paid_invoices"] or cash_audit["unsupported_target_invoices"]
     )
     if complete:
         for cohort in cohorts.values():

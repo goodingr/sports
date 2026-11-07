@@ -200,6 +200,68 @@ cash-matched payment per original subscription and service period and shows
 late recoveries separately. Reconcile missing schedules and other audit
 exceptions before using the rates. An incomplete report suppresses rates.
 
+### Attribute conversion and renewals to the pilot
+
+Use the same production Clerk instance for the pilot and paid app. Close
+pilot enrollment, then run the interest report with the screened roster and
+the original view-window bounds before opening paid enrollment. Freeze every
+qualified first viewer in that window, including viewers who never recorded
+price intent. Exclude team, duplicate, and test accounts. Compare the frozen
+viewer and first-intent counts by source with the interest report, then retain
+the cohort unchanged. Keep it and all later exports private and outside the
+repository.
+
+The [pilot conversion report](../scripts/commercial_pilot_conversion_report.py)
+takes one normalized evidence JSON object and the same live invoice, Balance,
+and cycle CSVs used above. The JSON contains:
+
+- `cohort` rows with `user_id` (Clerk user ID), `offer_version`
+  (`premium-29-usd-monthly-v1`), `source` (`direct`, `community`, `referral`,
+  `email`, or `other`), `viewed_at`, and `joined_at` (explicit `null` for no
+  recorded price intent). Copy Clerk `id` to `user_id`, and copy
+  `private_metadata.commercialPriceInterest.offerVersion`, `source`,
+  `viewedAt`, and `joinedAt` to their corresponding fields. Keep the
+  original first intent when someone later withdraws. Email permission
+  does not enter the report.
+- `clerk_bindings` rows with `user_id` and `stripe_customer_id` from current
+  Clerk `public_metadata.stripe_customer_id`. Use explicit `null` when the
+  account has no binding. Include all current Clerk accounts so the report
+  can detect two accounts claiming the same customer.
+- `stripe_customers` rows with Stripe `id`, boolean `livemode`, `metadata`
+  containing `userId` and/or legacy `clerkUserId` if present, and `deleted`
+  when applicable. Use the complete Customer export for the same live Stripe
+  account that supplied the invoice and Balance CSVs. Both sides must agree. If both Stripe metadata keys exist, they
+  must agree with each other and Clerk.
+- `history_start`, `viewed_from`, `viewed_before`, `cohort_frozen_at`,
+  `paid_opened_at`, `conversion_before`, `as_of`, `observed_through`, and
+  `bindings_observed_at` as ISO 8601 timestamps with UTC offsets.
+  `history_start` covers the full product history. Freeze the half-open
+  first-view cohort `[viewed_from, viewed_before)` after it closes and
+  before paid enrollment. `conversion_before` is the exclusive conversion
+  deadline and must have elapsed by `as_of`. `observed_through` is the end
+  of the Stripe cash export coverage. `bindings_observed_at` is the earlier
+  observation time of the later Clerk and Stripe identity exports. Both
+  coverage clocks must reach `as_of` and cannot exceed the current time.
+- `price_id` for the verified live $29 USD monthly price, optional
+  `grace_days` (default `7`), and `confirm_complete_same_instance_exports`
+  set to `true` only after checking all exports, identities, and coverage.
+
+```powershell
+poetry run python -m scripts.commercial_pilot_conversion_report --evidence C:/private/pilot-evidence.json --invoices C:/private/invoices.csv --balance C:/private/balance.csv --cycles C:/private/cycles.csv
+```
+
+A first payer must have their first cash-matched target-price charge at or
+after paid opening and before the conversion deadline. First price intents
+must fall inside the original pilot window. The report shows separate
+viewer and price-intent conversion rates, totals and source breakdowns, and
+the first two original renewal slots for converted customers. A present
+Clerk account with neither side claiming a customer can count as no
+checkout. Missing or conflicting bindings, unknown paid identities, and
+unreconciled cash suppress rates. Missing or ambiguous renewal evidence
+withholds renewal rates while preserving verified first-payer counts.
+Exit `2` indicates incomplete evidence. The report emits aggregate counts
+without user, customer, or invoice IDs.
+
 ## Paid launch evidence
 
 - A current approved and passing pick rule and release audit under the existing claim policy. [Claim evidence](CLAIM_EVIDENCE.md)
