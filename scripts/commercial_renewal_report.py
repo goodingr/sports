@@ -141,6 +141,8 @@ def build_renewal_report(
     )
     if not history_start <= as_of <= observed_through:
         raise ValueError("The observed export history must cover the as-of time")
+    if observed_through > datetime.now(timezone.utc):
+        raise ValueError("Observed export coverage cannot extend past the current time")
     if type(grace_days) is not int or grace_days < 0:
         raise ValueError("Retry grace days must be a nonnegative integer")
     grace = timedelta(days=grace_days)

@@ -1,15 +1,27 @@
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from scripts import commercial_renewal_report
 from scripts.commercial_renewal_report import build_renewal_report
 
 PRICE_ID = "price_pro_monthly"
 HISTORY_START = datetime.fromisoformat("2027-01-01T00:00:00Z")
 AS_OF = datetime.fromisoformat("2027-04-08T15:00:00Z")
 OBSERVED_THROUGH = datetime.fromisoformat("2027-04-09T15:00:00Z")
+NOW = datetime.fromisoformat("2027-04-10T15:00:00Z")
+
+
+@pytest.fixture(autouse=True)
+def freeze_report_clock(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz)
+
+    monkeypatch.setattr(commercial_renewal_report, "datetime", FrozenDateTime)
 
 
 def write_rows(path: Path, header: str, rows: list[tuple[str, ...]]) -> None:
@@ -174,6 +186,18 @@ def test_rejects_review_beyond_declared_source_coverage(tmp_path):
 
     with pytest.raises(ValueError):
         report_at(paths, observed_through=datetime.fromisoformat("2027-04-07T15:00:00Z"))
+
+
+@pytest.mark.parametrize("future_as_of", [False, True])
+def test_rejects_export_coverage_in_the_future(tmp_path, future_as_of):
+    paths = sample_exports(tmp_path)
+    after_now = NOW + timedelta(microseconds=1)
+
+    assert report_at(paths, observed_through=NOW)["status"] == "complete"
+    with pytest.raises(ValueError, match="past the current time"):
+        report_at(
+            paths, as_of=after_now if future_as_of else AS_OF, observed_through=after_now
+        )
 
 
 @pytest.mark.parametrize(
