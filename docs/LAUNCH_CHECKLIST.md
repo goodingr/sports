@@ -128,6 +128,11 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       (`grep -E '_test_|_test\b|placeholder|replace_me' .env` is empty).
 - [ ] Stripe keys, if used, are live keys; webhook signing secret matches
       the registered endpoint.
+- [ ] Stripe Checkout's single-subscription protection and the customer portal
+      are enabled for the canonical customer flow. Verify simultaneous checkout
+      and retry behavior before opening paid enrollment. [Stripe Checkout settings](https://docs.stripe.com/payments/checkout/limit-subscriptions)
+- [ ] The configured Stripe price is active and charges $29 USD each month.
+      Verify the hosted price before enabling `PAID_ENROLLMENT_ENABLED`.
 
 ## 10. Communications
 

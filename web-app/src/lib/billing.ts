@@ -2,6 +2,9 @@ import Stripe from "stripe";
 import { clerkClient } from "@clerk/nextjs/server";
 
 export const PREMIUM_KEY = "is_premium" as const;
+export const CHECKOUT_CURRENCY = "usd" as const;
+
+const MONTHLY_PRICE_CENTS = 2900;
 
 const ACTIVE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
     "active",
@@ -22,6 +25,32 @@ export function getStripeSecret(): string {
 
 export function getStripePriceId(): string {
     return requireEnv("STRIPE_PRICE_ID");
+}
+
+export async function getVerifiedCheckoutPriceId(stripe: Stripe): Promise<string | null> {
+    const priceId = getStripePriceId();
+    const price = await stripe.prices.retrieve(priceId, { expand: ["product"] });
+    const { product, recurring, unit_amount_decimal: decimal } = price;
+    if (
+        price.id !== priceId
+        || price.active !== true
+        || !product || typeof product === "string" || !("active" in product) || product.active !== true
+        || price.currency !== CHECKOUT_CURRENCY
+        || price.unit_amount !== MONTHLY_PRICE_CENTS
+        || (decimal != null && !/^2900(?:\.0+)?$/.test(decimal))
+        || price.type !== "recurring"
+        || price.billing_scheme !== "per_unit"
+        || price.custom_unit_amount != null
+        || price.transform_quantity != null
+        || recurring?.interval !== "month"
+        || recurring.interval_count !== 1
+        || recurring.usage_type !== "licensed"
+        || recurring.meter != null
+        || (recurring.trial_period_days != null && recurring.trial_period_days !== 0)
+    ) {
+        return null;
+    }
+    return priceId;
 }
 
 export function getStripeWebhookSecret(): string {

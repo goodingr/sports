@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import type Stripe from "stripe";
 import {
     PREMIUM_KEY,
@@ -6,6 +6,7 @@ import {
     createBillingPortalSession,
     getOrCreateCustomer,
     getStoredCustomerId,
+    getVerifiedCheckoutPriceId,
     isPremiumStatus,
     revokedSnapshot,
     setClerkForTests,
@@ -67,6 +68,58 @@ function makeSubscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.
 beforeEach(() => {
     setStripeForTests(null);
     setClerkForTests(null);
+});
+
+describe("getVerifiedCheckoutPriceId", () => {
+    const product = { id: "prod_test", object: "product", active: true } as Stripe.Product;
+    const recurring: Stripe.Price.Recurring = {
+        interval: "month", interval_count: 1, usage_type: "licensed", meter: null, trial_period_days: null,
+    };
+    const price = {
+        id: "price_test", active: true, product, currency: "usd", unit_amount: 2900,
+        unit_amount_decimal: "2900.00", type: "recurring", billing_scheme: "per_unit",
+        custom_unit_amount: null, transform_quantity: null, recurring,
+    };
+    const retrieve = vi.fn();
+    const stripe = { prices: { retrieve } } as unknown as Stripe;
+
+    beforeEach(() => {
+        retrieve.mockReset();
+        vi.stubEnv("STRIPE_PRICE_ID", price.id);
+    });
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it.each([false, true])("accepts the standard price in either Stripe mode (%s)", async (livemode) => {
+        vi.stubEnv("NODE_ENV", "production");
+        retrieve.mockResolvedValue({ ...price, livemode });
+
+        await expect(getVerifiedCheckoutPriceId(stripe)).resolves.toBe(price.id);
+        expect(retrieve).toHaveBeenCalledExactlyOnceWith(price.id, { expand: ["product"] });
+    });
+
+    it.each<[string, Partial<Stripe.Price>]>([
+        ["a different ID", { id: "price_other" }],
+        ["an archived price", { active: false }],
+        ["an archived product", { product: { ...product, active: false } }],
+        ["an unverified product", { product: product.id }],
+        ["a different currency", { currency: "cad" }],
+        ["a different amount", { unit_amount: 3000, unit_amount_decimal: "3000" }],
+        ["a fractional amount", { unit_amount: null, unit_amount_decimal: "2900.001" }],
+        ["an inconsistent decimal", { unit_amount_decimal: "2900.01" }],
+        ["a one-time purchase", { type: "one_time", recurring: null }],
+        ["an annual period", { recurring: { ...recurring, interval: "year" } }],
+        ["a multi-month period", { recurring: { ...recurring, interval_count: 2 } }],
+        ["tiered billing", { billing_scheme: "tiered" }],
+        ["metered usage", { recurring: { ...recurring, usage_type: "metered", meter: "mtr_test" } }],
+        ["a trial", { recurring: { ...recurring, trial_period_days: 7 } }],
+        ["a customer-defined amount", { custom_unit_amount: { minimum: null, maximum: null, preset: 2900 } }],
+        ["a quantity transformation", { transform_quantity: { divide_by: 2, round: "down" } }],
+    ])("rejects %s", async (_, overrides) => {
+        retrieve.mockResolvedValue({ ...price, ...overrides });
+
+        await expect(getVerifiedCheckoutPriceId(stripe)).resolves.toBeNull();
+    });
 });
 
 describe("isPremiumStatus", () => {

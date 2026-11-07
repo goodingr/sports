@@ -3,10 +3,11 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { isCheckoutAvailable } from "@/lib/api";
 import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
 import {
+    CHECKOUT_CURRENCY,
     getAppUrl,
     getOrCreateCustomer,
     getStripe,
-    getStripePriceId,
+    getVerifiedCheckoutPriceId,
 } from "@/lib/billing";
 
 export async function POST() {
@@ -35,11 +36,17 @@ export async function POST() {
         }
 
         const stripe = getStripe();
-        const priceId = getStripePriceId();
+        const priceId = await getVerifiedCheckoutPriceId(stripe).catch(() => null);
+        if (!priceId) {
+            console.error("[STRIPE_CHECKOUT_PRICE_UNAVAILABLE]");
+            return new NextResponse("Subscriptions are currently unavailable", { status: 503 });
+        }
         const appUrl = getAppUrl();
         const customerId = await getOrCreateCustomer(userId, email);
         const session = await stripe.checkout.sessions.create({
             customer: customerId,
+            currency: CHECKOUT_CURRENCY,
+            adaptive_pricing: { enabled: false },
             success_url: `${appUrl}/account?success=true`,
             cancel_url: `${appUrl}/pricing?canceled=true`,
             payment_method_types: ["card"],
