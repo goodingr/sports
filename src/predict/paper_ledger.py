@@ -22,7 +22,12 @@ from src.db.core import connect, resolve_db_path
 from src.models.prediction_quality import expected_value, no_vig_pair
 from src.predict.paper_report import build_paper_report
 from src.predict.paper_schedule import record_known_fixtures
-from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start, settle_open_trials
+from src.predict.paper_settlement import (
+    _START_TOLERANCE,
+    _normalized_h2h_prices,
+    _quote_source_start,
+    settle_open_trials,
+)
 from src.predict.quote_order import latest_market_snapshot_id
 
 DEFAULT_RULES = Path("config/paper_trial.yml")
@@ -194,23 +199,9 @@ def _model_inputs_match(conn: sqlite3.Connection, row: Any, quote: sqlite3.Row) 
     if snapshot_id != quote["snapshot_id"] or book_id != quote["book_id"]:
         return False
 
-    inputs = conn.execute(
-        """
-        SELECT lower(outcome) AS outcome, price_american
-        FROM odds
-        WHERE snapshot_id = ? AND game_id = ? AND book_id = ? AND market = 'h2h'
-        """,
-        (quote["snapshot_id"], row.game_id, quote["book_id"]),
-    ).fetchall()
-    if len(inputs) != 2:
-        return False
-    moneylines = {odd["outcome"]: odd["price_american"] for odd in inputs}
-    home_price, away_price = moneylines.get("home"), moneylines.get("away")
     # The SHA-pinned model never splits on its spread input.
-    return all(
-        isinstance(price, (int, float)) and math.isfinite(price) and abs(price) >= 100
-        for price in (home_price, away_price)
-    ) and (home_price, away_price) == (row.home_moneyline, row.away_moneyline)
+    prices = _normalized_h2h_prices(conn, quote)
+    return prices is not None and prices == (row.home_moneyline, row.away_moneyline)
 
 
 def _capture_one(
@@ -255,17 +246,19 @@ def _capture_one(
         minutes=trial.max_quote_age_minutes
     ):
         return "stale_quote"
-    provider_start = _quote_source_start(conn, quote, fetched_at)
+    if not _model_inputs_match(conn, row, quote):
+        return "unverified_model_inputs"
+    provider_start = _quote_source_start(
+        conn, quote, fetched_at, moneylines=(row.home_moneyline, row.away_moneyline)
+    )
     if provider_start is None:
-        return "unverified_quote_start"
+        return "unverified_original_quote"
     starts = (start, verified_start, provider_start)
     decision_start = min(starts)
     if max(starts) - decision_start > _START_TOLERANCE:
         return "game_schedule_changed"
     if decision_start - now < minimum_lead:
         return "outside_decision_window"
-    if not _model_inputs_match(conn, row, quote):
-        return "unverified_model_inputs"
 
     line, over_price, under_price = quote["line"], quote["over_price"], quote["under_price"]
     over_prob, under_prob = row.over_predicted_prob, row.under_predicted_prob

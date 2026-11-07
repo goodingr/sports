@@ -50,10 +50,19 @@ def ledger(tmp_path):
         yield conn, trial, db.parent / "raw" / "odds" / "basketball_nba"
 
 
-def _quote(conn, raw_dir, name, fetched, line, prices):
+def _quote(conn, raw_dir, name, fetched, line, prices, *, moneylines=None):
     raw_dir.mkdir(parents=True, exist_ok=True)
     receipt = raw_dir / f"{name}.json"
     sides = tuple(zip(("Over", "Under"), prices))
+    markets = [{
+        "key": "totals",
+        "outcomes": [{"name": side, "price": price, "point": line} for side, price in sides],
+    }]
+    if moneylines is not None:
+        markets.append({
+            "key": "h2h",
+            "outcomes": [{"name": team, "price": price} for team, price in zip(TEAMS, moneylines)],
+        })
     receipt.write_text(json.dumps({
         "fetched_at": fetched.isoformat(),
         "source": "the-odds-api",
@@ -64,12 +73,7 @@ def _quote(conn, raw_dir, name, fetched, line, prices):
             "home_team": TEAMS[0],
             "away_team": TEAMS[1],
             "commence_time": START.isoformat(),
-            "bookmakers": [{"key": "draftkings", "markets": [{
-                "key": "totals",
-                "outcomes": [
-                    {"name": side, "price": price, "point": line} for side, price in sides
-                ],
-            }]}],
+            "bookmakers": [{"key": "draftkings", "markets": markets}],
         }],
     }), encoding="utf-8")
     conn.execute(
@@ -83,6 +87,14 @@ def _quote(conn, raw_dir, name, fetched, line, prices):
         """,
         [(name, side, price, line) for side, price in sides],
     )
+    if moneylines is not None:
+        conn.executemany(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american)
+            VALUES (?, 'game', 1, 'h2h', ?, ?)
+            """,
+            [(name, side, price) for side, price in zip(("home", "away"), moneylines)],
+        )
     store_odds_snapshot_game_starts(conn, name, {"game": START.isoformat()})
     return receipt
 
@@ -90,7 +102,7 @@ def _quote(conn, raw_dir, name, fetched, line, prices):
 def _grade(ledger, *, side="over", line=220.5, close_line=None, close_prices=(-130, 110)):
     conn, trial, raw_dir = ledger
     entry_at = CAPTURE - timedelta(minutes=1)
-    _quote(conn, raw_dir, "entry", entry_at, line, (-110, -110))
+    _quote(conn, raw_dir, "entry", entry_at, line, (-110, -110), moneylines=(-130, 110))
     close_file = _quote(
         conn, raw_dir, "close", START - timedelta(minutes=30),
         line if close_line is None else close_line, close_prices,
@@ -159,7 +171,7 @@ def test_integer_total_with_observed_push_has_conditional_close_ev(ledger):
 @pytest.mark.parametrize(
     "defect",
     ["missing_close_archive", "duplicate_outcome", "opposite_price_changed", "score_corrected",
-     "newer_close", "tied_close", "clock_disagrees"],
+     "newer_close", "tied_close", "clock_disagrees", "entry_h2h_changed"],
 )
 def test_invalid_or_corrected_lineage_is_excluded(ledger, defect):
     conn, _, raw_dir = ledger
@@ -181,6 +193,10 @@ def test_invalid_or_corrected_lineage_is_excluded(ledger, defect):
         conn.execute(
             "UPDATE odds_snapshot_game_starts SET observed_start_utc = ? WHERE snapshot_id = 'close'",
             ((START + timedelta(minutes=1)).isoformat(),),
+        )
+    elif defect == "entry_h2h_changed":
+        conn.execute(
+            "UPDATE odds SET price_american = 135 WHERE snapshot_id = 'entry' AND outcome = 'away'"
         )
     elif defect == "score_corrected":
         conn.execute("UPDATE game_results SET home_score = 113")

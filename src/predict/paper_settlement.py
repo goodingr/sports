@@ -54,43 +54,53 @@ def _valid_american_odds(value: object) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value) and abs(value) >= 100
 
 
-def _archived_totals_pair_matches(event: dict, quote: _Quote) -> bool:
+def _normalized_h2h_prices(conn: sqlite3.Connection, quote: _Quote) -> tuple[float, float] | None:
+    rows = conn.execute(
+        """
+        SELECT lower(outcome) AS outcome, price_american
+        FROM odds
+        WHERE snapshot_id = ? AND game_id = ? AND book_id = ? AND market = 'h2h'
+        """,
+        (quote["snapshot_id"], quote["game_id"], quote["book_id"]),
+    ).fetchall()
+    if len(rows) != 2:
+        return None
+    pair = {row["outcome"]: row["price_american"] for row in rows}
+    home, away = pair.get("home"), pair.get("away")
+    if home is None or away is None or not (_valid_american_odds(home) and _valid_american_odds(away)):
+        return None
+    return float(home), float(away)
+
+
+def _archived_market_pair(event: dict, key: str) -> dict[str, dict] | None:
     books = event.get("bookmakers")
     if not isinstance(books, list):
-        return False
+        return None
     targets = [book for book in books if isinstance(book, dict) and book.get("key") == "draftkings"]
     if len(targets) != 1 or not isinstance(targets[0].get("markets"), list):
-        return False
-    totals = [
-        market
-        for market in targets[0]["markets"]
-        if isinstance(market, dict) and market.get("key") == "totals"
+        return None
+    markets = [
+        market for market in targets[0]["markets"]
+        if isinstance(market, dict) and market.get("key") == key
     ]
-    if len(totals) != 1:
-        return False
-    outcomes = totals[0].get("outcomes")
-    if (
-        not isinstance(outcomes, list)
-        or len(outcomes) != 2
-        or any(not isinstance(outcome, dict) for outcome in outcomes)
+    if len(markets) != 1:
+        return None
+    outcomes = markets[0].get("outcomes")
+    if not isinstance(outcomes, list) or len(outcomes) != 2 or not all(
+        isinstance(outcome, dict) and isinstance(outcome.get("name"), str) for outcome in outcomes
     ):
-        return False
-    pair = {
-        outcome.get("name"): outcome for outcome in outcomes if isinstance(outcome.get("name"), str)
-    }
-    return set(pair) == {"Over", "Under"} and all(
-        pair[side].get("point") == quote["line"]
-        and pair[side].get("price") == quote[f"{side.lower()}_price"]
-        for side in pair
-    )
+        return None
+    return {outcome["name"]: outcome for outcome in outcomes}
 
 
 def _archived_quote_start(
     conn: sqlite3.Connection,
     quote: _Quote,
     fetched_at: datetime,
+    *,
+    moneylines: tuple[float, float] | None = None,
 ) -> datetime | None:
-    """Recover legacy provenance from the original or relocated raw receipt."""
+    """Verify the exact original totals pair and optional ordered H2H inputs."""
     if not any(
         row["name"] == "raw_path" for row in conn.execute("PRAGMA table_info(odds_snapshots)")
     ):
@@ -174,16 +184,29 @@ def _archived_quote_start(
         or not isinstance(away, str)
         or (NBA_ALIASES.get(home.strip().lower()), NBA_ALIASES.get(away.strip().lower()))
         != (fixture["home_code"], fixture["away_code"])
-        or not _archived_totals_pair_matches(event, quote)
     ):
         return None
+    totals = _archived_market_pair(event, "totals")
+    if totals is None or set(totals) != {"Over", "Under"} or any(
+        totals[side].get("point") != quote["line"]
+        or totals[side].get("price") != quote[f"{side.lower()}_price"]
+        for side in totals
+    ):
+        return None
+    if moneylines is not None:
+        h2h = _archived_market_pair(event, "h2h")
+        if h2h is None or set(h2h) != {home, away} or (
+            h2h[home].get("price"), h2h[away].get("price")
+        ) != moneylines:
+            return None
     return _utc_timestamp(event.get("commence_time"))
 
 
 def _quote_source_start(
-    conn: sqlite3.Connection, quote: _Quote, fetched_at: datetime
+    conn: sqlite3.Connection, quote: _Quote, fetched_at: datetime, *,
+    require_original: bool = False, moneylines: tuple[float, float] | None = None,
 ) -> datetime | None:
-    """Resolve the provider's kickoff for the exact normalized totals pair."""
+    """Resolve kickoff and verify the original quote when requested."""
     if quote["source"] != _ODDS_SOURCE:
         return None
     if conn.execute(
@@ -197,8 +220,12 @@ def _quote_source_start(
             (quote["snapshot_id"], quote["game_id"]),
         ).fetchone()
         if proof is not None:
-            return _utc_timestamp(proof["observed_start_utc"])
-    return _archived_quote_start(conn, quote, fetched_at)
+            start = _utc_timestamp(proof["observed_start_utc"])
+            if start is None or not (require_original or moneylines is not None):
+                return start
+            archived = _archived_quote_start(conn, quote, fetched_at, moneylines=moneylines)
+            return start if archived == start else None
+    return _archived_quote_start(conn, quote, fetched_at, moneylines=moneylines)
 
 
 def _close_for_decision(

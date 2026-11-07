@@ -10,10 +10,10 @@ from datetime import datetime
 from src.models.prediction_quality import american_to_decimal, no_vig_pair
 from src.predict.paper_settlement import (
     _START_TOLERANCE,
-    _archived_quote_start,
     _decision_rows,
     _material_state,
     _minimum_lead,
+    _normalized_h2h_prices,
     _quote_source_start,
     _utc_timestamp,
     _valid_american_odds,
@@ -27,7 +27,7 @@ _ENTRY_FIELDS = {"book", "snapshot_id", "odds_fetched_at", "opposite_price"}
 
 def _verified_prices(
     conn: sqlite3.Connection, decision: sqlite3.Row,
-    snapshot_id: str, fetched_at: datetime, line: float,
+    snapshot_id: str, fetched_at: datetime, line: float, *, entry: bool = False,
 ) -> tuple[dict[str, float], datetime] | None:
     rows = [
         row for row in conn.execute(
@@ -55,13 +55,19 @@ def _verified_prices(
         "snapshot_id": snapshot_id,
         "game_id": decision["game_id"],
         "sport_id": decision["sport_id"],
+        "book_id": decision["book_id"],
         "source": decision["odds_source"],
         "line": line,
         "over_price": prices["over"],
         "under_price": prices["under"],
     }
-    raw_start = _archived_quote_start(conn, quote, fetched_at)
-    if raw_start is None or raw_start != _quote_source_start(conn, quote, fetched_at):
+    moneylines = _normalized_h2h_prices(conn, quote) if entry else None
+    if entry and moneylines is None:
+        return None
+    raw_start = _quote_source_start(
+        conn, quote, fetched_at, require_original=True, moneylines=moneylines
+    )
+    if raw_start is None:
         return None
     return prices, raw_start
 
@@ -88,7 +94,9 @@ def _verified_comparison(
         or _material_state(grade) != _material_state(expected_grade(conn, decision, observed_at))
     ):
         return None
-    entry = _verified_prices(conn, decision, decision["snapshot_id"], entry_at, decision["line"])
+    entry = _verified_prices(
+        conn, decision, decision["snapshot_id"], entry_at, decision["line"], entry=True
+    )
     close = _verified_prices(conn, decision, grade["close_snapshot_id"], close_at, grade["close_line"])
     if entry is None or close is None:
         return None

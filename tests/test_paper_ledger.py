@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from sklearn.ensemble import RandomForestRegressor
 
+from scripts.backup_evidence import EVIDENCE_ZIP, create_evidence_zip
 from src.db.core import connect, initialize
+from src.predict.engine import PredictionEngine
 from src.predict.paper_ledger import (
     capture_predictions,
     load_trial,
@@ -17,12 +20,55 @@ from src.predict.paper_ledger import (
 from src.predict.runner import run_predictions
 
 
+def _original_event(provider_id, start, *, line=222.5, moneylines=(-130, 110)):
+    home, away = "San Antonio Spurs", "Sacramento Kings"
+    return {
+        "id": provider_id, "sport_key": "basketball_nba", "commence_time": start,
+        "home_team": home, "away_team": away,
+        "bookmakers": [{"key": "draftkings", "markets": [
+            {"key": "h2h", "outcomes": [
+                {"name": home, "price": moneylines[0]}, {"name": away, "price": moneylines[1]},
+            ]},
+            {"key": "totals", "outcomes": [
+                {"name": "Over", "point": line, "price": -110},
+                {"name": "Under", "point": line, "price": -110},
+            ]},
+        ]}],
+    }
+
+
+def _write_original(path, fetched, events):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "fetched_at": fetched.isoformat(),
+        "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+        "results": events,
+    }), encoding="utf-8")
+
+
+def _set_original_provider_start(conn, game_id, start):
+    row = conn.execute(
+        """
+        SELECT s.raw_path, g.odds_api_id FROM games g JOIN odds o USING (game_id)
+        JOIN odds_snapshots s USING (snapshot_id) WHERE g.game_id = ? LIMIT 1
+        """,
+        (game_id,),
+    ).fetchone()
+    path = Path(row["raw_path"])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for event in payload["results"]:
+        if event["id"] == row["odds_api_id"]:
+            event["commence_time"] = start
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _set_fixture_start(conn, game_id, start):
     conn.execute("UPDATE games SET start_time_utc = ? WHERE game_id = ?", (start, game_id))
     conn.execute(
         "UPDATE odds_snapshot_game_starts SET observed_start_utc = ? WHERE game_id = ?",
         (start, game_id),
     )
+    _set_original_provider_start(conn, game_id, start)
 
 
 @pytest.fixture
@@ -72,6 +118,12 @@ def warehouse(tmp_path: Path):
                    ('snapshot', 'duplicate', 1, 'h2h', 'away', 110, NULL)
             """
         )
+        raw = tmp_path / "data" / "raw" / "odds" / "basketball_nba" / "snapshot.json"
+        _write_original(raw, now, [
+            _original_event("provider-game", start),
+            _original_event("provider-duplicate", (now + timedelta(days=3)).isoformat()),
+        ])
+        conn.execute("UPDATE odds_snapshots SET raw_path = ?", (str(raw),))
     predictions = pd.DataFrame(
         [
             {
@@ -169,6 +221,7 @@ def test_scoped_capture_checks_clock_span_across_all_three_sources(warehouse):
             "UPDATE odds_snapshot_game_starts SET observed_start_utc = ? WHERE game_id = 'game'",
             (provider_start.isoformat(),),
         )
+        _set_original_provider_start(conn, "game", provider_start.isoformat())
     assert capture_predictions(
         trial, predictions, trial.model_sha256, db, fixture_start_limits={"game": scoped_start}
     ) == {"game_schedule_changed": 1}
@@ -181,8 +234,12 @@ def test_scoped_capture_checks_clock_span_across_all_three_sources(warehouse):
     [
         ("legacy_row", "recorded"),
         ("legacy_table", "recorded"),
-        ("missing", "unverified_quote_start"),
-        ("invalid_normalized", "unverified_quote_start"),
+        ("legacy_zip", "recorded"),
+        ("missing", "unverified_original_quote"),
+        ("missing_original", "unverified_original_quote"),
+        ("invalid_normalized", "unverified_original_quote"),
+        ("contradictory_clock", "unverified_original_quote"),
+        ("contradictory_totals", "unverified_original_quote"),
     ],
 )
 def test_capture_accepts_only_verified_provider_tipoff(warehouse, tmp_path, proof, expected):
@@ -198,50 +255,22 @@ def test_capture_accepts_only_verified_provider_tipoff(warehouse, tmp_path, proo
                 WHERE game_id = 'game'
                 """
             )
-        else:
+        elif proof in {"legacy_row", "legacy_zip", "missing"}:
             conn.execute("DELETE FROM odds_snapshot_game_starts WHERE game_id = 'game'")
         conn.execute(
             "UPDATE odds_snapshots SET raw_path = ? WHERE snapshot_id = 'snapshot'",
             (r"Z:\old_checkout\data\raw\odds\basketball_nba\odds_entry.json",),
         )
-    if proof != "missing":
-        raw = tmp_path / "raw" / "odds" / "basketball_nba" / "odds_entry.json"
-        raw.parent.mkdir(parents=True)
-        payload = {
-            "fetched_at": now.isoformat(),
-            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
-            "results": [
-                {
-                    "id": "provider-game",
-                    "sport_key": "basketball_nba",
-                    "commence_time": provider_start.isoformat(),
-                    "home_team": "San Antonio Spurs",
-                    "away_team": "Sacramento Kings",
-                    "bookmakers": [
-                        {
-                            "key": "draftkings",
-                            "markets": [
-                                {
-                                    "key": "h2h",
-                                    "outcomes": [
-                                        {"name": "San Antonio Spurs", "price": -130},
-                                        {"name": "Sacramento Kings", "price": 110},
-                                    ],
-                                },
-                                {
-                                    "key": "totals",
-                                    "outcomes": [
-                                        {"name": "Over", "point": 222.5, "price": -110},
-                                        {"name": "Under", "point": 222.5, "price": -110},
-                                    ],
-                                },
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-        raw.write_text(json.dumps(payload), encoding="utf-8")
+    if proof not in {"missing", "missing_original"}:
+        raw_root = (tmp_path / "bundle" if proof == "legacy_zip" else tmp_path) / "raw"
+        raw = raw_root / "odds" / "basketball_nba" / "odds_entry.json"
+        if proof == "contradictory_totals":
+            event = _original_event("provider-game", predictions.iloc[0].commence_time, line=223.5)
+        else:
+            event = _original_event("provider-game", provider_start.isoformat())
+        _write_original(raw, now, [event])
+        if proof == "legacy_zip":
+            create_evidence_zip(tmp_path / EVIDENCE_ZIP, [("raw", raw_root)])
 
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {expected: 1}
     with connect(db) as conn:
@@ -491,6 +520,13 @@ def test_paper_quote_order_preserves_submillisecond_and_legacy_clocks(
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {
         "quote_not_current_at_trial_book": 1
     }
+    if new_outcome == "recorded":
+        raw = db.parent / "data" / "raw" / "odds" / "basketball_nba" / "new.json"
+        _write_original(
+            raw, newer, [_original_event("provider-game", predictions.iloc[0].commence_time, line=229.5)]
+        )
+        with connect(db) as conn:
+            conn.execute("UPDATE odds_snapshots SET raw_path = ? WHERE snapshot_id = 'a-new'", (str(raw),))
     latest = predictions.assign(
         selected_totals_snapshot_id="a-new", selected_h2h_snapshot_id="a-new", total_line=229.5
     )
@@ -501,3 +537,50 @@ def test_paper_quote_order_preserves_submillisecond_and_legacy_clocks(
         assert tuple(decision) == ("a-new", 229.5)
     else:
         assert decision is None
+
+
+@pytest.mark.parametrize("original_agrees", [False, True])
+def test_real_forest_threshold_crossing_requires_exact_original_inputs(warehouse, original_agrees):
+    db, trial, predictions, fetched = warehouse
+    line = 220.5
+    raw_prices = (-130, 110)
+    normalized_prices = (200, -250)
+    inputs = pd.DataFrame(
+        [
+            [line, 0.0, *raw_prices],
+            [line, 0.0, *normalized_prices],
+        ],
+        columns=["total_close", "spread_close", "home_moneyline_close", "away_moneyline_close"],
+    )
+    engine = PredictionEngine(model_type=trial.model_type)
+    engine.totals_model = RandomForestRegressor(n_estimators=3, bootstrap=False, random_state=42).fit(
+        inputs, [line, line - 20]
+    )
+    engine.totals_features = inputs.columns.tolist()
+    engine.totals_std = 10.0
+    normalized = predictions.assign(
+        total_line=line, spread_line=0.0,
+        home_moneyline=normalized_prices[0], away_moneyline=normalized_prices[1],
+    )
+    archived = normalized.assign(home_moneyline=raw_prices[0], away_moneyline=raw_prices[1])
+    engine._score_totals(normalized)
+    engine._score_totals(archived)
+    assert abs(archived.iloc[0].under_predicted_prob - 0.5) < trial.min_edge
+    assert normalized.iloc[0].under_predicted_prob - 0.5 > trial.min_edge
+
+    with connect(db) as conn:
+        conn.execute("UPDATE odds SET line = ? WHERE game_id = 'game' AND market = 'totals'", (line,))
+        conn.executemany(
+            "UPDATE odds SET price_american = ? WHERE game_id = 'game' AND market = 'h2h' AND outcome = ?",
+            list(zip(normalized_prices, ("home", "away"))),
+        )
+        path = Path(conn.execute("SELECT raw_path FROM odds_snapshots").fetchone()[0])
+    _write_original(path, fetched, [_original_event(
+        "provider-game", predictions.iloc[0].commence_time, line=line,
+        moneylines=normalized_prices if original_agrees else raw_prices,
+    )])
+
+    expected = "recorded" if original_agrees else "unverified_original_quote"
+    assert capture_predictions(trial, normalized, trial.model_sha256, db) == {expected: 1}
+    with connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM paper_decisions").fetchone()[0] == int(original_agrees)
