@@ -7,8 +7,11 @@ import json
 import os
 import stat
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from typing import IO
 
 EVIDENCE_ZIP = "source_evidence.zip"
 EVIDENCE_MANIFEST = "evidence_manifest.json"
@@ -37,17 +40,80 @@ def _safe_name(name: str) -> None:
         raise ValueError(f"unsupported evidence archive path: {name}")
 
 
+def _stat_state(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+
 def _source_state(path: Path) -> tuple[int, int, int, int, int]:
     metadata = path.lstat()
     if path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
         raise ValueError(f"evidence source contains a symbolic link: {path}")
     if not stat.S_ISREG(metadata.st_mode):
         raise ValueError(f"evidence source is not a regular file: {path}")
-    return metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
+    return _stat_state(metadata)
 
 
-def create_evidence_zip(target: Path, roots: list[tuple[str, Path]]) -> dict:
-    """Freeze selected files, detecting changes to every file that was copied."""
+@contextmanager
+def _open_evidence_source(
+    path: Path, expected: tuple[int, int, int, int, int]
+) -> Iterator[IO[bytes]]:
+    if _source_state(path) != expected:
+        raise ValueError(f"evidence source changed during capture: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        if _stat_state(os.fstat(source.fileno())) != expected:
+            raise ValueError("evidence source changed before it was opened")
+        yield source
+    if _source_state(path) != expected:
+        raise ValueError(f"evidence source changed during capture: {path}")
+
+
+def _measure_member(source: IO[bytes], output: IO[bytes] | None = None) -> dict[str, int | str]:
+    digest = hashlib.sha256()
+    size = 0
+    while chunk := source.read(1024 * 1024):
+        digest.update(chunk)
+        size += len(chunk)
+        if output is not None:
+            output.write(chunk)
+    return {"size_bytes": size, "sha256": digest.hexdigest()}
+
+
+def _append_inherited_members(
+    target: zipfile.ZipFile, inherited: Path, files: dict[str, dict[str, int | str]]
+) -> None:
+    local_names = {name.casefold(): name for name in files}
+    try:
+        with (
+            _open_evidence_source(inherited, _source_state(inherited)) as source,
+            zipfile.ZipFile(source) as archive,
+        ):
+            for name, entry in _zip_manifest(archive)["files"].items():
+                local_name = local_names.get(name.casefold())
+                if local_name is not None and local_name != name:
+                    raise ValueError(f"inherited evidence path case conflicts with local file: {name}")
+                with archive.open(name) as member:
+                    if local_name is not None:
+                        observed = _measure_member(member)
+                    else:
+                        with target.open(name, "w", force_zip64=True) as output:
+                            observed = _measure_member(member, output)
+                if (
+                    observed["size_bytes"] != entry["size_bytes"]
+                    or observed["sha256"] != entry.get("sha256")
+                ):
+                    raise ValueError(f"inherited evidence ZIP checksum failed: {name}")
+                if local_name is not None and observed != files[local_name]:
+                    raise ValueError(f"inherited evidence differs from local file: {name}")
+                files[name] = observed
+    except (zipfile.BadZipFile, KeyError, json.JSONDecodeError) as error:
+        raise ValueError("invalid inherited evidence ZIP") from error
+
+
+def create_evidence_zip(
+    target: Path, roots: list[tuple[str, Path]], *, inherited: Path | None = None
+) -> dict:
+    """Freeze verified inherited members and stable local files in one archive."""
     sources = {}
     names = set()
     for prefix, root in roots:
@@ -75,23 +141,15 @@ def create_evidence_zip(target: Path, roots: list[tuple[str, Path]]) -> dict:
     files = {}
     with zipfile.ZipFile(target, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for name, (path, expected) in sources.items():
-            if _source_state(path) != expected:
+            with (
+                _open_evidence_source(path, expected) as source,
+                archive.open(name, "w", force_zip64=True) as output,
+            ):
+                files[name] = _measure_member(source, output)
+            if files[name]["size_bytes"] != expected[2]:
                 raise ValueError(f"evidence source changed during capture: {path}")
-            digest = hashlib.sha256()
-            copied = 0
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            with os.fdopen(os.open(path, flags), "rb") as source, archive.open(name, "w", force_zip64=True) as output:
-                metadata = os.fstat(source.fileno())
-                observed = (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
-                if observed != expected:
-                    raise ValueError("evidence source changed before it was opened")
-                while chunk := source.read(1024 * 1024):
-                    digest.update(chunk)
-                    copied += len(chunk)
-                    output.write(chunk)
-            if _source_state(path) != expected or copied != expected[2]:
-                raise ValueError(f"evidence source changed during capture: {path}")
-            files[name] = {"size_bytes": copied, "sha256": digest.hexdigest()}
+        if inherited is not None:
+            _append_inherited_members(archive, inherited, files)
         for path, expected in sources.values():
             if _source_state(path) != expected:
                 raise ValueError(f"evidence source changed during capture: {path}")
@@ -143,11 +201,9 @@ def validate_evidence_zip(path: Path) -> None:
         with zipfile.ZipFile(path) as archive:
             manifest = _zip_manifest(archive)
             for name, entry in manifest["files"].items():
-                digest = hashlib.sha256()
                 with archive.open(name) as source:
-                    while chunk := source.read(1024 * 1024):
-                        digest.update(chunk)
-                if digest.hexdigest() != entry.get("sha256"):
+                    observed = _measure_member(source)
+                if observed["sha256"] != entry.get("sha256"):
                     raise ValueError(f"evidence ZIP checksum failed: {name}")
     except (zipfile.BadZipFile, KeyError, json.JSONDecodeError) as error:
         raise ValueError("invalid evidence ZIP") from error

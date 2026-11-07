@@ -161,7 +161,9 @@ def create_backup(
                 raise ValueError("models changed during backup; retry after training finishes")
 
         if evidence_roots is not None:
-            evidence = create_evidence_zip(staging_dir / EVIDENCE_ZIP, evidence_roots)
+            restored = db_path.resolve().parent / EVIDENCE_ZIP
+            inherited = restored if restored.exists() or restored.is_symlink() else None
+            evidence = create_evidence_zip(staging_dir / EVIDENCE_ZIP, evidence_roots, inherited=inherited)
             print(f"  source evidence: {evidence['files']} files, {evidence['zip_bytes']} compressed bytes")
 
         files = {}

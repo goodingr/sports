@@ -135,6 +135,13 @@ the same staging and rollback mechanism as parquet sidecars. It remains there
 after temporary remote downloads are removed. Its original raw and research
 paths can be inspected with standard ZIP tools. Legacy backups remain readable.
 
+The next backup validates this installed bundle and carries its members forward
+with new local observations. Byte-identical overlaps are recorded once. A
+different file at the same archive path stops the backup and leaves previous
+snapshots available. Preserve both observations under distinct filenames before
+retrying. Keep the restored bundle beside the database even if you extract a
+copy for analysis.
+
 The local quote replay reader first checks the captured original path, then a
 relocated `raw/` tree beside the target database, then the corresponding `raw/`
 member inside the restored ZIP. File hashes are verified during replay. Absolute

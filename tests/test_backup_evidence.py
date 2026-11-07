@@ -55,6 +55,85 @@ def test_snapshot_and_restore_preserve_original_evidence_bytes(tmp_path):
     assert (target.parent / bundle.name).read_bytes() == bundle.read_bytes()
 
 
+def test_backup_after_restore_carries_original_and_new_evidence(tmp_path, monkeypatch):
+    first, original = _snapshot(tmp_path)
+    workspace = tmp_path / "worker"
+    db = workspace / "data" / "betting.db"
+    models = workspace / "models"
+    backup_archive.install_archive(first, db, models, force=False)
+    inherited = db.parent / backup_evidence.EVIDENCE_ZIP
+    assert not (db.parent / "raw").exists()
+    assert not (workspace / "reports").exists()
+
+    raw = db.parent / "raw"
+    raw.mkdir()
+    # An identical overlap is retained only once. The new observation is added.
+    (raw / "observation.json").write_bytes(original.read_bytes())
+    new_observation = b'{"captured_at":"2025-11-26T00:30:00Z","price":-105}'
+    (raw / "new.json").write_bytes(new_observation)
+    backup_root = workspace / "backups"
+    monkeypatch.setattr(backup_data, "_PROJECT_ROOT", workspace)
+    monkeypatch.setenv("SPORTS_DB_PATH", str(db))
+    monkeypatch.setenv("MODELS_DIR", str(models))
+    monkeypatch.setenv("BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("BACKUP_RETENTION_DAYS", "7")
+
+    assert backup_data.main() == 0
+    (second,) = backup_root.iterdir()
+    assert inherited.read_bytes() == (first / inherited.name).read_bytes()
+    with zipfile.ZipFile(second / inherited.name) as archive:
+        assert set(archive.namelist()) == {
+            backup_evidence.EVIDENCE_MANIFEST,
+            "raw/observation.json",
+            "raw/new.json",
+            "reports/research/experiment.py",
+            "reports/betting_benchmarks/after_raw_recovery.json",
+        }
+        assert archive.read("reports/research/experiment.py") == b"frozen_parameters = [1, 2]\n"
+
+    recovered = tmp_path / "recovered" / "betting.db"
+    backup_archive.install_archive(second, recovered, tmp_path / "recovered-models", force=False)
+    assert backup_evidence.read_raw_evidence(
+        "raw/observation.json", recovered.parent
+    ) == original.read_bytes()
+    assert backup_evidence.read_raw_evidence("raw/new.json", recovered.parent) == new_observation
+
+
+@pytest.mark.parametrize(
+    ("problem", "message"),
+    [
+        ("different", "differs from local file"),
+        ("case", "path case conflicts"),
+        ("tampered", "ZIP checksum failed"),
+    ],
+)
+def test_inherited_conflicts_abort_backup_publication(tmp_path, problem, message):
+    snapshot, original = _snapshot(tmp_path)
+    db = tmp_path / "restored" / "betting.db"
+    models = tmp_path / "restored-models"
+    backup_archive.install_archive(snapshot, db, models, force=False)
+    inherited = db.parent / backup_evidence.EVIDENCE_ZIP
+    raw = db.parent / "raw"
+    raw.mkdir()
+    name = "Observation.json" if problem == "case" else "observation.json"
+    local_bytes = b"different local capture" if problem == "different" else original.read_bytes()
+    (raw / name).write_bytes(local_bytes)
+    if problem == "tampered":
+        with zipfile.ZipFile(inherited) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        members["raw/observation.json"] = b"!" + original.read_bytes()[1:]
+        with zipfile.ZipFile(inherited, "w") as archive:
+            for name, contents in members.items():
+                archive.writestr(name, contents)
+    before = inherited.read_bytes()
+    with pytest.raises(ValueError, match=message):
+        backup_data.create_backup(
+            db, snapshot.parent, [], models_dir=models, evidence_roots=[("raw", raw)]
+        )
+    assert list(snapshot.parent.iterdir()) == [snapshot]
+    assert inherited.read_bytes() == before
+
+
 def test_restore_rejects_corrupt_evidence_and_keeps_prior_bundle(tmp_path):
     snapshot, _ = _snapshot(tmp_path)
     bundle = snapshot / backup_evidence.EVIDENCE_ZIP
