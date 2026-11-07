@@ -558,7 +558,9 @@ poetry run python -m src.data.ingest_nba_events --collect --observe-paper
 On Windows, `scripts/install_paper_close_task.ps1 -Discover` previews the
 `SportsPaperNBAEvents` task. Add `-Apply` to register it. It checks at 10, 25,
 40, and 55 minutes past the hour while limiting provider requests to one per
-rolling hour. It expires at the capture deadline, retains the known windows for
+rolling hour. If a scheduled check is at most two seconds early, it waits
+until the hour has elapsed and rechecks the cooldown under a write lock.
+It expires at the capture deadline, retains the known windows for
 the configured paper trial, and writes `logs/paper_events_YYYYMMDD.log`.
 
 Use the official schedule audit to measure games missing from the provider feed.

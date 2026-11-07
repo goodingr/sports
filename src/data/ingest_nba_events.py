@@ -12,6 +12,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from time import sleep
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,7 @@ _URL = f"https://api.the-odds-api.com/v4/sports/{_SPORT}/events"
 _SOURCE = "the-odds-api-nba-events"
 _ENTRY_PROBE_SOURCE = "the-odds-api-nba-entry-probe"
 _INTERVAL = timedelta(hours=1)
+_MAX_BOUNDARY_WAIT = timedelta(seconds=2)
 _HORIZON = timedelta(hours=48)
 _MATCH_TOLERANCE = timedelta(minutes=10)
 _ALIAS_TOLERANCE = timedelta(hours=2)
@@ -59,7 +61,7 @@ def _utc(value: object) -> datetime | None:
         return None
 
 
-def _recent_attempt(conn: sqlite3.Connection, now: datetime) -> bool:
+def _cooldown_remaining(conn: sqlite3.Connection, now: datetime) -> timedelta:
     latest = conn.execute(
         """
         SELECT r.started_at FROM source_runs r JOIN data_sources s ON s.source_id = r.source_id
@@ -68,11 +70,15 @@ def _recent_attempt(conn: sqlite3.Connection, now: datetime) -> bool:
         (_SOURCE,),
     ).fetchone()
     if latest is None:
-        return False
+        return timedelta()
     started = _utc(latest["started_at"])
     if started is None:
         raise RuntimeError("Invalid NBA event discovery attempt timestamp")
-    return now - started < _INTERVAL
+    return max(timedelta(), _INTERVAL - (now - started))
+
+
+def _recent_attempt(conn: sqlite3.Connection, now: datetime) -> bool:
+    return _cooldown_remaining(conn, now) > timedelta()
 
 
 def _reserve(path: Path, *, source: str = _SOURCE) -> tuple[str, int, datetime] | None:
@@ -414,7 +420,7 @@ def retain_entry_probe(
         raise
 
 
-def discover_events(*, collect: bool = False) -> dict[str, str | int]:
+def discover_events(*, collect: bool = False, wait_near_boundary: bool = False) -> dict[str, str | int]:
     """Inspect the discovery clock, or fetch one free NBA schedule batch when due."""
     load_env()
     path = resolve_db_path().resolve()
@@ -424,8 +430,12 @@ def discover_events(*, collect: bool = False) -> dict[str, str | int]:
         conn.row_factory = sqlite3.Row
         if conn.execute("SELECT 1 FROM sports WHERE league = 'NBA'").fetchone() is None:
             return {"status": "nba_unavailable"}
-        if _recent_attempt(conn, datetime.now(timezone.utc)):
+        remaining = _cooldown_remaining(conn, datetime.now(timezone.utc))
+    if remaining > timedelta():
+        if not (collect and wait_near_boundary) or remaining > _MAX_BOUNDARY_WAIT:
             return {"status": "cooldown"}
+        # The reservation below still enforces the full interval under a write lock.
+        sleep(remaining.total_seconds())
     if not collect:
         return {"status": "due"}
 
@@ -489,7 +499,7 @@ def main() -> None:
             if datetime.now(timezone.utc) >= datetime.fromisoformat(trial.review_at):
                 print(json.dumps({"status": "trial_inactive"}))
                 return
-            result = discover_events(collect=True)
+            result = discover_events(collect=True, wait_near_boundary=True)
             if result["status"] in {"discovered", "cooldown"}:
                 register_trial(trial)
         else:

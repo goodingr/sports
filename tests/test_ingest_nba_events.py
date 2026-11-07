@@ -113,7 +113,11 @@ def test_preview_reads_no_keys_and_creates_no_records(warehouse, monkeypatch):
 def test_scheduled_observation_retries_during_cooldown(warehouse, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["ingest_nba_events", "--collect", "--observe-paper"])
     calls = []
-    monkeypatch.setattr(discovery, "discover_events", lambda *, collect: {"status": "cooldown"})
+    def discover(*, collect, wait_near_boundary):
+        assert collect and wait_near_boundary
+        return {"status": "cooldown"}
+
+    monkeypatch.setattr(discovery, "discover_events", discover)
     monkeypatch.setattr(paper_ledger, "register_trial", calls.append)
 
     discovery.main()
@@ -372,6 +376,40 @@ def test_provider_errors_still_reserve_one_attempt_for_an_hour(
     assert not raw.exists()
     with connect(path) as conn:
         assert conn.execute("SELECT status FROM source_runs").fetchone()[0] == "failed"
+
+
+@pytest.mark.parametrize("another_collector", [False, True])
+def test_scheduled_discovery_waits_for_the_exact_boundary(warehouse, monkeypatch, another_collector):
+    path, _, clock = warehouse
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(clock.current)
+        return _response([])
+
+    monkeypatch.setattr(requests, "get", get)
+    assert discovery.discover_events(collect=True)["status"] == "discovered"
+    due = NOW + timedelta(hours=1)
+    clock.current = due - timedelta(seconds=3)
+    monkeypatch.setattr(discovery, "sleep", _unexpected)
+    assert discovery.discover_events(collect=True, wait_near_boundary=True) == {"status": "cooldown"}
+    clock.current = due - timedelta(milliseconds=110)
+
+    def sleep_at_boundary(seconds):
+        assert seconds == pytest.approx(0.110)
+        clock.current += timedelta(seconds=seconds)
+        if another_collector:
+            assert discovery.discover_events(collect=True)["status"] == "discovered"
+
+    monkeypatch.setattr(discovery, "sleep", sleep_at_boundary)
+    assert discovery.discover_events(collect=True) == {"status": "cooldown"}
+    outcome = discovery.discover_events(collect=True, wait_near_boundary=True)
+    assert outcome["status"] == ("cooldown" if another_collector else "discovered")
+    assert calls == [NOW, due]
+    with connect(path) as conn:
+        assert [
+            row[0] for row in conn.execute("SELECT started_at FROM source_runs ORDER BY started_at")
+        ] == [NOW.isoformat(), due.isoformat()]
 
 
 def test_concurrent_collectors_share_a_single_hourly_reservation(warehouse, monkeypatch):
