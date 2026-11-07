@@ -73,7 +73,7 @@ def warehouse(tmp_path, monkeypatch):
             return cls.current.astimezone(tz)
 
     path = tmp_path / "paper.db"
-    raw = tmp_path / "raw"
+    raw = tmp_path / "data" / "raw"
     trial = paper_ledger.load_trial()
     monkeypatch.setenv("SPORTS_DB_PATH", str(path))
     monkeypatch.setattr(paper_entry_poll, "RAW_DATA_DIR", raw)
@@ -171,8 +171,18 @@ def warehouse(tmp_path, monkeypatch):
 
 
 def _seed_quotes(events, *, fetched=NOW - timedelta(minutes=3)):
+    payload = {
+        "source": "the-odds-api",
+        "fetched_at": fetched.isoformat(),
+        "request": {"url": f"{paper_entry_poll._BASE_URL}/odds", "params": {}},
+        "results": events,
+    }
+    raw_path = paper_entry_poll.write_snapshot(
+        payload, paper_entry_poll.RAW_DATA_DIR / "odds" / "basketball_nba"
+    )
     load_odds_snapshot(
-        {"source": "the-odds-api", "fetched_at": fetched.isoformat(), "results": events},
+        payload,
+        raw_path=str(raw_path),
         region="us",
         sport_key="basketball_nba",
     )
@@ -244,7 +254,11 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
             row[0] for row in conn.execute("SELECT game_id FROM paper_fixture_observations")
         } == {"early-one", "early-two"}
         snapshot = conn.execute(
-            "SELECT * FROM odds_snapshots WHERE raw_path IS NOT NULL"
+            """
+            SELECT s.* FROM odds_snapshots s
+            JOIN paper_decisions d ON d.snapshot_id = s.snapshot_id
+            WHERE d.game_id = 'early-one'
+            """
         ).fetchone()
         assert dict(
             conn.execute(

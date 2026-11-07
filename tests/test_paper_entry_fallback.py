@@ -289,7 +289,7 @@ def test_match_keeps_earlier_pre_request_canonical_clock_after_schedule_refresh(
 @pytest.fixture
 def entry_runtime(warehouse, tmp_path, monkeypatch):
     path, trial = warehouse
-    raw = tmp_path / "raw"
+    raw = tmp_path / "data" / "raw"
 
     class ClockType(type):
         def __instancecheck__(cls, value):
@@ -1079,9 +1079,15 @@ def test_racing_cache_does_not_bypass_observed_earlier_clock(
     free = [_quote("a" * 32, free_start, "CHI", "PHI"), paid[1]]
     calls = _mock_sources(monkeypatch, paid, events=free, official=official)
     fake_request = requests.get
-    cache_receipt = tmp_path / "cache-receipt.json"
+    cache_dir = entry.RAW_DATA_DIR / "odds" / "basketball_nba" / "paper_entry" / "racing-cache"
+    cache_receipt = cache_dir / "receipt.json"
+    cache_receipt.parent.mkdir(parents=True)
+    fetched = clock.current - timedelta(seconds=1)
     raw = json.dumps(
         {
+            "source": trial.odds_source,
+            "fetched_at": fetched.isoformat(),
+            "request": {"url": f"{entry._BASE_URL}/odds", "params": {}},
             "results": paid,
             "provider_events_probe": {
                 "results": [
@@ -1101,7 +1107,7 @@ def test_racing_cache_does_not_bypass_observed_earlier_clock(
                 trial,
                 paid,
                 ordinary_due,
-                clock.current - timedelta(seconds=1),
+                fetched,
                 "racing-cache",
                 cache_receipt,
             )
