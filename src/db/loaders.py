@@ -447,7 +447,12 @@ def load_schedules(
                     home_team_id = excluded.home_team_id,
                     away_team_id = excluded.away_team_id,
                     venue = excluded.venue,
-                    status = excluded.status,
+                    status = CASE
+                        WHEN games.status = 'voided' THEN games.status
+                        WHEN ? = 'espn_api' AND excluded.status = 'scheduled'
+                            AND games.status IN ('final', 'in_progress') THEN games.status
+                        ELSE excluded.status
+                    END,
                     gsis_id = COALESCE(excluded.gsis_id, games.gsis_id),
                     pfr_id = COALESCE(excluded.pfr_id, games.pfr_id)
                 """,
@@ -464,6 +469,7 @@ def load_schedules(
                     status,
                     gsis_id,
                     pfr_id,
+                    source_version,
                 ),
             )
 
@@ -481,6 +487,9 @@ def load_schedules(
                     spread_close = excluded.spread_close,
                     total_close = excluded.total_close,
                     source_version = excluded.source_version
+                WHERE excluded.source_version != 'espn_api'
+                    OR (excluded.home_score IS NOT NULL AND excluded.away_score IS NOT NULL)
+                    OR (game_results.home_score IS NULL AND game_results.away_score IS NULL)
                 """,
                 (
                     game_id,
@@ -1081,14 +1090,22 @@ def load_odds_snapshot(
         LOGGER.info("No odds data to load")
         return
 
+    source = payload.get("source", "the-odds-api")
+    historical = source == "the-odds-api-history"
     fetched_at = payload.get("fetched_at")
     if fetched_at:
         try:
             fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
         except ValueError:
+            if historical:
+                raise
             fetched_dt = datetime.now(timezone.utc)
     else:
+        if historical:
+            raise ValueError("Historical odds snapshot requires an as-of timestamp")
         fetched_dt = datetime.now(timezone.utc)
+    if historical and fetched_dt.utcoffset() is None:
+        raise ValueError("Historical odds snapshot requires a timezone-aware timestamp")
 
     snapshot_id = uuid.uuid4().hex
 
@@ -1102,7 +1119,14 @@ def load_odds_snapshot(
             league=config["league"],
             default_market=config["default_market"],
         )
-        source = payload.get("source", "the-odds-api")
+        if historical and conn.execute(
+            """
+            SELECT 1 FROM odds_snapshots
+            WHERE sport_id = ? AND source = ? AND fetched_at_utc = ? AND raw_path IS ?
+            """,
+            (sport_id, source, fetched_dt.isoformat(), raw_path),
+        ).fetchone():
+            return
         conn.execute(
             "INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path) VALUES (?, ?, ?, ?, ?)",
             (snapshot_id, fetched_dt.isoformat(), sport_id, source, raw_path),
@@ -1123,14 +1147,31 @@ def load_odds_snapshot(
             home_team_id = _ensure_team(conn, sport_id, home_code, event.get("home_team"))
             away_team_id = _ensure_team(conn, sport_id, away_code, event.get("away_team"))
 
-            game_id = _find_game_by_details(
-                conn,
-                sport_id=sport_id,
-                home_team_id=home_team_id,
-                away_team_id=away_team_id,
-                start_iso=commence_iso,
-                odds_api_id=event.get("id"),
-            )
+            if historical:
+                matched = conn.execute(
+                    """
+                    SELECT game_id FROM games
+                    WHERE sport_id = ? AND home_team_id = ? AND away_team_id = ?
+                      AND status = 'final'
+                      AND ABS(unixepoch(start_time_utc) - unixepoch(?)) <= 600
+                      AND unixepoch(?) < MIN(unixepoch(start_time_utc), unixepoch(?))
+                    LIMIT 2
+                    """,
+                    (sport_id, home_team_id, away_team_id, commence_iso,
+                     fetched_dt.isoformat(), commence_iso),
+                ).fetchall()
+                if len(matched) != 1:
+                    continue
+                game_id = matched[0][0]
+            else:
+                game_id = _find_game_by_details(
+                    conn,
+                    sport_id=sport_id,
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    start_iso=commence_iso,
+                    odds_api_id=event.get("id"),
+                )
 
             if not game_id:
                 # 1. Generate Canonical Internal ID
@@ -1173,13 +1214,13 @@ def load_odds_snapshot(
                             event.get("id"),
                         ),
                     )
-            else:
+            elif not historical:
                 conn.execute(
                     """
                     UPDATE games
                     SET odds_api_id = COALESCE(?, odds_api_id),
                         start_time_utc = COALESCE(?, start_time_utc),
-                        status = CASE WHEN status = 'final' THEN status ELSE 'scheduled' END
+                        status = CASE WHEN status IN ('final', 'voided') THEN status ELSE 'scheduled' END
                     WHERE game_id = ?
                     """,
                     (event.get("id"), commence_iso, game_id),
@@ -1273,7 +1314,7 @@ def load_odds_snapshot(
                         )
             
             # Update game_results with moneylines from outcomes (after processing all bookmakers)
-            if outcomes_by_key or total_close_value is not None:
+            if not historical and (outcomes_by_key or total_close_value is not None):
                 home_ml = outcomes_by_key.get("home")
                 away_ml = outcomes_by_key.get("away")
                 total_close_norm = _safe_float(total_close_value)

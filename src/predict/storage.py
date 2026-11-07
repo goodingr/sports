@@ -70,6 +70,8 @@ def _empty_game_odds_columns(games_df: pd.DataFrame) -> pd.DataFrame:
         "spread_line",
         "selected_h2h_book",
         "selected_totals_book",
+        "selected_totals_snapshot_id",
+        "selected_totals_book_id",
         "selected_odds_fetched_at",
     ]:
         games_df[column] = None
@@ -140,6 +142,8 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
                 games_df.at[idx, "over_moneyline"] = _clean_value(over["price_american"])
                 games_df.at[idx, "under_moneyline"] = _clean_value(under["price_american"])
                 games_df.at[idx, "selected_totals_book"] = _clean_value(over["book_name"])
+                games_df.at[idx, "selected_totals_snapshot_id"] = over["snapshot_id"]
+                games_df.at[idx, "selected_totals_book_id"] = int(over["book_id"])
             else:
                 for _, odd in totals.iterrows():
                     side = odd["side"]
@@ -186,7 +190,7 @@ def load_games_from_database(league: str, days_ahead: int = 7) -> pd.DataFrame:
               AND g.start_time_utc IS NOT NULL
               AND julianday(g.start_time_utc) >= julianday('now')
               AND julianday(g.start_time_utc) <= julianday('now', ?)
-              AND COALESCE(g.status, 'scheduled') != 'final'
+              AND COALESCE(g.status, 'scheduled') NOT IN ('final', 'voided')
             ORDER BY g.start_time_utc
         """
         games_df = pd.read_sql_query(query, conn, params=(sport_id, f"+{days_ahead} days"))

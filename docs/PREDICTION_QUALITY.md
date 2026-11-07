@@ -49,9 +49,10 @@ poetry run python -m src.features.betting_model_input `
 Totals rows include opening line, latest pre-game line, line movement, no-vig
 probabilities, market hold, line dispersion, best available side prices, rolling
 prior team scoring/allowed form, rest, and back-to-back flags. Moneyline exports
-are one row per bettable side/team. The date filter is strictly before game start
-for market snapshots and strictly before the target game for team-history
-features.
+are one row per side and game. Quotes must precede kickoff, and team form and
+injury features use the selected quote time as their cutoff. Training excludes
+three-way soccer moneylines and historical NBA and soccer enrichments that lack
+quote-time provenance.
 
 ## Train And Validate Candidate Models
 
@@ -70,6 +71,11 @@ Supported `--model-type` values are `market_only`, `line_movement`, `logistic`,
 `gradient_boosting`, `random_forest`, and `xgboost`. Start every league with
 `market_only` and `line_movement`; candidate models must beat those baselines
 out of sample before their rules can move toward approval.
+
+Each validation fold keeps all rows for a game together. Model fitting and
+calibration use outcomes available before the earliest quote in the fold.
+Historical results lack observed settlement times, so the benchmark assumes
+they become available six hours after kickoff.
 
 The trainer writes:
 
@@ -95,6 +101,10 @@ poetry run python -m src.models.train_betting `
 
 The benchmark ranks only rules declared in `config/betting_benchmark.yml`, adds
 book/timing CLV slices to candidate rankings, and never auto-promotes a rule.
+For a chronological holdout, pass `--holdout-start YYYY-MM-DD` to
+`python -m src.models.betting_benchmark`. The benchmark ranks rules using
+development outcomes available before that UTC boundary, then evaluates only
+the top candidate meeting the sample floor on quotes at or after it.
 Each run also writes `reports/betting_benchmarks/triage_<timestamp>.json`. The
 triage artifact groups candidate failures by league, market, model, and strict
 failure reason, reports timing/CLV data gaps, and lists the failing candidate
@@ -184,9 +194,14 @@ poetry run python -m src.data.backfill_total_close_provenance `
   --output reports/data_quality/total_close_provenance_latest_pregame_write_latest.json
 ```
 
-The totals benchmark uses same-book close lines from the odds snapshot history
-when available. Legacy `game_results.total_close` is retained for lineage
-auditing, but public launch decisions should use same-book CLV diagnostics.
+The totals benchmark counts same-book closing quotes captured after the decision
+and within 90 minutes before kickoff. Legacy `game_results.total_close` is retained
+for lineage auditing.
+
+The historical odds backfill uses the provider's archived snapshot time and only
+attaches pregame odds to uniquely matched final fixtures. It preserves existing
+schedule, score, and close records. The [historical odds API](https://the-odds-api.com/liveapi/guides/v4/#get-historical-odds)
+requires a paid provider plan.
 
 ## Repair NBA Availability IDs
 
@@ -220,6 +235,8 @@ A subscriber-facing rule must satisfy all of these:
 - ROI at least 5%;
 - bootstrap 95% ROI lower bound above 0%;
 - model Brier score beats the no-vig market baseline;
+- at least 80% closing-line coverage, positive average closing-line value, and
+  positive closing-line value on more than half of matched bets;
 - latest available odds snapshot is not older than the configured
   `max_hours_before_start`;
 - rule is predeclared as `approved` in `config/published_rules.yml`.
@@ -252,8 +269,8 @@ and the historical quality summary that justified publishing the rule.
 
 ## Promotion Workflow
 
-Promotion is explicit and gated. A candidate rule can move into `approved_rules`
-only when it passes at least one strict report source:
+Promotion requires a passing report for the current rule and launch thresholds.
+A locked rule's sample begins at its recorded lock time.
 
 ```powershell
 poetry run python -m src.predict.publishable_bets promote `
@@ -266,6 +283,60 @@ If the candidate does not pass, the command exits non-zero and does not edit the
 rules file. Approved rules that later fail the gate produce no paid bets; add
 `disabled: true` or set `status: disabled` in `config/published_rules.yml` to
 turn one off intentionally.
+
+## Prospective NBA Paper Trial
+
+The private trial in `config/paper_trial.yml` tests full-game NBA totals at
+DraftKings. It pins the random forest artifact by SHA-256 and records the first
+qualifying decision per fixture. A decision requires a model edge of at least
+20 percentage points against the two-sided no-vig market and positive modeled
+value at the quoted price. The model's two moneyline inputs must match the
+snapshot that supplied the totals pair. The pinned model has zero dependence on
+its spread input.
+
+The capture window runs from 12 hours to 15 minutes before scheduled tipoff.
+The latest totals snapshot for the fixture must have been fetched within 10 minutes of
+capture. This measures the quote the feed returned, without assuming sportsbook
+acceptance or recording any wager.
+
+The scheduled pipeline runs the paper update after data ingestion and captures
+eligible decisions during NBA prediction refresh. To run the same steps locally,
+use these commands from the repository root.
+
+```powershell
+poetry run python -m src.predict.paper_ledger report
+poetry run python -m src.predict.paper_ledger update
+poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --region us --force-refresh
+poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper
+```
+
+The update command registers the trial on its first run and appends available
+settlements. The report command reads the existing ledger. The refresh command
+consumes live odds quota. The warehouse backup includes trial registrations,
+decisions, and grades.
+
+Settlement uses full-game final scores, including overtime, at one paper unit
+per decision. A push returns the stake. Cancelled games and starts that moved
+more than 10 minutes are voided. A small start-time correction uses the earlier
+start for lead time and closing eligibility. A decision with less than 15 minutes
+of lead time against the corrected start is voided. Closing line value uses the latest
+paired totals quote from the same book and feed within 90 minutes before tipoff
+and strictly after the decision. A missing close stays missing in the report.
+
+Preview the closing collector with
+`poetry run python -m src.predict.paper_close_poll`. Add `--collect` to allow
+one batched request when pending decisions need a close and have 10 to 60
+minutes until tipoff. The collector checks a 200-credit reserve, spaces requests
+at least 15 minutes apart, and allows up to three attempts per UTC day. A preview
+only reads the warehouse. The collector uses the currently active provider key.
+
+Capture ends February 1, 2027 at midnight Eastern time. The final report freezes
+grades one week later and requires at least 150 graded decisions, 5% flat-unit
+ROI, a positive lower 95% date-clustered bootstrap bound, a lower Brier score than
+the quoted no-vig market, and at least 80% same-book closing coverage with
+positive average CLV and positive CLV on more than half the matched decisions.
+Unresolved decisions at the grading cutoff fail review. This verdict remains
+internal to the trial. The paid feed uses the separate approval workflow above.
 
 ## Current Intended Use
 

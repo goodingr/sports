@@ -364,6 +364,34 @@ def test_publish_guardrail_blocks_legacy_rows_for_benchmarked_rule(
     assert not output_path.exists()
 
 
+def test_live_matching_requires_contract_and_rule_id_on_each_pick():
+    frame = pd.DataFrame(
+        [
+            {"game_id": "wrong-rule", "rule_id": "another", "feature_contract": "canonical"},
+            {"game_id": "wrong-contract", "rule_id": "current", "feature_contract": "legacy"},
+            {"game_id": "matched", "rule_id": "current", "feature_contract": "canonical"},
+        ]
+    )
+
+    matching, mismatches, missing_id = publisher._matching_live_rows(
+        frame, {"id": "current", "feature_contract": "canonical"}
+    )
+
+    assert matching["game_id"].tolist() == ["matched"]
+    assert not mismatches
+    assert not missing_id
+
+
+def test_locked_rule_evidence_excludes_prelock_predictions():
+    bets = pd.DataFrame({
+        "game_id": ["before", "after"],
+        "predicted_at": ["2026-03-01T00:00:00Z", "2026-03-03T00:00:00Z"],
+    })
+    rule = {"id": "locked", "locked_at": "2026-03-02T00:00:00Z"}
+
+    assert publisher.filter_bets_for_rule(bets, rule)["game_id"].tolist() == ["after"]
+
+
 def test_promote_candidate_rule_requires_passing_gate(tmp_path):
     failing_db = tmp_path / "failing.db"
     passing_db = tmp_path / "passing.db"

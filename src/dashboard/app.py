@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import date, timedelta
+import sqlite3
+from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from typing import Optional, Tuple
 
@@ -12,6 +14,9 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import Dash, Input, Output, State, dcc, html, ctx, no_update
 from dash.exceptions import PreventUpdate
+
+from src.db.core import resolve_db_path
+from src.predict.paper_report import build_paper_report
 
 from . import components
 from .data import (
@@ -256,6 +261,7 @@ def _navbar(pathname: Optional[str]) -> dbc.Nav:
             dbc.NavLink("Moneyline", href="/", active=pathname == "/" or pathname == ""),
             dbc.NavLink("Winner Predictions", href="/predictions", active=pathname == "/predictions"),
             dbc.NavLink("Over/Under", href="/overunder", active=pathname == "/overunder"),
+            dbc.NavLink("Paper Trials", href="/paper", active=pathname == "/paper"),
             dbc.NavLink("Raw Data", href="/data", active=pathname == "/data"),
         ],
         pills=True,
@@ -824,6 +830,19 @@ app.layout = html.Div(
 )
 
 
+def _paper_layout(pathname: str) -> dbc.Container:
+    return dbc.Container(
+        [
+            _navbar(pathname),
+            html.H2("Prospective paper trials"),
+            html.P("Tracks pregame decisions and settlements in the internal research ledger."),
+            dbc.Button("Refresh trial evidence", id="refresh-paper", className="mb-3"),
+            dcc.Loading(html.Div(id="paper-trials")),
+        ],
+        fluid=True,
+    )
+
+
 @app.callback(Output("page-content", "children"), Input("url", "pathname"))
 def render_page(pathname: Optional[str]):
     if pathname == "/predictions":
@@ -832,7 +851,91 @@ def render_page(pathname: Optional[str]):
         return _overunder_layout(pathname)
     if pathname == "/data":
         return _data_layout(pathname)
+    if pathname == "/paper":
+        return _paper_layout(pathname)
     return _dashboard_layout(pathname)
+
+
+@app.callback(Output("paper-trials", "children"), Input("refresh-paper", "n_clicks"))
+def show_paper_trials(_n_clicks: Optional[int]):
+    db_uri = f"{resolve_db_path().resolve().as_uri()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(db_uri, uri=True, timeout=2)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'paper_trials'"
+            ).fetchone():
+                return components.empty_state("No paper trial is registered yet.")
+            report = build_paper_report(conn, datetime.now(timezone.utc))
+    except (sqlite3.Error, ValueError, KeyError):
+        return dbc.Alert("Paper trial evidence is temporarily unavailable.", color="warning")
+    if not report["trials"]:
+        return components.empty_state("No paper trial is registered yet.")
+
+    def percent(value: Optional[float]) -> str:
+        return f"{value:.1%}" if value is not None else "—"
+
+    cards = []
+    for trial in report["trials"]:
+        spec = trial["specification"]
+        metrics = trial["metrics"]
+        interval = metrics["bootstrap_roi_interval"]
+        roi_range = (
+            f"95% interval {percent(interval['low'])} to {percent(interval['high'])}"
+            if interval else "95% interval pending"
+        )
+        review = pd.Timestamp(trial["final_review_at"]).tz_convert(DISPLAY_TIMEZONE)
+        brier_model = metrics["model_brier"]
+        brier_market = metrics["market_brier"]
+        brier = (
+            f"{brier_model:.3f} vs {brier_market:.3f}"
+            if brier_model is not None and brier_market is not None else "—"
+        )
+        cards.append(
+            dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.H4(f"{spec['league']} {spec['market']} at {spec['book'].title()}"),
+                        html.P(
+                            f"{trial['review_status'].title()} · "
+                            f"Final review {review.strftime('%b %d, %Y %Z')}"
+                        ),
+                        dbc.Row(
+                            [
+                                dbc.Col(metric_card(
+                                    "Graded decisions",
+                                    f"{metrics['graded_decisions']} / {spec['min_decisions']}",
+                                    subtitle=f"{metrics['pending']} awaiting settlement",
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Paper ROI", percent(metrics["roi"]), subtitle=roi_range,
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Brier score", brier, subtitle="Model vs no-vig book",
+                                ), md=3),
+                                dbc.Col(metric_card(
+                                    "Closing-line coverage",
+                                    percent(metrics["clv_coverage"]),
+                                    subtitle=(
+                                        f"{metrics['clv_count']} same-book closes, "
+                                        f"{percent(metrics['clv_win_rate'])} improved"
+                                    ),
+                                ), md=3),
+                            ],
+                            className="g-3",
+                        ),
+                        html.Small(
+                            f"Review verdict {trial['review_verdict']}"
+                            if trial["review_verdict"] else f"Trial {trial['trial_id']}",
+                            className="d-block mt-3",
+                        ),
+                    ]
+                ),
+                className="mb-3",
+            )
+        )
+    return cards
 
 
 @app.callback(

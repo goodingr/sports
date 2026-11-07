@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+import pandas as pd
 import pytest
 
 from src.db import loaders
@@ -59,6 +60,32 @@ def test_has_successful_source_run(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     assert loaders.has_successful_source_run("demo_source") is True
     assert loaders.has_successful_source_run("missing") is False
+
+
+def test_espn_schedule_refresh_preserves_stored_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "schedules.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+    fixture = {
+        "game_id": "EPL_123",
+        "season": 2026,
+        "gameday": "2026-01-01",
+        "gametime": "18:00",
+        "home_team": "Arsenal",
+        "away_team": "Chelsea",
+        "home_score": 2,
+        "away_score": 0,
+    }
+    loaders.load_schedules(pd.DataFrame([fixture]), source_version="espn_scoreboard", league="EPL")
+    schedule = {**fixture, "home_score": None, "away_score": None}
+    loaders.load_schedules(pd.DataFrame([schedule]), source_version="espn_api", league="EPL")
+
+    with sqlite3.connect(db_path) as conn:
+        result = conn.execute(
+            "SELECT status, home_score, away_score, source_version FROM games JOIN game_results USING (game_id)"
+        ).fetchone()
+    assert result == ("final", 2, 0, "espn_scoreboard")
 
 
 def test_load_odds_snapshot_persists_total_close_lineage(
@@ -192,3 +219,28 @@ def test_load_odds_snapshot_keeps_latest_pregame_total_close(
     assert row["total_close"] == 222.5
     assert row["total_close_snapshot_time_utc"] == "2026-01-01T19:00:00+00:00"
     assert row["total_close_book"] == "DraftKings"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE games SET status = 'final'")
+    archive = payload("2026-01-01T19:30:00+00:00", 223.5)
+    archive["source"] = "the-odds-api-history"
+    archive["results"][0]["commence_time"] = "2026-01-01T20:05:00Z"
+    archive["results"].append({**archive["results"][0], "commence_time": "2026-01-02T20:00:00Z"})
+
+    for _ in range(2):
+        loaders.load_odds_snapshot(archive, raw_path="archive.json", sport_key="basketball_nba")
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT start_time_utc, status FROM games"
+        ).fetchall() == [("2026-01-01T20:00:00+00:00", "final")]
+        assert conn.execute("SELECT total_close FROM game_results").fetchone() == (222.5,)
+        assert conn.execute(
+            """
+            SELECT DISTINCT fetched_at_utc, line FROM odds JOIN odds_snapshots USING (snapshot_id)
+            WHERE source = 'the-odds-api-history'
+            """
+        ).fetchall() == [("2026-01-01T19:30:00+00:00", 223.5)]
+        assert conn.execute(
+            "SELECT COUNT(*) FROM odds_snapshots WHERE source = 'the-odds-api-history'"
+        ).fetchone() == (1,)

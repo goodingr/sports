@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Master pipeline script. Orchestrates ingest, data hygiene, quality
-    benchmarking, current prediction refresh, and paid-picks publishing.
+    benchmarking, current prediction refresh, paper tracking, and paid-picks publishing.
 #>
 
 param(
@@ -11,13 +11,20 @@ param(
     [switch]$SkipPrediction = $false,
     [switch]$SkipPublish = $false,
     [switch]$SoccerOnly = $false,
-    [switch]$SkipOdds = $false
+    [switch]$SkipOdds = $false,
+    [switch]$SkipPaper = $false
 )
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
+
+$paperEnabled = -not $SkipPaper -and (Test-Path -LiteralPath "config/paper_trial.yml" -PathType Leaf)
+$paperFailed = $false
+$runBenchmark = -not $SkipTraining -and -not $SkipBenchmark
+$releaseQualityPassed = $true
+$paidOutput = "reports/publishable_bets/latest_publishable_bets.json"
 
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $logFile = "logs/pipeline_${timestamp}.log"
@@ -57,36 +64,35 @@ Write-Host "=== Starting Paid-Release Data Hygiene ==="
 python -m src.data.quality --prune-orphans --warn-only --leagues $paidReleaseLeagues
 python -m src.data.score_backfill --resolve-stale --lookback-days 14 --leagues $paidReleaseLeagues
 python -m src.data.quality --finalize-scored --close-unresolved-stale --warn-only --leagues $paidReleaseLeagues
-python -m src.data.quality --warn-only --leagues $paidReleaseLeagues
-
-# 2. Quality-first benchmark (Default, unless skipped)
-if (-not $SkipTraining -and -not $SkipBenchmark) {
-    Write-Host "=== Starting Paid-Picks Data Quality Gate ==="
+if ($runBenchmark -or -not $SkipPublish) {
     python -m src.data.quality --leagues $paidReleaseLeagues
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Paid-release data quality failed. Skipping benchmark."
-        exit $LASTEXITCODE
+    $releaseQualityPassed = $LASTEXITCODE -eq 0
+    if (-not $releaseQualityPassed) {
+        Write-Warning "Paid-release data quality failed."
+        if (-not $SkipPublish -and (Test-Path -LiteralPath $paidOutput -PathType Leaf)) {
+            Remove-Item -LiteralPath $paidOutput -ErrorAction Stop
+        }
     }
-
-    Write-Host "=== Starting Rolling-Origin Betting Benchmark ==="
-    python -m src.models.train_betting `
-        --benchmark `
-        --benchmark-config config/betting_benchmark.yml `
-        --benchmark-output-dir reports/betting_benchmarks
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Betting benchmark failed. Aborting."
-        exit $LASTEXITCODE
-    }
-} else {
-    Write-Host "=== Skipping Paid-Picks Benchmark ==="
 }
 
-# 3. Predict. These current predictions are not subscriber-facing unless the
+if ($paperEnabled) {
+    Write-Host "=== Updating Paper Ledger ==="
+    & poetry run python -m src.predict.paper_ledger update
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Paper ledger update failed (exit=$LASTEXITCODE)."
+        $paperFailed = $true
+    }
+}
+
+# 2. Predict. These current predictions are not subscriber-facing unless the
 # publish gate matches them to an approved, passing rule.
 if (-not $SkipPrediction) {
     Write-Host "=== Starting Current Prediction Refresh ==="
-    & "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly
-    if ($LASTEXITCODE -ne 0) {
+    & "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly -Paper:($paperEnabled -and -not $SkipOdds)
+    if ($LASTEXITCODE -eq 2) {
+        Write-Warning "The NBA paper capture run failed. Other predictions completed."
+        $paperFailed = $true
+    } elseif ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Prediction pipeline failed."
         exit $LASTEXITCODE
     }
@@ -94,13 +100,13 @@ if (-not $SkipPrediction) {
     Write-Host "=== Skipping Current Prediction Refresh ==="
 }
 
-# 4. Paid-picks publish gate. --allow-empty keeps fail-closed no-pick days from
+# 3. Paid-picks publish gate. --allow-empty keeps fail-closed no-pick days from
 # failing automation.
-if (-not $SkipPublish) {
+if (-not $SkipPublish -and $releaseQualityPassed) {
     Write-Host "=== Starting Paid-Picks Publish Gate ==="
     python -m src.predict.publishable_bets publish `
         --rules config/published_rules.yml `
-        --output reports/publishable_bets/latest_publishable_bets.json `
+        --output $paidOutput `
         --quality-output reports/publishable_bets/latest_quality_report.json `
         --leagues $paidReleaseLeagues `
         --allow-empty
@@ -112,6 +118,24 @@ if (-not $SkipPublish) {
     Write-Host "=== Skipping Paid-Picks Publish Gate ==="
 }
 
+# 4. Benchmark after publishing so research does not delay the prediction refresh.
+if ($runBenchmark -and $releaseQualityPassed) {
+    Write-Host "=== Starting Rolling-Origin Betting Benchmark ==="
+    python -m src.models.train_betting `
+        --benchmark `
+        --benchmark-config config/betting_benchmark.yml `
+        --benchmark-output-dir reports/betting_benchmarks
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Betting benchmark failed."
+        exit $LASTEXITCODE
+    }
+} else {
+    Write-Host "=== Skipping Paid-Picks Benchmark ==="
+}
+
 Write-Host "=== Master Pipeline Completed ==="
 
 Stop-Transcript
+if ($paperFailed -or -not $releaseQualityPassed) {
+    exit 1
+}

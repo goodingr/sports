@@ -475,6 +475,37 @@ def test_nba_advanced_and_availability_features_are_pregame(tmp_path):
     assert row["home_injuries_impact_points_l10"] == 18
 
 
+def test_form_and_injuries_use_each_quote_time(tmp_path):
+    db_path = tmp_path / "market.db"
+    _create_market_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = '2026-01-01T10:00:00Z' "
+            "WHERE game_id = 'PREV_HOME'"
+        )
+        conn.execute(
+            """
+            INSERT INTO injury_reports (
+                league, team_id, team_code, player_name, position, status,
+                report_date, game_date, source_key
+            ) VALUES (
+                'NBA', 1, 'LAL', 'Afternoon Out', 'G', 'Out',
+                '2026-01-01T17:00:00Z', '2026-01-01', 'test'
+            )
+            """
+        )
+
+    rows = build_totals_model_input(db_path, leagues=["NBA"], latest_only=False)
+    opening = rows[rows["snapshot_id"] == "OPEN"].iloc[0]
+    latest = rows[rows["snapshot_id"] == "LATEST"].iloc[0]
+
+    assert opening["home_games_l5"] == 0
+    assert pd.isna(opening["home_injuries_out"])
+    assert latest["home_games_l5"] == 1
+    assert latest["home_score_for_l5"] == 100
+    assert latest["home_injuries_out"] == 1
+
+
 def test_feature_coverage_report_includes_density_and_drop_reasons(tmp_path):
     db_path = tmp_path / "market.db"
     _create_market_db(db_path)

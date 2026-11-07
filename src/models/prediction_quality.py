@@ -37,6 +37,7 @@ class QualityGate:
     min_bootstrap_roi_low: float = 0.0
     min_avg_clv: float = 0.0
     min_clv_win_rate: float = 0.5
+    min_clv_coverage: float = 0.80
     max_hours_before_start: Optional[float] = 72.0
     require_positive_clv: bool = True
     bootstrap_samples: int = 3000
@@ -480,6 +481,7 @@ def summarize_bets(
             "win_rate": None,
             "profit": 0.0,
             **closing_line_value_summary(bets),
+            "closing_line_value_coverage": 0.0,
             "passes_launch_gate": False,
         }
     frame = bets.dropna(subset=["profit", "predicted_prob", "won"]).copy()
@@ -498,6 +500,7 @@ def summarize_bets(
         market_probs = frame["no_vig_market_prob"].fillna(frame["implied_prob"])
         market_brier = float(brier_score_loss(frame["won"].astype(int), market_probs))
     clv = closing_line_value_summary(frame)
+    clv_coverage = clv["closing_line_value_count"] / len(frame) if len(frame) else 0.0
 
     ordered_won = (
         frame.sort_values("start_time_utc")["won"]
@@ -522,6 +525,7 @@ def summarize_bets(
         "bootstrap_roi_median": ci_median,
         "bootstrap_roi_high": ci_high,
         **clv,
+        "closing_line_value_coverage": clv_coverage,
         "max_drawdown": max_drawdown(frame["profit"]),
         "max_losing_streak": max_losing_streak(ordered_won),
         "calibration_bins": calibration_bins(frame),
@@ -533,6 +537,7 @@ def summarize_bets(
                 not gate.require_positive_clv
                 or (
                     clv["closing_line_value_count"] > 0
+                    and clv_coverage >= gate.min_clv_coverage
                     and clv["avg_closing_line_value"] is not None
                     and clv["avg_closing_line_value"] > gate.min_avg_clv
                     and clv["closing_line_value_win_rate"] is not None
@@ -590,6 +595,15 @@ def filter_bets_for_rule(
     frame = bets.copy()
     if frame.empty or rule_is_disabled(rule):
         return _empty_like(frame)
+
+    if rule.get("locked_at") is not None:
+        if "predicted_at" not in frame.columns:
+            return _empty_like(frame)
+        locked_at = pd.to_datetime(rule["locked_at"], utc=True, errors="coerce")
+        if pd.isna(locked_at):
+            return _empty_like(frame)
+        predicted_at = pd.to_datetime(frame["predicted_at"], utc=True, errors="coerce", format="mixed")
+        frame = frame[predicted_at >= locked_at]
 
     if rule.get("market"):
         if "market" not in frame.columns:
@@ -656,6 +670,8 @@ def evaluate_rule(bets: pd.DataFrame, rule: dict[str, Any], gate: QualityGate) -
     if gate.require_positive_clv:
         if summary.get("closing_line_value_count", 0) <= 0:
             failures.append("missing_clv")
+        if summary.get("closing_line_value_coverage", 0.0) < gate.min_clv_coverage:
+            failures.append(f"clv_coverage_below_{gate.min_clv_coverage}")
         if (
             summary.get("avg_closing_line_value") is None
             or summary["avg_closing_line_value"] <= gate.min_avg_clv
@@ -894,6 +910,7 @@ def _read_prediction_artifact(path: Path) -> pd.DataFrame:
 
 def _quality_gate_from_config(config: dict[str, Any]) -> QualityGate:
     raw = config.get("launch_gate") or {}
+    max_age = raw.get("max_hours_before_start", QualityGate.max_hours_before_start)
     return QualityGate(
         min_bets_narrow=int(raw.get("min_bets_narrow", QualityGate.min_bets_narrow)),
         min_bets_multi_league=int(
@@ -905,11 +922,8 @@ def _quality_gate_from_config(config: dict[str, Any]) -> QualityGate:
         ),
         min_avg_clv=float(raw.get("min_avg_clv", QualityGate.min_avg_clv)),
         min_clv_win_rate=float(raw.get("min_clv_win_rate", QualityGate.min_clv_win_rate)),
-        max_hours_before_start=(
-            None
-            if raw.get("max_hours_before_start") is None
-            else float(raw.get("max_hours_before_start", QualityGate.max_hours_before_start))
-        ),
+        min_clv_coverage=float(raw.get("min_clv_coverage", QualityGate.min_clv_coverage)),
+        max_hours_before_start=None if max_age is None else float(max_age),
         require_positive_clv=bool(
             raw.get("require_positive_clv", QualityGate.require_positive_clv)
         ),
@@ -1137,14 +1151,18 @@ def configured_rules(config: dict[str, Any]) -> list[dict[str, Any]]:
         for rule in config.get("approved_rules", []) or []
     ]
     locked = [
-        {**rule, "status": rule.get("status", "locked_candidate")}
+        {**rule, "status": "locked_candidate", "disabled": rule_is_disabled(rule)}
         for rule in config.get("locked_candidate_rules", []) or []
     ]
     candidates = [
-        {**rule, "status": rule.get("status", "candidate")}
+        {**rule, "status": "candidate", "disabled": rule_is_disabled(rule)}
         for rule in config.get("candidate_rules", []) or []
     ]
-    return [*approved, *locked, *candidates]
+    rules = [*approved, *locked, *candidates]
+    ids = [str(rule["id"]) for rule in rules]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Betting rule IDs must be unique across all rule sections.")
+    return rules
 
 
 def build_quality_report(

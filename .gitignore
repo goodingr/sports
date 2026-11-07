@@ -69,6 +69,8 @@ data/**/*.db
 # Database files
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
 
 # Archives
 *.zip

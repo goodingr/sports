@@ -33,6 +33,17 @@ LEAGUE_TO_SPORT_KEY = {
 }
 
 
+def _request_metadata(url: str, params: dict[str, str]) -> dict[str, Any]:
+    return {"url": url, "params": {name: value for name, value in params.items() if name != "apiKey"}}
+
+
+def _request_odds(url: str, params: dict[str, str]) -> requests.Response:
+    try:
+        return requests.get(url, params=params, timeout=10, allow_redirects=False)
+    except requests.RequestException:
+        raise RuntimeError("Odds API connection failed") from None
+
+
 def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
     """Call The Odds API for the configured sport/market."""
 
@@ -59,41 +70,28 @@ def fetch_odds(settings: OddsAPISettings) -> Dict[str, Any]:
         # Always use the current active key from the manager
         params["apiKey"] = OddsAPIKeyManager.get_current_key()
         
-        response = requests.get(url, params=params, timeout=10)
-        try:
-            response.raise_for_status()
-            break # Success
-        except requests.HTTPError as exc:  # pragma: no cover - network guard
-            if response.status_code == 401:
-                LOGGER.warning("Odds API returned 401 Unauthorized with key ending in ...%s", params["apiKey"][-4:])
-                if attempt < max_attempts - 1:
-                    LOGGER.info("Rotating API key and retrying...")
-                    OddsAPIKeyManager.rotate_key()
-                    continue
-                else:
-                    raise RuntimeError(
-                        "All Odds API keys exhausted (401 Unauthorized). "
-                        "Confirm that your plan includes odds-history access and that the API keys are valid."
-                    ) from exc
-            if response.status_code == 404:
-                LOGGER.warning(
-                    "Odds endpoint returned 404 for sport %s (url=%s). Returning empty payload.",
-                    settings.sport,
-                    url,
-                )
-                return {
-                    "fetched_at": datetime.now(timezone.utc).isoformat(),
-                    "request": {"url": url, "params": params},
-                    "results": [],
-                    "rate_limit_remaining": response.headers.get("x-requests-remaining"),
-                    "rate_limit_reset": response.headers.get("x-requests-reset"),
-                    "error": "404 Not Found",
-                }
-            raise
+        response = _request_odds(url, params)
+        if response.status_code == 200:
+            break
+        if response.status_code == 401 and attempt < max_attempts - 1:
+            LOGGER.warning("Odds API returned 401 Unauthorized. Rotating the active key.")
+            OddsAPIKeyManager.rotate_key()
+            continue
+        if response.status_code == 404:
+            LOGGER.warning("Odds endpoint returned 404 for %s. Returning empty payload.", settings.sport)
+            return {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "request": _request_metadata(url, params),
+                "results": [],
+                "rate_limit_remaining": response.headers.get("x-requests-remaining"),
+                "rate_limit_reset": response.headers.get("x-requests-reset"),
+                "error": "404 Not Found",
+            }
+        raise RuntimeError(f"Odds API returned HTTP {response.status_code} for {settings.sport}")
 
     payload = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "request": {"url": url, "params": params},
+        "request": _request_metadata(url, params),
         "results": response.json(),
         "rate_limit_remaining": response.headers.get("x-requests-remaining"),
         "rate_limit_reset": response.headers.get("x-requests-reset"),
@@ -162,32 +160,38 @@ def _load_recent_snapshot(
 
 
 def fetch_odds_history(settings: OddsAPISettings, target_datetime: datetime) -> Dict[str, Any]:
-    url = f"{settings.base_url}/sports/{settings.sport}/odds-history"
+    if target_datetime.utcoffset() is None:
+        raise ValueError("Historical odds requests need a timezone-aware timestamp")
+    target = target_datetime.astimezone(timezone.utc).replace(microsecond=0)
+    url = f"{settings.base_url}/historical/sports/{settings.sport}/odds"
     params = {
         "apiKey": settings.api_key,
         "regions": settings.region,
         "markets": settings.market,
         "oddsFormat": "american",
         "dateFormat": "iso",
-        "date": target_datetime.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "date": target.isoformat().replace("+00:00", "Z"),
     }
 
-    response = requests.get(url, params=params, timeout=10)
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:  # pragma: no cover - network guard
-        if response.status_code == 401:
-            raise RuntimeError(
-                "Received 401 Unauthorized from The Odds API when requesting odds history. "
-                "This endpoint requires a paid plan; verify access or adjust the backfill range."
-            ) from exc
-        raise
+    response = _request_odds(url, params)
+    if response.status_code != 200:
+        raise RuntimeError(f"Odds API history returned HTTP {response.status_code} for {settings.sport}")
+
+    body = response.json()
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise RuntimeError("Odds API returned an invalid historical snapshot")
+    timestamp = body.get("timestamp")
+    snapshot = _parse_timestamp(timestamp) if isinstance(timestamp, str) else None
+    if snapshot is None or snapshot.utcoffset() is None or snapshot > target:
+        raise RuntimeError("Odds API historical snapshot has an invalid as-of timestamp")
 
     payload = {
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "requested_date": target_datetime.isoformat(),
-        "request": {"url": url, "params": params},
-        "results": response.json(),
+        "source": "the-odds-api-history",
+        "fetched_at": snapshot.astimezone(timezone.utc).isoformat(),
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "requested_date": target.isoformat(),
+        "request": _request_metadata(url, params),
+        "results": body["data"],
         "rate_limit_remaining": response.headers.get("x-requests-remaining"),
         "rate_limit_reset": response.headers.get("x-requests-reset"),
     }

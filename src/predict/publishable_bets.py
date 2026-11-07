@@ -8,6 +8,7 @@ import logging
 import sqlite3
 import sys
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, Optional
 
 import pandas as pd
@@ -17,6 +18,7 @@ from src.db.core import DB_PATH
 from src.models.prediction_quality import (
     DEFAULT_RELEASE_LEAGUES,
     _json_default,
+    _quality_gate_from_config,
     build_quality_report,
     configured_rules,
     filter_bets_for_rule,
@@ -81,11 +83,15 @@ def _normalize_now(now: Optional[str | pd.Timestamp]) -> pd.Timestamp:
 
 def _latest_pre_game(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
-    frame["predicted_at"] = pd.to_datetime(frame["predicted_at"], utc=True, errors="coerce")
-    frame["start_time_utc"] = pd.to_datetime(frame["start_time_utc"], utc=True, errors="coerce")
+    for column in ("predicted_at", "start_time_utc"):
+        frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce", format="mixed")
     frame = frame[frame["predicted_at"].notna() & frame["start_time_utc"].notna()].copy()
-    frame = frame[frame["predicted_at"] <= frame["start_time_utc"]].copy()
-    return frame.sort_values("predicted_at").drop_duplicates(["game_id", "model_type"], keep="last")
+    frame = frame[frame["predicted_at"] < frame["start_time_utc"]].copy()
+    identity = ["game_id", "model_type"]
+    identity.extend(
+        field for field in (*BENCHMARK_METADATA_FIELDS, *LIVE_RULE_ID_FIELDS) if field in frame
+    )
+    return frame.sort_values("predicted_at").drop_duplicates(identity, keep="last")
 
 
 def load_current_prediction_output(
@@ -151,14 +157,15 @@ def load_current_prediction_output(
     if df.empty:
         return df
 
-    df = _latest_pre_game(df)
+    now_utc = _normalize_now(now)
+    predicted = pd.to_datetime(df["predicted_at"], utc=True, errors="coerce", format="mixed")
+    df = _latest_pre_game(df[predicted <= now_utc])
     if df.empty:
         return df
 
-    now_utc = _normalize_now(now)
-    df = df[df["start_time_utc"] >= now_utc].copy()
+    df = df[df["start_time_utc"] > now_utc].copy()
     df = df[
-        ~df["game_status"].astype(str).str.lower().isin({"final", "completed", "closed", "post"})
+        df["game_status"].astype(str).str.lower().isin({"scheduled", "pre"})
     ].copy()
 
     if leagues:
@@ -327,25 +334,46 @@ def _live_metadata_mismatches(current_bets: pd.DataFrame, rule: dict[str, Any]) 
     return sorted(set(mismatches))
 
 
-def _rule_id_metadata_mismatch(current_bets: pd.DataFrame, rule: dict[str, Any]) -> bool:
-    present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in current_bets]
-    if not present_rule_fields:
-        return bool(_required_live_metadata(rule))
-    rule_id = str(rule.get("id"))
-    return not any(
-        rule_id in {str(value) for value in current_bets[field].dropna().unique()}
-        for field in present_rule_fields
-    )
+def _matching_live_rows(
+    current_bets: pd.DataFrame, rule: dict[str, Any]
+) -> tuple[pd.DataFrame, list[str], bool]:
+    rows = current_bets
+    present_rule_fields = [field for field in LIVE_RULE_ID_FIELDS if field in rows]
+    missing_matching_id = False
+    if present_rule_fields:
+        tagged = rows[present_rule_fields].astype("string")
+        id_matches = tagged.eq(str(rule.get("id")))
+        conflicting_id = (tagged.notna() & ~id_matches.fillna(False)).any(axis=1)
+        rows = rows[id_matches.any(axis=1) & ~conflicting_id]
+        missing_matching_id = rows.empty
+    elif _required_live_metadata(rule):
+        missing_matching_id = True
+
+    mismatches = _live_metadata_mismatches(rows, rule)
+    if missing_matching_id or mismatches:
+        return rows.iloc[0:0], mismatches, missing_matching_id
+    for field in _required_live_metadata(rule):
+        rows = rows[rows[field].astype(str) == str(rule[field])]
+    return rows, [], False
 
 
 def _remove_paid_output(path: Path) -> None:
-    if path.exists() and path.is_file():
-        path.unlink()
+    path.unlink(missing_ok=True)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as temp:
+            temp_path = Path(temp.name)
+            json.dump(payload, temp, indent=2, default=_json_default)
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def publishable_bets(
@@ -411,19 +439,21 @@ def publishable_bets(
 
     publish_rows: list[dict[str, Any]] = []
     for rule in passing_rules:
-        metadata_mismatches = _live_metadata_mismatches(current_bets, rule)
-        if metadata_mismatches or _rule_id_metadata_mismatch(current_bets, rule):
+        matching_rows, metadata_mismatches, missing_matching_id = _matching_live_rows(
+            current_bets, rule
+        )
+        if metadata_mismatches or missing_matching_id:
             rule_id = str(rule.get("id"))
             status["skipped_passing_rule_ids"].append(rule_id)
             status["live_metadata_mismatches"][rule_id] = {
                 "missing_or_mismatched_fields": metadata_mismatches,
-                "missing_matching_rule_id": _rule_id_metadata_mismatch(current_bets, rule),
+                "missing_matching_rule_id": missing_matching_id,
             }
             continue
         quality_result = result_by_id[str(rule.get("id"))]
         timing_filter = quality_result.get("odds_timing_filter") or {}
         rule_bets = filter_bets_for_rule(
-            current_bets,
+            matching_rows,
             rule,
             max_hours_before_start=timing_filter.get("max_hours_before_start"),
         )
@@ -482,8 +512,10 @@ def promote_candidate_rule(
     candidate = next(
         (
             rule
-            for rule in [*locked_candidate_rules, *candidate_rules]
+            for rule in configured_rules(config)
             if str(rule.get("id")) == rule_id
+            and rule.get("status") in {"candidate", "locked_candidate"}
+            and not rule_is_disabled(rule)
         ),
         None,
     )
@@ -497,10 +529,12 @@ def promote_candidate_rule(
         leagues=leagues,
         benchmark_prediction_paths=benchmark_prediction_paths,
     )
+    if report.get("launch_gate") != _quality_gate_from_config(config).__dict__:
+        raise RuntimeError("Quality report does not use the current launch gate. Regenerate it.")
     passing_sources: list[str] = []
     for source in report.get("evaluation_sources", []):
         for result in source.get("rule_results", []):
-            if str(result.get("rule_id")) == rule_id and result.get("passes_launch_gate") is True:
+            if result.get("rule") == candidate and result.get("passes_launch_gate") is True:
                 passing_sources.append(str(source.get("source_id")))
     if not passing_sources:
         raise RuntimeError(f"Candidate rule {rule_id} does not pass the launch gate")
@@ -579,12 +613,10 @@ def lock_candidate_rule(
     report_candidate = _candidate_from_lock_report(report, rule_id)
     if report_candidate is None:
         raise RuntimeError(f"Rule {rule_id} was not recommended for locked paper tracking")
-    if candidate is None:
-        candidate = report_candidate
-
     lock_time = _normalize_now(locked_at).isoformat()
     locked = {
-        **candidate,
+        **(candidate or {}),
+        **report_candidate,
         "status": "locked_candidate",
         "locked_at": lock_time,
         "lock_source": str(benchmark_report_path),

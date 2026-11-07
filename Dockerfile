@@ -88,10 +88,10 @@ COPY pyproject.toml poetry.lock README.md ./
 # filesystem's exec bit (matters on Windows hosts).
 RUN find ./scripts -type f -name "*.sh" -exec chmod +x {} \;
 
-# Runtime data lives under /app/data, /app/models, /app/logs, /app/backups.
+# Runtime data lives under /app/data, /app/models, /app/logs, /app/reports, /app/backups.
 # Compose mounts persistent volumes here. Pre-create them so the image works
 # even if a volume is missing (e.g. local one-shot runs).
-RUN mkdir -p /app/data /app/models /app/logs /app/backups \
+RUN mkdir -p /app/data /app/models /app/logs /app/reports /app/backups \
  && chown -R app:app /app
 
 USER app

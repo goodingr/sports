@@ -27,10 +27,11 @@ from sklearn.metrics import brier_score_loss
 
 from src.data.availability_quality import warn_if_low_availability_coverage
 from src.db.core import DB_PATH
-from src.features.betting_model_input import DEFAULT_RELEASE_LEAGUES
+from src.features.betting_model_input import DEFAULT_RELEASE_LEAGUES, RESULT_AVAILABILITY_LAG
 from src.models.benchmark_triage import build_benchmark_triage_report
 from src.models.prediction_quality import (
     DEFAULT_STAKE,
+    _hours_before_start,
     american_to_decimal,
     bootstrap_roi_interval,
     calibration_bins,
@@ -80,6 +81,7 @@ class StrictGate:
     min_bootstrap_roi_low: float = 0.0
     min_avg_clv: float = 0.0
     min_clv_win_rate: float = 0.5
+    min_clv_coverage: float = 0.80
     max_hours_before_start: Optional[float] = 72.0
     require_positive_clv: bool = True
     bootstrap_samples: int = 3000
@@ -153,6 +155,7 @@ def _strict_gate_from_raw(raw: dict[str, Any]) -> StrictGate:
         ),
         min_avg_clv=float(raw.get("min_avg_clv", StrictGate.min_avg_clv)),
         min_clv_win_rate=float(raw.get("min_clv_win_rate", StrictGate.min_clv_win_rate)),
+        min_clv_coverage=float(raw.get("min_clv_coverage", StrictGate.min_clv_coverage)),
         max_hours_before_start=(
             None
             if raw.get("max_hours_before_start") is None
@@ -527,23 +530,27 @@ def _totals_closing_line_value(
     price_source: str,
 ) -> tuple[float, float, str]:
     """Return same-book totals CLV, close line, and source label."""
-    same_book_columns = {
-        "selected_book_total_close",
-        "best_over_book_total_close",
-        "best_under_book_total_close",
-    }
-    same_book_available = any(column in row.index for column in same_book_columns)
     if price_source == "best_book":
-        close_line = row.get(f"best_{side}_book_total_close")
+        prefix = f"best_{side}_book"
         source = f"same_book_{side}_best_book"
     else:
-        close_line = row.get("selected_book_total_close")
+        prefix = "selected_book"
         source = "same_book_selected_book"
 
-    if pd.isna(close_line) and not same_book_available:
-        close_line = row.get("total_close")
-        source = "legacy_game_results_total_close"
-    if pd.isna(close_line):
+    close_line = row.get(f"{prefix}_total_close")
+    close_time = pd.to_datetime(
+        row.get(f"{prefix}_close_snapshot_time_utc"), utc=True, errors="coerce"
+    )
+    entry_time = pd.to_datetime(row.get("snapshot_time_utc"), utc=True, errors="coerce")
+    kickoff = pd.to_datetime(row.get("start_time_utc"), utc=True, errors="coerce")
+    if (
+        pd.isna(close_line)
+        or pd.isna(close_time)
+        or pd.isna(entry_time)
+        or pd.isna(kickoff)
+        or not entry_time < close_time < kickoff
+        or kickoff - close_time > pd.Timedelta(minutes=90)
+    ):
         return np.nan, np.nan, source
 
     line = float(row["line"])
@@ -702,6 +709,7 @@ def _summarize_rule_bets(frame: pd.DataFrame, gate: StrictGate) -> dict[str, Any
             "brier_delta_vs_market": None,
             "model_beats_market_brier": False,
             "closing_line_value_count": 0,
+            "closing_line_value_coverage": 0.0,
             "avg_closing_line_value": None,
             "closing_line_value_win_rate": None,
             "calibration_bins": [],
@@ -747,6 +755,7 @@ def _summarize_rule_bets(frame: pd.DataFrame, gate: StrictGate) -> dict[str, Any
             brier is not None and market_brier is not None and brier < market_brier
         ),
         **clv,
+        "closing_line_value_coverage": clv["closing_line_value_count"] / len(clean),
         "calibration_bins": calibration_bins(clean),
         "max_drawdown": max_drawdown(clean.sort_values("start_time_utc")["profit"]),
         "losing_streak": max_losing_streak(clean.sort_values("start_time_utc")["won"]),
@@ -771,14 +780,10 @@ def _hours_bucket(hours: Any) -> str:
 def _filter_rule_bets(
     bets: pd.DataFrame,
     rule: dict[str, Any],
-    *,
-    max_hours_before_start: Optional[float] = None,
 ) -> pd.DataFrame:
-    frame = bets.copy()
-    frame = frame[frame["market"] == str(rule["market"]).lower()]
-    frame = frame[frame["league"].astype(str).str.upper() == str(rule["league"]).upper()]
-    frame = frame[frame["model_type"] == str(rule["model_type"])]
-    frame = frame[frame["prediction_variant"] == str(rule["prediction_variant"])]
+    if bets.empty:
+        return bets
+    frame = bets[bets["edge"] >= float(rule["min_edge"])]
     for field in ("feature_variant", "price_mode", "timing_bucket"):
         if rule.get(field) is not None:
             if field not in frame.columns:
@@ -786,30 +791,17 @@ def _filter_rule_bets(
             frame = frame[frame[field].astype(str) == str(rule[field])]
     if str(rule["side"]).lower() != "both":
         frame = frame[frame["side"] == str(rule["side"]).lower()]
-    frame = frame[frame["edge"] >= float(rule["min_edge"])]
-    if max_hours_before_start is not None and "hours_before_start" in frame.columns:
-        hours = pd.to_numeric(frame["hours_before_start"], errors="coerce")
-        if hours.notna().any():
-            frame = frame[hours.notna() & (hours <= max_hours_before_start)].copy()
     return frame
 
 
-def _rule_timing_exclusion_count(
+def _filter_eligible_quote_times(
     bets: pd.DataFrame,
-    rule: dict[str, Any],
     max_hours_before_start: Optional[float],
-) -> int:
-    if max_hours_before_start is None or bets.empty or "hours_before_start" not in bets.columns:
-        return 0
-    raw = _filter_rule_bets(bets, rule, max_hours_before_start=None)
-    if raw.empty:
-        return 0
-    filtered = _filter_rule_bets(
-        bets,
-        rule,
-        max_hours_before_start=max_hours_before_start,
-    )
-    return int(len(raw) - len(filtered))
+) -> pd.DataFrame:
+    if max_hours_before_start is None or bets.empty:
+        return bets
+    hours = _hours_before_start(bets)
+    return bets[(hours > 0) & (hours <= max_hours_before_start)]
 
 
 def _rule_clv_slices(frame: pd.DataFrame) -> list[dict[str, Any]]:
@@ -1045,8 +1037,12 @@ def _gate_failures(
     if gate.require_brier_beats_market and not result.get("model_beats_market_brier"):
         failures.append("brier_does_not_beat_market")
     if gate.require_positive_clv:
-        if int(result.get("closing_line_value_count") or 0) <= 0:
+        clv_count = int(result.get("closing_line_value_count") or 0)
+        bet_count = int(result.get("bets") or 0)
+        if clv_count <= 0:
             failures.append("missing_clv")
+        if (clv_count / bet_count if bet_count else 0.0) < gate.min_clv_coverage:
+            failures.append(f"clv_coverage_below_{gate.min_clv_coverage}")
         if (
             result.get("avg_closing_line_value") is None
             or float(result["avg_closing_line_value"]) <= gate.min_avg_clv
@@ -1058,13 +1054,11 @@ def _gate_failures(
         ):
             failures.append(f"clv_win_rate_not_above_{gate.min_clv_win_rate}")
     baseline_roi = market_baseline.get("roi") if market_baseline else None
-    if (
-        gate.require_roi_beats_market_baseline
-        and baseline_roi is not None
-        and result.get("roi") is not None
-        and float(result["roi"]) <= float(baseline_roi)
-    ):
-        failures.append("roi_does_not_beat_market_baseline")
+    if gate.require_roi_beats_market_baseline:
+        if baseline_roi is None:
+            failures.append("market_baseline_roi_missing")
+        elif result.get("roi") is not None and float(result["roi"]) <= float(baseline_roi):
+            failures.append("roi_does_not_beat_market_baseline")
     return failures
 
 
@@ -1075,16 +1069,33 @@ def rank_predeclared_rules(
 ) -> list[dict[str, Any]]:
     """Evaluate predeclared rules and attach market baseline comparisons."""
     results: list[dict[str, Any]] = []
-    for rule in rules:
-        filtered = (
-            _filter_rule_bets(
-                bets,
-                rule,
-                max_hours_before_start=gate.max_hours_before_start,
+    cohorts = {}
+    if not bets.empty:
+        cohorts = {
+            key: group
+            for key, group in bets.groupby(
+                [
+                    "market",
+                    bets["league"].astype(str).str.upper(),
+                    "model_type",
+                    "prediction_variant",
+                ],
+                sort=False,
             )
-            if not bets.empty
-            else pd.DataFrame()
+        }
+    empty = pd.DataFrame()
+    for rule in rules:
+        cohort = cohorts.get(
+            (
+                str(rule["market"]).lower(),
+                str(rule["league"]).upper(),
+                str(rule["model_type"]),
+                str(rule["prediction_variant"]),
+            ),
+            empty,
         )
+        raw = _filter_rule_bets(cohort, rule)
+        filtered = _filter_eligible_quote_times(raw, gate.max_hours_before_start)
         result = _summarize_rule_bets(filtered, gate)
         result.update(
             {
@@ -1103,15 +1114,7 @@ def rank_predeclared_rules(
                 "rule": rule,
                 "odds_timing_filter": {
                     "max_hours_before_start": gate.max_hours_before_start,
-                    "stale_odds_excluded": (
-                        _rule_timing_exclusion_count(
-                            bets,
-                            rule,
-                            gate.max_hours_before_start,
-                        )
-                        if not bets.empty
-                        else 0
-                    ),
+                    "stale_odds_excluded": int(len(raw) - len(filtered)),
                 },
                 "clv_slices": _rule_clv_slices(filtered),
             }
@@ -1150,6 +1153,7 @@ def rank_predeclared_rules(
     results.sort(
         key=lambda row: (
             bool(row.get("publishable")),
+            (row.get("bets") or 0) >= row["required_min_bets"],
             bool(row.get("model_beats_market_brier")),
             -_sort_number(row.get("brier_delta_vs_market"), 999.0),
             _sort_number(row.get("bootstrap_roi_low"), -999.0),
@@ -1254,11 +1258,63 @@ def _candidate_rule_rankings(ranked_rules: list[dict[str, Any]]) -> list[dict[st
     return rows
 
 
+def rank_with_temporal_holdout(
+    bets: pd.DataFrame,
+    rules: list[dict[str, Any]],
+    gate: StrictGate,
+    holdout_start: pd.Timestamp,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Rank on settled development outcomes and test only the frozen rule."""
+    development = holdout = bets
+    if not bets.empty:
+        kickoff = pd.to_datetime(bets["start_time_utc"], format="mixed", utc=True)
+        quote_time = pd.to_datetime(bets["predicted_at"], format="mixed", utc=True)
+        development = bets[kickoff + RESULT_AVAILABILITY_LAG < holdout_start]
+        holdout = bets[quote_time >= holdout_start]
+
+    rankings = rank_predeclared_rules(development, rules, gate)
+    frozen = next(
+        (
+            row
+            for row in rankings
+            if row["kind"] == "candidate" and row["bets"] >= row["required_min_bets"]
+        ),
+        None,
+    )
+    evaluated = None
+    if frozen is not None:
+        baseline_rules = [
+            rule
+            for rule in rules
+            if rule["kind"] == "baseline"
+            and rule["market"] == frozen["market"]
+            and rule["league"] == frozen["league"]
+        ]
+        results = rank_predeclared_rules(holdout, [frozen["rule"], *baseline_rules], gate)
+        evaluated = next(row for row in results if row["rule_id"] == frozen["rule_id"])
+    return rankings, {
+        "start_utc": holdout_start.isoformat(),
+        "development_games": int(development["game_id"].nunique()) if not development.empty else 0,
+        "holdout_games": int(holdout["game_id"].nunique()) if not holdout.empty else 0,
+        "frozen_rule_id": frozen["rule_id"] if frozen is not None else None,
+        "development_passes_strict_gate": bool(frozen and frozen["passes_strict_gate"]),
+        "holdout_passes_strict_gate": bool(evaluated and evaluated["passes_strict_gate"]),
+        "result": evaluated,
+    }
+
+
 def run_betting_benchmark(
     db_path: Path = DB_PATH,
     config_path: Path = DEFAULT_CONFIG_PATH,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
+    *,
+    holdout_start: Optional[str] = None,
 ) -> BenchmarkArtifacts:
+    holdout_boundary = (
+        pd.to_datetime(holdout_start, utc=True) if holdout_start is not None else None
+    )
+    if holdout_boundary is not None and pd.isna(holdout_boundary):
+        raise ValueError("holdout_start must be a UTC date or timestamp")
     config = load_benchmark_config(config_path)
     warn_if_low_availability_coverage(db_path=db_path, leagues=config.leagues)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1330,7 +1386,13 @@ def run_betting_benchmark(
         for rule in build_predeclared_rules(config)
         if rule["model_type"] in {*config.baselines, *available_candidates}
     ]
-    ranked_rules = rank_predeclared_rules(bets, rules, config.strict_gate)
+    holdout_report = None
+    if holdout_boundary is None:
+        ranked_rules = rank_predeclared_rules(bets, rules, config.strict_gate)
+    else:
+        ranked_rules, holdout_report = rank_with_temporal_holdout(
+            bets, rules, config.strict_gate, holdout_boundary
+        )
     generated_at = datetime.now(timezone.utc)
     timestamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
     report_path = output_dir / f"betting_benchmark_{timestamp}.json"
@@ -1341,6 +1403,8 @@ def run_betting_benchmark(
         "config_path": str(config_path),
         "triage_report_path": str(triage_report_path),
         "rolling_origin": asdict(config.rolling),
+        "result_availability_lag_hours": RESULT_AVAILABILITY_LAG.total_seconds() / 3600,
+        "temporal_holdout": holdout_report,
         "strict_gate": asdict(config.strict_gate),
         "sweep": {
             "markets": list(config.markets),
@@ -1359,6 +1423,11 @@ def run_betting_benchmark(
         "candidate_rule_rankings": _candidate_rule_rankings(ranked_rules),
         "best_candidate": _best_candidate_payload(ranked_rules),
     }
+    if holdout_report is not None and report["best_candidate"].get("best_candidate_rule"):
+        report["best_candidate"]["publishable"] = bool(
+            holdout_report["development_passes_strict_gate"]
+            and holdout_report["holdout_passes_strict_gate"]
+        )
     triage_report = build_benchmark_triage_report(
         ranked_rules,
         strict_gate=asdict(config.strict_gate),
@@ -1412,6 +1481,10 @@ def _parse_args() -> argparse.Namespace:
         help="Directory for benchmark artifacts.",
     )
     parser.add_argument(
+        "--holdout-start",
+        help="UTC boundary after which one rule frozen on development is evaluated.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -1426,6 +1499,7 @@ def main() -> None:
         db_path=args.db,
         config_path=args.config,
         output_dir=args.output_dir,
+        holdout_start=args.holdout_start,
     )
     print(f"Ranked benchmark written to {artifacts.report_path}")
     print(f"Triage report written to {artifacts.triage_report_path}")

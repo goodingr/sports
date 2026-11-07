@@ -35,6 +35,8 @@ from src.data.availability_quality import warn_if_low_availability_coverage
 from src.db.core import DB_PATH
 from src.features.betting_model_input import (
     DEFAULT_RELEASE_LEAGUES,
+    RESULT_AVAILABILITY_LAG,
+    SOCCER_LEAGUES,
     build_moneyline_side_model_input,
     build_totals_model_input,
     get_model_feature_contract,
@@ -310,25 +312,38 @@ def load_training_frame(
 ) -> tuple[pd.DataFrame, FeatureContract]:
     """Load a leakage-safe training frame and matching feature contract."""
     if market == "totals":
-        df = build_totals_model_input(db_path=db_path, leagues=leagues, latest_only=latest_only)
-        if df.empty:
-            return df, _contract_for_market(market, df)
-        df = df[df["target_over"].notna()].copy()
+        df = build_totals_model_input(
+            db_path=db_path,
+            leagues=leagues,
+            latest_only=latest_only,
+            include_retrospective_features=False,
+        )
     elif market == "moneyline":
+        if leagues is not None:
+            leagues = tuple(league for league in leagues if league.upper() not in SOCCER_LEAGUES)
+            if not leagues:
+                empty = pd.DataFrame()
+                return empty, _contract_for_market(market, empty)
         df = build_moneyline_side_model_input(
             db_path=db_path,
             leagues=leagues,
             latest_only=latest_only,
+            include_retrospective_features=False,
         )
-        if df.empty:
-            return df, _contract_for_market(market, df)
-        df = df[df["target_win"].notna()].copy()
+        if not df.empty:
+            # The canonical side model assumes a two-way market. Soccer h2h
+            # quotes include a draw, which loses an ordinary home or away bet.
+            df = df[~df["league"].str.upper().isin(SOCCER_LEAGUES)].copy()
     else:
         raise ValueError("market must be one of: totals, moneyline")
 
+    if df.empty:
+        return df, _contract_for_market(market, df)
     df["start_time_utc"] = pd.to_datetime(df["start_time_utc"], utc=True, errors="coerce")
     df = df.dropna(subset=["start_time_utc"]).sort_values("start_time_utc").reset_index(drop=True)
     contract = _contract_for_market(market, df)
+    if latest_only:
+        df = df.dropna(subset=[contract.target_column])
     contract.validate(df)
     return df, contract
 
@@ -413,23 +428,42 @@ def _rolling_origin_splits(
     folds: int = 5,
     min_train_size: int = 100,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Hold each game out together and train only on results available at the origin."""
     if len(df) < 2:
-        raise ValueError("Need at least two settled games for validation")
-    ordered_idx = np.arange(len(df))
-    min_train_size = min(min_train_size, max(1, len(df) // 2))
-    remaining = len(df) - min_train_size
-    if remaining <= 0:
-        return [(ordered_idx[:-1], ordered_idx[-1:])]
-    fold_count = max(1, min(folds, remaining))
-    test_size = max(1, remaining // fold_count)
+        return []
+    kickoff = pd.to_datetime(df["start_time_utc"], format="mixed", utc=True, errors="coerce")
+    quote_time = pd.to_datetime(
+        df.get("snapshot_time_utc", kickoff), format="mixed", utc=True, errors="coerce"
+    )
+    rows = pd.DataFrame(
+        {
+            "game": df["game_id"].to_numpy() if "game_id" in df else np.arange(len(df)),
+            "decision": quote_time.array,
+            "result_available": (kickoff + RESULT_AVAILABILITY_LAG).array,
+        }
+    )
+    games = rows.groupby("game", sort=False).agg(
+        decision=("decision", "min"),
+        result_available=("result_available", "max"),
+    )
+    origins = games["decision"].value_counts().sort_index()
+    if len(origins) < 2:
+        return []
+    min_train_size = max(1, min(min_train_size, len(games) // 2))
+    first_test_origin = min(
+        int(origins.cumsum().searchsorted(min_train_size)) + 1, len(origins) - 1
+    )
+    decision_by_row = rows["game"].map(games["decision"])
+    result_available_by_row = rows["game"].map(games["result_available"])
+    test_origins = origins.index[first_test_origin:].to_numpy()
     splits: list[tuple[np.ndarray, np.ndarray]] = []
-    for fold in range(fold_count):
-        train_end = min_train_size + fold * test_size
-        test_end = len(df) if fold == fold_count - 1 else min(len(df), train_end + test_size)
-        if train_end >= test_end:
-            continue
-        splits.append((ordered_idx[:train_end], ordered_idx[train_end:test_end]))
-    return splits or [(ordered_idx[:-1], ordered_idx[-1:])]
+    for test_window in np.array_split(test_origins, min(max(1, folds), len(test_origins))):
+        origin = test_window[0]
+        train_idx = np.flatnonzero((decision_by_row < origin) & (result_available_by_row < origin))
+        test_idx = np.flatnonzero(decision_by_row.isin(test_window))
+        if len(train_idx) and len(test_idx):
+            splits.append((train_idx, test_idx))
+    return splits
 
 
 def _line_movement_probability(
@@ -472,8 +506,10 @@ def _predict_probabilities(
             contract.market_probability_column,
         )
 
-    X_train = train_df[contract.feature_columns].apply(pd.to_numeric, errors="coerce")
     y_train = train_df[contract.target_column].astype(int)
+    if y_train.nunique() < 2:
+        return _predict_probabilities("market_only", None, train_df, test_df, contract)
+    X_train = train_df[contract.feature_columns].apply(pd.to_numeric, errors="coerce")
     X_test = test_df[contract.feature_columns].apply(pd.to_numeric, errors="coerce")
     estimator.fit(X_train, y_train)
     return np.clip(estimator.predict_proba(X_test)[:, 1], 0.001, 0.999)
@@ -615,6 +651,8 @@ def rolling_origin_validate(
     contract.validate(df)
     df = df.sort_values("start_time_utc").reset_index(drop=True)
     splits = _rolling_origin_splits(df, folds=folds, min_train_size=min_train_size)
+    if not splits:
+        raise ValueError("Need settled training results before a validation quote")
     prediction_frames: list[pd.DataFrame] = []
     fold_metrics: list[dict[str, Any]] = []
 

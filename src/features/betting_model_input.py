@@ -24,6 +24,9 @@ from src.features import soccer_features
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_RELEASE_LEAGUES = ("NBA", "NHL", "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
+# Historical results lack an observed settlement timestamp. Allow time for the
+# game to finish and the result to be posted before using its outcome.
+RESULT_AVAILABILITY_LAG = pd.Timedelta(hours=6)
 SOCCER_LEAGUES = {"EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1"}
 GENERIC_ROLLING_WINDOWS = (3, 5, 10)
 NBA_ROLLING_WINDOWS = (5, 10)
@@ -503,12 +506,15 @@ def _load_team_result_history(db_path: Path, leagues: Optional[Iterable[str]]) -
         JOIN game_results gr ON g.game_id = gr.game_id
         WHERE gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
+          AND g.status = 'final'
           {league_sql}
     """
     history = _read_sql(db_path, query, params)
     if history.empty:
         return history
-    history["start_time_utc"] = pd.to_datetime(history["start_time_utc"], utc=True, errors="coerce")
+    history["start_time_utc"] = pd.to_datetime(
+        history["start_time_utc"], format="mixed", utc=True, errors="coerce"
+    )
     for column in ["home_score", "away_score", "home_team_id", "away_team_id"]:
         history[column] = pd.to_numeric(history[column], errors="coerce")
     return history.dropna(
@@ -544,16 +550,17 @@ def _empty_team_prior_summary(prefix: str) -> dict[str, float]:
 def _team_prior_summary(
     history: pd.DataFrame,
     team_id: Any,
-    before: pd.Timestamp,
+    decision_time: pd.Timestamp,
+    start_time: pd.Timestamp,
     prefix: str,
     *,
     target_is_home: bool,
 ) -> dict[str, float]:
-    if history.empty or pd.isna(team_id) or pd.isna(before):
+    if history.empty or pd.isna(team_id) or pd.isna(decision_time):
         return _empty_team_prior_summary(prefix)
 
     team_value = float(team_id)
-    before_games = history[history["start_time_utc"] < before]
+    before_games = history[history["start_time_utc"] < decision_time - RESULT_AVAILABILITY_LAG]
     home_games = before_games[before_games["home_team_id"] == team_value][
         ["start_time_utc", "home_score", "away_score"]
     ].rename(columns={"home_score": "score_for", "away_score": "score_against"})
@@ -571,7 +578,7 @@ def _team_prior_summary(
     team_games = team_games.copy()
     team_games["game_total"] = team_games["score_for"] + team_games["score_against"]
     team_games["win"] = (team_games["score_for"] > team_games["score_against"]).astype(float)
-    rest_days = (before - team_games.iloc[-1]["start_time_utc"]).total_seconds() / 86400.0
+    rest_days = (start_time - team_games.iloc[-1]["start_time_utc"]).total_seconds() / 86400.0
     summary = _empty_team_prior_summary(prefix)
     for window in GENERIC_ROLLING_WINDOWS:
         recent = team_games.tail(window)
@@ -609,13 +616,15 @@ def _attach_team_history_features(
         return selected
 
     feature_rows = []
+    decision_keys = ["game_id", "snapshot_time_utc"]
     game_rows = selected[
-        ["game_id", "home_team_id", "away_team_id", "start_time_utc"]
-    ].drop_duplicates("game_id")
+        [*decision_keys, "home_team_id", "away_team_id", "start_time_utc"]
+    ].drop_duplicates(decision_keys)
     for _, row in game_rows.iterrows():
         home = _team_prior_summary(
             history,
             row["home_team_id"],
+            row["snapshot_time_utc"],
             row["start_time_utc"],
             "home",
             target_is_home=True,
@@ -623,12 +632,14 @@ def _attach_team_history_features(
         away = _team_prior_summary(
             history,
             row["away_team_id"],
+            row["snapshot_time_utc"],
             row["start_time_utc"],
             "away",
             target_is_home=False,
         )
         merged = {
             "game_id": row["game_id"],
+            "snapshot_time_utc": row["snapshot_time_utc"],
             **home,
             **away,
         }
@@ -657,7 +668,7 @@ def _attach_team_history_features(
         )
         feature_rows.append(merged)
 
-    return selected.merge(pd.DataFrame(feature_rows), on="game_id", how="left")
+    return selected.merge(pd.DataFrame(feature_rows), on=decision_keys, how="left")
 
 
 def _attach_best_totals_prices(pregame_pairs: pd.DataFrame, selected: pd.DataFrame) -> pd.DataFrame:
@@ -1033,8 +1044,12 @@ def _load_injury_reports(db_path: Path, leagues: Optional[Iterable[str]]) -> pd.
     reports = _read_sql(db_path, query, params)
     if reports.empty:
         return reports
-    reports["report_date"] = pd.to_datetime(reports["report_date"], utc=True, errors="coerce")
-    reports["game_date"] = pd.to_datetime(reports["game_date"], utc=True, errors="coerce")
+    reports["report_date"] = pd.to_datetime(
+        reports["report_date"], format="mixed", utc=True, errors="coerce"
+    )
+    reports["game_date"] = pd.to_datetime(
+        reports["game_date"], format="mixed", utc=True, errors="coerce"
+    )
     reports["team_id"] = pd.to_numeric(reports["team_id"], errors="coerce")
     reports["player_id"] = reports["player_id"].fillna("").astype(str).str.strip()
     reports["status_category"] = reports.apply(
@@ -1069,6 +1084,7 @@ def _load_player_stat_history(db_path: Path, leagues: Optional[Iterable[str]]) -
         JOIN games g ON ps.game_id = g.game_id
         JOIN sports s ON g.sport_id = s.sport_id
         WHERE g.start_time_utc IS NOT NULL
+          AND g.status = 'final'
           {league_sql}
     """
     stats = _read_sql(db_path, query, params)
@@ -1095,9 +1111,9 @@ def _recent_player_stat_averages(
     team_id: Any,
     player_id: Any,
     player_name: Any,
-    start_time: pd.Timestamp,
+    decision_time: pd.Timestamp,
 ) -> dict[str, float]:
-    if player_stats.empty or pd.isna(start_time):
+    if player_stats.empty or pd.isna(decision_time):
         return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
     scoped = player_stats[player_stats["league"] == str(league).upper()].copy()
     if pd.notna(team_id):
@@ -1110,7 +1126,11 @@ def _recent_player_stat_averages(
         scoped = scoped[scoped["player_name"] == clean_player_name]
     else:
         return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
-    scoped = scoped[scoped["start_time_utc"] < start_time].sort_values("start_time_utc").tail(10)
+    scoped = (
+        scoped[scoped["start_time_utc"] < decision_time - RESULT_AVAILABILITY_LAG]
+        .sort_values("start_time_utc")
+        .tail(10)
+    )
     if scoped.empty:
         return {metric: np.nan for metric in PLAYER_IMPACT_METRICS}
     return {
@@ -1130,10 +1150,11 @@ def _summarize_team_injuries(
     team_id: Any,
     team_code: Any,
     start_time: pd.Timestamp,
+    decision_time: pd.Timestamp,
     player_stats: pd.DataFrame,
 ) -> dict[str, float]:
     empty = {column: np.nan for column in INJURY_SOURCE_COLUMNS}
-    if reports.empty or pd.isna(start_time):
+    if reports.empty or pd.isna(decision_time):
         return empty
 
     team_reports = reports[reports["league"] == str(league).upper()].copy()
@@ -1144,7 +1165,7 @@ def _summarize_team_injuries(
         ]
     else:
         team_reports = team_reports[team_reports["team_code"] == str(team_code or "").upper()]
-    team_reports = team_reports[team_reports["report_date"] <= start_time]
+    team_reports = team_reports[team_reports["report_date"] <= decision_time]
     if team_reports.empty:
         return empty
 
@@ -1153,7 +1174,7 @@ def _summarize_team_injuries(
     if not same_game.empty:
         team_reports = same_game
     else:
-        min_report_time = start_time - pd.Timedelta(days=7)
+        min_report_time = decision_time - pd.Timedelta(days=7)
         team_reports = team_reports[team_reports["report_date"] >= min_report_time]
     if team_reports.empty:
         return empty
@@ -1186,7 +1207,7 @@ def _summarize_team_injuries(
             team_id=team_id,
             player_id=getattr(injury, "player_id", None),
             player_name=getattr(injury, "player_name", None),
-            start_time=start_time,
+            decision_time=decision_time,
         )
         for metric, value in averages.items():
             if pd.isna(value):
@@ -1213,9 +1234,10 @@ def _attach_injury_features(
     player_stats = _load_player_stat_history(db_path, leagues)
 
     rows: list[dict[str, Any]] = []
+    decision_keys = ["game_id", "snapshot_time_utc"]
     game_rows = selected[
         [
-            "game_id",
+            *decision_keys,
             "league",
             "start_time_utc",
             "home_team_id",
@@ -1223,9 +1245,12 @@ def _attach_injury_features(
             "home_team_code",
             "away_team_code",
         ]
-    ].drop_duplicates("game_id")
+    ].drop_duplicates(decision_keys)
     for row in game_rows.itertuples(index=False):
-        record: dict[str, Any] = {"game_id": row.game_id}
+        record: dict[str, Any] = {
+            "game_id": row.game_id,
+            "snapshot_time_utc": row.snapshot_time_utc,
+        }
         for side in ("home", "away"):
             summary = _summarize_team_injuries(
                 reports,
@@ -1233,11 +1258,12 @@ def _attach_injury_features(
                 team_id=getattr(row, f"{side}_team_id"),
                 team_code=getattr(row, f"{side}_team_code"),
                 start_time=row.start_time_utc,
+                decision_time=row.snapshot_time_utc,
                 player_stats=player_stats,
             )
             record.update({f"{side}_{key}": value for key, value in summary.items()})
         rows.append(record)
-    return selected.merge(pd.DataFrame(rows), on="game_id", how="left")
+    return selected.merge(pd.DataFrame(rows), on=decision_keys, how="left")
 
 
 def _soccer_season_from_start(start_time: pd.Timestamp) -> int | None:
@@ -1374,6 +1400,8 @@ def build_totals_model_input(
     db_path: Path = DB_PATH,
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
     latest_only: bool = True,
+    *,
+    include_retrospective_features: bool = True,
 ) -> pd.DataFrame:
     """Build leakage-safe over/under model input from odds snapshots and results."""
     _ensure_total_close_lineage_columns(db_path)
@@ -1417,6 +1445,7 @@ def build_totals_model_input(
           AND o.line IS NOT NULL
           AND gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
+          AND g.status = 'final'
           {league_sql}
         GROUP BY
             g.game_id, s.league, g.start_time_utc, os.snapshot_id,
@@ -1431,7 +1460,10 @@ def build_totals_model_input(
     if df.empty:
         return df
     df = _normalize_datetime_columns(df)
-    df = df[df["snapshot_time_utc"] <= df["start_time_utc"]].copy()
+    df = df[
+        (df["snapshot_time_utc"] < df["start_time_utc"])
+        & (df["start_time_utc"] < pd.Timestamp.now(tz="UTC") - RESULT_AVAILABILITY_LAG)
+    ].copy()
     if df.empty:
         return df
     for column in ["line", "over_moneyline", "under_moneyline", "home_score", "away_score"]:
@@ -1484,9 +1516,10 @@ def build_totals_model_input(
     selected = _attach_best_totals_prices(df, selected)
     selected = _attach_totals_close_lines_by_book(latest_by_book, selected)
     selected = _attach_team_history_features(selected, db_path, leagues)
-    selected = _attach_nba_advanced_features(selected, db_path)
     selected = _attach_injury_features(selected, db_path, leagues)
-    selected = _attach_soccer_features(selected)
+    if include_retrospective_features:
+        selected = _attach_nba_advanced_features(selected, db_path)
+        selected = _attach_soccer_features(selected)
     selected = _finalize_game_feature_contract(selected)
     return selected.sort_values(["league", "start_time_utc", "game_id"]).reset_index(drop=True)
 
@@ -1508,6 +1541,8 @@ def build_moneyline_model_input(
     db_path: Path = DB_PATH,
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
     latest_only: bool = True,
+    *,
+    include_retrospective_features: bool = True,
 ) -> pd.DataFrame:
     """Build leakage-safe moneyline model input from odds snapshots and results."""
     league_sql, params = _league_filter(leagues)
@@ -1544,13 +1579,17 @@ def build_moneyline_model_input(
           AND o.price_american IS NOT NULL
           AND gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
+          AND g.status = 'final'
           {league_sql}
     """
     raw = _read_sql(db_path, query, params)
     if raw.empty:
         return raw
     raw = _normalize_datetime_columns(raw)
-    raw = raw[raw["snapshot_time_utc"] <= raw["start_time_utc"]].copy()
+    raw = raw[
+        (raw["snapshot_time_utc"] < raw["start_time_utc"])
+        & (raw["start_time_utc"] < pd.Timestamp.now(tz="UTC") - RESULT_AVAILABILITY_LAG)
+    ].copy()
     if raw.empty:
         return raw
     raw["side"] = raw.apply(
@@ -1634,9 +1673,10 @@ def build_moneyline_model_input(
     selected = _latest_per_game(paired) if latest_only else paired.copy()
     selected = _attach_best_moneyline_prices(paired, selected)
     selected = _attach_team_history_features(selected, db_path, leagues)
-    selected = _attach_nba_advanced_features(selected, db_path)
     selected = _attach_injury_features(selected, db_path, leagues)
-    selected = _attach_soccer_features(selected)
+    if include_retrospective_features:
+        selected = _attach_nba_advanced_features(selected, db_path)
+        selected = _attach_soccer_features(selected)
     selected = _finalize_game_feature_contract(selected)
     return selected.sort_values(["league", "start_time_utc", "game_id"]).reset_index(drop=True)
 
@@ -1645,9 +1685,16 @@ def build_moneyline_side_model_input(
     db_path: Path = DB_PATH,
     leagues: Optional[Iterable[str]] = DEFAULT_RELEASE_LEAGUES,
     latest_only: bool = True,
+    *,
+    include_retrospective_features: bool = True,
 ) -> pd.DataFrame:
     """Build one leakage-safe moneyline row per bettable side/team."""
-    games = build_moneyline_model_input(db_path=db_path, leagues=leagues, latest_only=latest_only)
+    games = build_moneyline_model_input(
+        db_path=db_path,
+        leagues=leagues,
+        latest_only=latest_only,
+        include_retrospective_features=include_retrospective_features,
+    )
     if games.empty:
         return games
 
@@ -1783,6 +1830,7 @@ def _market_drop_reasons(
             g.game_id,
             UPPER(s.league) AS league,
             g.start_time_utc,
+            g.status,
             gr.home_score,
             gr.away_score
         FROM games g
@@ -1794,8 +1842,15 @@ def _market_drop_reasons(
     games = _read_sql(db_path, games_query, params)
     if games.empty:
         return {}
-    games["start_time_utc"] = pd.to_datetime(games["start_time_utc"], utc=True, errors="coerce")
-    games["has_result"] = games["home_score"].notna() & games["away_score"].notna()
+    games["start_time_utc"] = pd.to_datetime(
+        games["start_time_utc"], format="mixed", utc=True, errors="coerce"
+    )
+    games["has_result"] = (
+        games["home_score"].notna()
+        & games["away_score"].notna()
+        & games["status"].eq("final")
+        & (games["start_time_utc"] < pd.Timestamp.now(tz="UTC") - RESULT_AVAILABILITY_LAG)
+    )
 
     odds_query = f"""
         SELECT
@@ -1818,11 +1873,8 @@ def _market_drop_reasons(
     if odds.empty:
         pregame_ids: set[Any] = set()
     else:
-        odds["start_time_utc"] = pd.to_datetime(odds["start_time_utc"], utc=True, errors="coerce")
-        odds["snapshot_time_utc"] = pd.to_datetime(
-            odds["snapshot_time_utc"], utc=True, errors="coerce"
-        )
-        odds = odds[odds["snapshot_time_utc"] <= odds["start_time_utc"]].copy()
+        odds = _normalize_datetime_columns(odds)
+        odds = odds[odds["snapshot_time_utc"] < odds["start_time_utc"]].copy()
         if market == "totals":
             odds = odds[odds["line"].notna()].copy()
         pregame_ids = set(odds["game_id"].dropna().unique())

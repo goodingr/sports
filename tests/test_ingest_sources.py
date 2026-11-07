@@ -2,15 +2,48 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from src.data import ingest_sources
+import pytest
+import requests
+
+from src.data import ingest_odds, ingest_sources
 
 HANDLER_PATH = "tests.test_ingest_sources:_dummy_handler"
 
 
 def _dummy_handler(**kwargs: Any) -> None:  # pragma: no cover - used via handler path
     return None
+
+
+def test_odds_request_metadata_excludes_credentials(monkeypatch) -> None:
+    api_key = "fake-test-key"
+    settings = ingest_odds.OddsAPISettings(api_key=api_key)
+    def fake_get(url, *, params, **kwargs):
+        assert params["apiKey"] == api_key
+        response = requests.Response()
+        response.status_code = 200
+        response._content = (
+            b'{"timestamp":"2026-01-01T00:00:00Z","data":[]}' if "/historical/" in url else b"[]"
+        )
+        return response
+
+    monkeypatch.setattr(ingest_odds.OddsAPIKeyManager, "get_available_keys", lambda: [api_key])
+    monkeypatch.setattr(ingest_odds.OddsAPIKeyManager, "get_current_key", lambda: api_key)
+    monkeypatch.setattr(ingest_odds.requests, "get", fake_get)
+    live = ingest_odds.fetch_odds(settings)
+    history = ingest_odds.fetch_odds_history(settings, datetime(2026, 1, 1, tzinfo=timezone.utc))
+    for payload in (live, history):
+        assert "apiKey" not in payload["request"]["params"]
+        assert payload["request"]["params"]["regions"] == settings.region
+
+    def failed_get(url, *, params, **kwargs):
+        raise requests.ConnectionError(f"Connection failed at {url}?apiKey={params['apiKey']}")
+
+    monkeypatch.setattr(ingest_odds.requests, "get", failed_get)
+    with pytest.raises(RuntimeError, match="^Odds API connection failed$"):
+        ingest_odds.fetch_odds(settings)
 
 
 def test_entry_run_mode_defaults() -> None:

@@ -1,7 +1,9 @@
 """Core prediction engine logic."""
 
+import hashlib
 import logging
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -114,10 +116,14 @@ class PredictionEngine:
         self.totals_model = None
         self.totals_std = None
         self.totals_features = None
+        self.totals_model_sha256 = None
         
-    def load_model(self, league: str) -> bool:
+    def load_model(self, league: str, *, trace_totals: bool = False) -> bool:
         """Load the trained model for the specified league."""
-        league_upper = league.upper()
+        self.totals_model = None
+        self.totals_std = None
+        self.totals_features = None
+        self.totals_model_sha256 = None
         # Try specific model type first
         model_filename = f"{league.lower()}_{self.model_type}_calibrated_moneyline.pkl"
         model_path = MODEL_REGISTRY_PATH / model_filename
@@ -156,7 +162,12 @@ class PredictionEngine:
             totals_path = MODEL_REGISTRY_PATH / totals_filename
             if totals_path.exists():
                 try:
-                    bundle = joblib.load(totals_path)
+                    if trace_totals:
+                        model_bytes = totals_path.read_bytes()
+                        bundle = joblib.load(BytesIO(model_bytes))
+                        self.totals_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
+                    else:
+                        bundle = joblib.load(totals_path)
                     if isinstance(bundle, dict):
                         self.totals_model = bundle.get("regressor")
                         self.totals_std = bundle.get("residual_std", 5.0) # Default to 5.0 if missing
@@ -388,7 +399,9 @@ class PredictionEngine:
             
         return pd.DataFrame(features_list)
 
-    def predict(self, league: str, days_ahead: int = 7) -> Optional[pd.DataFrame]:
+    def predict(
+        self, league: str, days_ahead: int = 7, *, trace_totals: bool = False
+    ) -> Optional[pd.DataFrame]:
         """Generate predictions for upcoming games."""
         
         # 1. Load games
@@ -398,8 +411,12 @@ class PredictionEngine:
             return None
             
         # 2. Load model
-        if not self.load_model(league):
+        if not self.load_model(league, trace_totals=trace_totals):
+            if trace_totals:
+                raise FeatureContractError(f"Cannot load the prediction model for {league}")
             return None
+        if trace_totals and (self.totals_model is None or not self.totals_std):
+            raise FeatureContractError(f"Cannot load the totals model for {league}")
             
         # 3. Prepare features
         X_df = self.prepare_features(games_df, league)
@@ -420,6 +437,7 @@ class PredictionEngine:
             X_df["away_edge"] = X_df["away_predicted_prob"] - (1 - X_df["implied_prob"])
             
             # Totals prediction
+            X_df["predicted_total_points"] = np.nan
             if self.totals_model and self.totals_std:
                 try:
                     totals_X = self._build_totals_matrix(X_df)
@@ -441,6 +459,8 @@ class PredictionEngine:
                     X_df["under_edge"] = X_df["under_predicted_prob"] - X_df["under_implied_prob"]
                     
                 except Exception as e:
+                    if trace_totals:
+                        raise
                     LOGGER.warning(f"Totals prediction failed for {league}: {e}")
                     X_df["over_predicted_prob"] = np.nan
                     X_df["under_predicted_prob"] = np.nan
@@ -472,15 +492,23 @@ class PredictionEngine:
                 output_cols.extend(["home_implied_prob", "away_implied_prob"])
                 
             final_df = X_df[output_cols].copy()
+            if trace_totals:
+                trace_columns = ["selected_totals_snapshot_id", "selected_totals_book_id"]
+                final_df = final_df.merge(
+                    games_df[["game_id", *trace_columns]], on="game_id", validate="one_to_one"
+                )
             
             # Add metadata
             final_df["league"] = league
-            final_df["predicted_at"] = pd.Timestamp.now(tz="UTC")
+            predicted_at = datetime.now(timezone.utc)
+            final_df["predicted_at"] = predicted_at
             
             # Save
-            save_predictions(final_df, self.model_type)
+            save_predictions(final_df, self.model_type, timestamp=predicted_at)
             return final_df
             
         except Exception as e:
+            if trace_totals:
+                raise
             LOGGER.error(f"Prediction failed for {league}: {e}")
             return None

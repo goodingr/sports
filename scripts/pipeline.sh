@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Linux/container equivalent of scripts/pipeline.ps1.
-# Orchestrates ingest -> data hygiene -> (quality benchmark) -> current
-# prediction refresh -> paid-picks publish gate.
+# Orchestrates ingest -> data hygiene -> paper grading -> prediction refresh
+# and paper capture -> paid-picks publish gate -> quality benchmark.
 #
 # Defaults: full pipeline (with quality benchmark).
 # Flags:
@@ -12,6 +12,7 @@
 #   --skip-publish     skip the paid-picks publish gate
 #   --soccer-only      only process soccer leagues
 #   --skip-odds        skip odds + scores fetches (use cached data)
+#   --skip-paper       skip the private paper ledger
 #
 # Each step's stdout/stderr is appended to logs/pipeline_<ts>.log.
 #
@@ -20,7 +21,7 @@
 #   failed league/model so a flaky odds API doesn't take down predict for
 #   the entire portfolio. But we *count* every WARN, write a structured
 #   summary to logs/pipeline_summary.json, and exit non-zero if a critical
-#   step has zero successes (e.g. predict failed for *every* league/model).
+#   step fails (e.g. predict failed for *every* league/model).
 #   The non-zero exit is what scripts/run_job.sh turns into a fail heartbeat
 #   for the container healthcheck.
 
@@ -33,6 +34,7 @@ SKIP_PREDICTION=0
 SKIP_PUBLISH=0
 SOCCER_ONLY=0
 SKIP_ODDS=0
+SKIP_PAPER=0
 
 for arg in "$@"; do
 	case "$arg" in
@@ -42,6 +44,7 @@ for arg in "$@"; do
 		--skip-publish) SKIP_PUBLISH=1 ;;
 		--soccer-only)   SOCCER_ONLY=1 ;;
 		--skip-odds)     SKIP_ODDS=1 ;;
+		--skip-paper)    SKIP_PAPER=1 ;;
 		*) echo "unknown arg: $arg" >&2; exit 64 ;;
 	esac
 done
@@ -50,6 +53,7 @@ mkdir -p logs
 TS=$(date -u +%Y%m%d_%H%M%S)
 LOG_FILE="logs/pipeline_${TS}.log"
 SUMMARY_FILE="logs/pipeline_summary.json"
+PAID_OUTPUT="reports/publishable_bets/latest_publishable_bets.json"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -66,6 +70,13 @@ QUALITY_OK=0
 QUALITY_FAIL=0
 PUBLISH_OK=0
 PUBLISH_FAIL=0
+PAPER_OK=0
+PAPER_FAIL=0
+PAPER_ENABLED=0
+
+if (( ! SKIP_PAPER )) && [[ -f config/paper_trial.yml ]]; then
+	PAPER_ENABLED=1
+fi
 
 note_failure() {
 	local step=$1; shift
@@ -76,7 +87,7 @@ note_failure() {
 
 # Run a sub-command and increment success/failure counters for the named step.
 #   bucket_run <bucket> <description> -- <command...>
-# Bucket is one of: ingest, train, predict.
+# Bucket is one of: ingest, train, predict, quality, publish, paper.
 bucket_run() {
 	local bucket=$1 desc=$2
 	shift 2
@@ -92,19 +103,22 @@ bucket_run() {
 			predict) PREDICT_OK=$((PREDICT_OK + 1)) ;;
 			quality) QUALITY_OK=$((QUALITY_OK + 1)) ;;
 			publish) PUBLISH_OK=$((PUBLISH_OK + 1)) ;;
+			paper)   PAPER_OK=$((PAPER_OK + 1)) ;;
 		esac
 		return 0
+	else
+		local rc=$?
 	fi
-	local rc=$?
 	case "$bucket" in
 		ingest)  INGEST_FAIL=$((INGEST_FAIL + 1)) ;;
 		train)   TRAIN_FAIL=$((TRAIN_FAIL + 1)) ;;
 		predict) PREDICT_FAIL=$((PREDICT_FAIL + 1)) ;;
 		quality) QUALITY_FAIL=$((QUALITY_FAIL + 1)) ;;
 		publish) PUBLISH_FAIL=$((PUBLISH_FAIL + 1)) ;;
+		paper)   PAPER_FAIL=$((PAPER_FAIL + 1)) ;;
 	esac
 	note_failure "$bucket" "$desc (exit=$rc)"
-	return 0
+	return "$rc"
 }
 
 CORE_LEAGUES=(NFL NBA CFB NCAAB NHL)
@@ -142,7 +156,7 @@ fi
 PAID_LEAGUES_CSV=$(IFS=,; printf '%s' "${PAID_LEAGUES[*]}")
 
 log "============================================="
-log "pipeline start (skip_benchmark=$SKIP_TRAINING skip_prediction=$SKIP_PREDICTION skip_publish=$SKIP_PUBLISH soccer_only=$SOCCER_ONLY skip_odds=$SKIP_ODDS)"
+log "pipeline start (skip_benchmark=$SKIP_TRAINING skip_prediction=$SKIP_PREDICTION skip_publish=$SKIP_PUBLISH soccer_only=$SOCCER_ONLY skip_odds=$SKIP_ODDS paper_enabled=$PAPER_ENABLED)"
 log "leagues: ${LEAGUES[*]}"
 log "paid release leagues: ${PAID_LEAGUES[*]}"
 log "============================================="
@@ -223,26 +237,29 @@ if (( ${#PAID_LEAGUES[@]} > 0 )); then
 			--leagues "$PAID_LEAGUES_CSV"
 fi
 
+if (( PAPER_ENABLED )); then
+	log "step 3b: update paper ledger"
+	bucket_run paper "paper_ledger_update" -- python -m src.predict.paper_ledger update
+fi
+
 # ----------------------------------------------------------------------------
 # Step 2: quality-first benchmark. This replaces legacy training as the
 # promotion path for paid picks. It never auto-approves a rule.
 # ----------------------------------------------------------------------------
-if (( ! SKIP_TRAINING )); then
+RELEASE_QUALITY_PASSED=1
+if (( ! SKIP_TRAINING || ! SKIP_PUBLISH )); then
 	log "step 4: paid-picks data-quality gate"
-	if python -m src.data.quality --leagues "$PAID_LEAGUES_CSV"; then
+	if [[ -n "$PAID_LEAGUES_CSV" ]] && python -m src.data.quality --leagues "$PAID_LEAGUES_CSV"; then
 		QUALITY_OK=$((QUALITY_OK + 1))
-		log "step 4a: rolling-origin paid-picks benchmark"
-		bucket_run train "betting_benchmark" -- \
-			python -m src.models.train_betting \
-				--benchmark \
-				--benchmark-config config/betting_benchmark.yml \
-				--benchmark-output-dir reports/betting_benchmarks
 	else
+		RELEASE_QUALITY_PASSED=0
 		QUALITY_FAIL=$((QUALITY_FAIL + 1))
-		note_failure "quality" "paid-release data quality failed; skipped paid-picks benchmark"
+		note_failure "quality" "paid-release data quality failed"
+		if (( ! SKIP_PUBLISH )) && ! rm -f -- "$PAID_OUTPUT"; then
+			PUBLISH_FAIL=$((PUBLISH_FAIL + 1))
+			note_failure "publish" "could not revoke the previous paid output"
+		fi
 	fi
-else
-	log "skipping paid-picks benchmark (--skip-training/--skip-benchmark)"
 fi
 
 # ----------------------------------------------------------------------------
@@ -256,11 +273,20 @@ if (( ! SKIP_PREDICTION )); then
 	for league in "${LEAGUES[@]}"; do
 		for mt in "${MODEL_TYPES[@]}"; do
 			log "  predicting: $league / $mt"
-			bucket_run predict "predict[$league/$mt]" -- \
+			PAPER_ARGS=()
+			if (( PAPER_ENABLED && ! SKIP_ODDS )) && [[ "$league/$mt" == NBA/random_forest ]]; then
+				PAPER_ARGS+=(--paper)
+			fi
+			if ! bucket_run predict "predict[$league/$mt]" -- \
 				python -m src.predict.runner \
 					--leagues "$league" \
 					--model-type "$mt" \
-					--log-level INFO
+					--log-level INFO "${PAPER_ARGS[@]}"; then
+				if (( ${#PAPER_ARGS[@]} )); then
+					PAPER_FAIL=$((PAPER_FAIL + 1))
+					note_failure "paper" "NBA/random_forest paper capture run failed"
+				fi
+			fi
 		done
 	done
 else
@@ -270,17 +296,29 @@ fi
 # ----------------------------------------------------------------------------
 # Step 4: paid-picks publish gate. Empty output is a valid fail-closed state.
 # ----------------------------------------------------------------------------
-if (( ! SKIP_PUBLISH )); then
+if (( ! SKIP_PUBLISH && RELEASE_QUALITY_PASSED )); then
 	log "step 6: paid-picks publish gate"
 	bucket_run publish "publishable_bets" -- \
 		python -m src.predict.publishable_bets publish \
 			--rules config/published_rules.yml \
-			--output reports/publishable_bets/latest_publishable_bets.json \
+			--output "$PAID_OUTPUT" \
 			--quality-output reports/publishable_bets/latest_quality_report.json \
 			--leagues "$PAID_LEAGUES_CSV" \
 			--allow-empty
 else
-	log "skipping paid-picks publish gate (--skip-publish)"
+	log "skipping paid-picks publish gate"
+fi
+
+# Research runs after the prediction refresh and cannot delay the paid feed.
+if (( ! SKIP_TRAINING && RELEASE_QUALITY_PASSED )); then
+	log "step 7: rolling-origin paid-picks benchmark"
+	bucket_run train "betting_benchmark" -- \
+		python -m src.models.train_betting \
+			--benchmark \
+			--benchmark-config config/betting_benchmark.yml \
+			--benchmark-output-dir reports/betting_benchmarks
+else
+	log "skipping paid-picks benchmark"
 fi
 
 # ----------------------------------------------------------------------------
@@ -303,10 +341,16 @@ fi
 if (( ! SKIP_TRAINING && QUALITY_FAIL > 0 )); then
 	CRITICAL=1
 fi
+if (( ! RELEASE_QUALITY_PASSED )); then
+	CRITICAL=1
+fi
 if (( ! SKIP_TRAINING && TRAIN_FAIL > 0 )); then
 	CRITICAL=1
 fi
 if (( ! SKIP_PUBLISH && PUBLISH_FAIL > 0 )); then
+	CRITICAL=1
+fi
+if (( PAPER_FAIL > 0 )); then
 	CRITICAL=1
 fi
 
@@ -326,13 +370,14 @@ printf '  "log_file": "%s",\n' "$LOG_FILE"
 	printf '  "benchmark": { "ok": %s, "fail": %s },\n' "$TRAIN_OK" "$TRAIN_FAIL"
 	printf '  "predict":{ "ok": %s, "fail": %s },\n' "$PREDICT_OK" "$PREDICT_FAIL"
 	printf '  "publish":{ "ok": %s, "fail": %s },\n' "$PUBLISH_OK" "$PUBLISH_FAIL"
+	printf '  "paper": { "enabled": %s, "ok": %s, "fail": %s },\n' "$PAPER_ENABLED" "$PAPER_OK" "$PAPER_FAIL"
 	printf '  "total_failures": %s,\n' "$TOTAL_FAIL"
 	printf '  "critical": %s\n' "$([[ $CRITICAL -eq 1 ]] && printf true || printf false)"
 	printf '}\n'
 } > "$SUMMARY_FILE"
 
 log "============================================="
-log "pipeline complete: ingest=${INGEST_OK}/${INGEST_FAIL} quality=${QUALITY_OK}/${QUALITY_FAIL} benchmark=${TRAIN_OK}/${TRAIN_FAIL} predict=${PREDICT_OK}/${PREDICT_FAIL} publish=${PUBLISH_OK}/${PUBLISH_FAIL} (total_failures=${TOTAL_FAIL})"
+log "pipeline complete: ingest=${INGEST_OK}/${INGEST_FAIL} quality=${QUALITY_OK}/${QUALITY_FAIL} benchmark=${TRAIN_OK}/${TRAIN_FAIL} predict=${PREDICT_OK}/${PREDICT_FAIL} publish=${PUBLISH_OK}/${PUBLISH_FAIL} paper=${PAPER_OK}/${PAPER_FAIL} (total_failures=${TOTAL_FAIL})"
 if (( TOTAL_FAIL > 0 )); then
 	log "failures:"
 	for f in "${FAILURES[@]}"; do log "  - $f"; done
@@ -341,7 +386,7 @@ log "summary written to $SUMMARY_FILE"
 log "============================================="
 
 if (( CRITICAL == 1 )); then
-	log "CRITICAL: pipeline failed in a way that prevents serving fresh predictions"
+	log "CRITICAL: one or more required pipeline steps failed"
 	exit 1
 fi
 

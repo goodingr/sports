@@ -7,7 +7,8 @@
 
 param(
     [string]$League = "",
-    [switch]$SoccerOnly = $false
+    [switch]$SoccerOnly = $false,
+    [switch]$Paper = $false
 )
 
 $ErrorActionPreference = "Continue"
@@ -17,6 +18,9 @@ Set-Location $projectRoot
 
 $logFile = "logs/predict_pipeline_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss')
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
+
+$paperFailed = $false
+$predictionSucceeded = $false
 
 $coreLeagues = @("NFL", "NBA", "CFB", "NCAAB", "NHL")
 $soccerLeagues = @("EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1")
@@ -77,12 +81,20 @@ try {
         foreach ($league in $targetLeagues) {
             foreach ($modelType in $modelTypes) {
                 Write-Log "Generating predictions for $league with $modelType model..."
-                # Use new runner
-                & poetry run python -m src.predict.runner --leagues $league --model-type $modelType --log-level INFO 2>&1 | ForEach-Object { "$_" }
+                $capturePaper = $Paper -and $league -eq "NBA" -and $modelType -eq "random_forest"
+                $paperArgs = @()
+                if ($capturePaper) {
+                    $paperArgs += "--paper"
+                }
+                & poetry run python -m src.predict.runner --leagues $league --model-type $modelType --log-level INFO @paperArgs 2>&1 | ForEach-Object { "$_" }
                 if ($LASTEXITCODE -ne 0) {
                     Write-Log "WARNING: Prediction failed for $league ($modelType)"
+                    if ($capturePaper) {
+                        $paperFailed = $true
+                    }
                     continue
                 }
+                $predictionSucceeded = $true
             }
         }
     }
@@ -97,3 +109,6 @@ Write-Log "Step 2: Result syncing is now handled by ingestion pipeline."
 Write-Log "========================================="
 Write-Log "PREDICTION pipeline completed"
 Write-Log "========================================="
+if (-not $predictionSucceeded) { exit 1 }
+if ($paperFailed) { exit 2 }
+exit 0
