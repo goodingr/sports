@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from src.predict.paper_coverage import capture_coverage
+from src.predict.paper_settlement_history import grades_as_of
 
 GRADING_GRACE = timedelta(days=7)
 BOOTSTRAP_SAMPLES = 3000
@@ -45,18 +46,44 @@ def _is_probability(value: float | None) -> bool:
     return value is not None and 0.0 <= value <= 1.0
 
 
+def _grade_evidence(grade: sqlite3.Row | None) -> tuple[Any, Any, Any]:
+    if grade is None or grade["outcome"] == "pending":
+        return "pending", None, None
+    return grade["outcome"], grade["profit_units"], grade["clv_points"]
+
+
+def _late_grade_changes(
+    conn: sqlite3.Connection,
+    trial_id: str,
+    review_at: datetime,
+    final_review_at: datetime,
+    observed_at: datetime,
+) -> int:
+    if observed_at <= final_review_at:
+        return 0
+    frozen = grades_as_of(conn, trial_id, final_review_at)
+    current = grades_as_of(conn, trial_id, observed_at)
+    return sum(
+        _grade_evidence(frozen.get(row["game_id"]))
+        != _grade_evidence(current.get(row["game_id"]))
+        for row in conn.execute(
+            "SELECT game_id, captured_at FROM paper_decisions WHERE trial_id = ?", (trial_id,)
+        )
+        if _as_utc(row["captured_at"]) < review_at
+    )
+
+
 def _trial_metrics(
     conn: sqlite3.Connection,
     trial_id: str,
     review_at: datetime,
     evidence_cutoff: datetime,
 ) -> dict[str, Any]:
+    grades = grades_as_of(conn, trial_id, evidence_cutoff)
     decisions = conn.execute(
         """
-        SELECT d.start_time_utc, d.captured_at, d.model_probability, d.market_probability,
-               s.settled_at, s.outcome, s.profit_units, s.clv_points
+        SELECT d.game_id, d.start_time_utc, d.captured_at, d.model_probability, d.market_probability
         FROM paper_decisions d
-        LEFT JOIN paper_settlements s ON s.trial_id = d.trial_id AND s.game_id = d.game_id
         WHERE d.trial_id = ?
         ORDER BY d.game_id
         """,
@@ -71,21 +98,22 @@ def _trial_metrics(
         captured_at = _as_utc(row["captured_at"])
         if captured_at >= review_at or captured_at > evidence_cutoff:
             continue
-        if row["settled_at"] is None or _as_utc(row["settled_at"]) > evidence_cutoff:
+        grade = grades.get(row["game_id"])
+        if grade is None or grade["outcome"] == "pending":
             counts["pending"] += 1
             continue
 
-        outcome = row["outcome"]
+        outcome = grade["outcome"]
         counts[outcome] += 1
         if outcome == "void":
             continue
 
-        profit = row["profit_units"]
+        profit = grade["profit_units"]
         if profit is not None and math.isfinite(profit):
             day = _as_utc(row["start_time_utc"]).date()
             daily_profits[day].append(profit)
 
-        clv = row["clv_points"]
+        clv = grade["clv_points"]
         if clv is not None and math.isfinite(clv):
             clv_values.append(clv)
 
@@ -195,6 +223,9 @@ def build_paper_report(conn: sqlite3.Connection, observed_at: datetime) -> dict[
                 "review_status": status,
                 "review_verdict": verdict,
                 "review_failures": failures,
+                "late_grade_changes": _late_grade_changes(
+                    conn, row["trial_id"], review_at, final_review_at, observed_at
+                ),
                 "capture_coverage": capture_coverage(
                     conn,
                     row["trial_id"],

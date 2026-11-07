@@ -390,6 +390,12 @@ of lead time against the corrected start is voided. Closing line value uses the 
 paired totals quote from the same book and feed within 90 minutes before tipoff
 and strictly after the decision. A missing close stays missing in the report.
 
+Ledger updates re-evaluate source results and retain grade revisions, including
+official score corrections and retracted final scores. Reports select the latest
+grade observed by their evidence cutoff. Material outcome, profit, or CLV
+corrections after the final review are flagged separately and block subscriber
+approval. The original frozen review stays available for audit.
+
 Preview the closing collector with
 `poetry run python -m src.predict.paper_close_poll`. Add `--collect` to allow
 one batched request when pending decisions need a close and have 10 to 60

@@ -937,6 +937,15 @@ def show_paper_trials(_n_clicks: Optional[int]):
                         f"Ambiguous schedules {known['ambiguous_schedule_fixtures']}"
                     )
                 )
+        if trial.get("late_grade_changes", 0):
+            coverage_details.append(
+                dbc.Alert(
+                    f"{trial['late_grade_changes']} grades changed after the final review. "
+                    "Subscriber approval is blocked.",
+                    color="warning",
+                    className="mt-2 mb-0",
+                )
+            )
         cards.append(
             dbc.Card(
                 dbc.CardBody(
