@@ -1,7 +1,7 @@
 # Predeclared betting rules for subscriber-facing recommendations.
 #
 # Launch rule status:
-# - approved: may be shown only if the quality report says it passes launch gates.
+# - approved: requires a passing completed prospective trial and current launch gates.
 # - candidate: monitored and backtested, but not subscriber-facing.
 # - status: disabled or disabled: true: never subscriber-facing.
 #
