@@ -159,6 +159,11 @@ def _decision_quote(
           AND sn.sport_id = ? AND sn.source = ? AND lower(b.name) = ?
           AND over.market = 'totals' AND lower(over.outcome) = 'over'
           AND lower(under.outcome) = 'under'
+          AND (
+            SELECT COUNT(*) FROM odds paired
+            WHERE paired.snapshot_id = sn.snapshot_id AND paired.game_id = over.game_id
+              AND paired.book_id = b.book_id AND paired.market = 'totals'
+          ) = 2
           AND sn.snapshot_id = (
             SELECT newest.snapshot_id FROM odds_snapshots newest
             WHERE newest.sport_id = sn.sport_id AND newest.source = sn.source
@@ -184,22 +189,28 @@ def _decision_quote(
 
 def _model_inputs_match(conn: sqlite3.Connection, row: Any, quote: sqlite3.Row) -> bool:
     """Check the odds inputs the model saw against the same decision snapshot."""
-    moneylines = {
-        odd["outcome"]: odd["price_american"]
-        for odd in conn.execute(
-            """
-            SELECT lower(outcome) AS outcome, price_american
-            FROM odds
-            WHERE snapshot_id = ? AND game_id = ? AND book_id = ?
-              AND market = 'h2h' AND lower(outcome) IN ('home', 'away')
-            """,
-            (quote["snapshot_id"], row.game_id, quote["book_id"]),
-        )
-    }
+    snapshot_id = getattr(row, "selected_h2h_snapshot_id", None)
+    book_id = getattr(row, "selected_h2h_book_id", None)
+    if pd.isna(snapshot_id) or pd.isna(book_id):
+        return False
+    if snapshot_id != quote["snapshot_id"] or book_id != quote["book_id"]:
+        return False
+
+    inputs = conn.execute(
+        """
+        SELECT lower(outcome) AS outcome, price_american
+        FROM odds
+        WHERE snapshot_id = ? AND game_id = ? AND book_id = ? AND market = 'h2h'
+        """,
+        (quote["snapshot_id"], row.game_id, quote["book_id"]),
+    ).fetchall()
+    if len(inputs) != 2:
+        return False
+    moneylines = {odd["outcome"]: odd["price_american"] for odd in inputs}
     home_price, away_price = moneylines.get("home"), moneylines.get("away")
     # The SHA-pinned model never splits on its spread input.
     return all(
-        price is not None and math.isfinite(price) and abs(price) >= 100
+        isinstance(price, (int, float)) and math.isfinite(price) and abs(price) >= 100
         for price in (home_price, away_price)
     ) and (home_price, away_price) == (row.home_moneyline, row.away_moneyline)
 

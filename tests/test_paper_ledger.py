@@ -55,6 +55,8 @@ def warehouse(tmp_path: Path):
                 "predicted_at": datetime.now(timezone.utc),
                 "selected_totals_snapshot_id": "snapshot",
                 "selected_totals_book_id": 1,
+                "selected_h2h_snapshot_id": "snapshot",
+                "selected_h2h_book_id": 1,
                 "total_line": 222.5,
                 "over_moneyline": -110,
                 "under_moneyline": -110,
@@ -125,6 +127,41 @@ def test_capture_rejects_missing_provenance_wrong_model_and_invalid_market(wareh
         "game_unavailable": 1,
         "prediction_missing": 1,
     }
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    [
+        {"selected_h2h_snapshot_id": "different-snapshot"},
+        {"selected_h2h_book_id": 2},
+        {"selected_h2h_snapshot_id": None},
+    ],
+)
+def test_capture_rejects_matching_prices_with_different_provenance(warehouse, provenance):
+    db, trial, predictions, _ = warehouse
+    assert capture_predictions(trial, predictions.assign(**provenance), trial.model_sha256, db) == {
+        "unverified_model_inputs": 1
+    }
+
+
+@pytest.mark.parametrize(
+    ("market", "outcome", "line", "failure"),
+    [
+        ("h2h", "HOME", None, "unverified_model_inputs"),
+        ("totals", "OVER", 222.5, "quote_not_current_at_trial_book"),
+    ],
+)
+def test_capture_rejects_ambiguous_quote_pairs(warehouse, market, outcome, line, failure):
+    db, trial, predictions, _ = warehouse
+    with connect(db) as conn:
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+            VALUES ('snapshot', 'game', 1, ?, ?, -130, ?)
+            """,
+            (market, outcome, line),
+        )
+    assert capture_predictions(trial, predictions, trial.model_sha256, db) == {failure: 1}
 
 
 def test_capture_records_empty_and_failed_runs(warehouse, monkeypatch):

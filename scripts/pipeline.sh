@@ -173,6 +173,20 @@ fi
 # ----------------------------------------------------------------------------
 # Step 1: ingest
 # ----------------------------------------------------------------------------
+CAPTURE_PAPER_FIRST=0
+if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${LEAGUES[@]}" | grep -qx NBA; then
+	CAPTURE_PAPER_FIRST=1
+	log "step: fetch NBA odds for paper capture before history ingestion"
+	if bucket_run ingest "odds[NBA]" -- \
+		python -m src.data.ingest_odds --league NBA --market h2h,totals --force-refresh; then
+		bucket_run paper "NBA/random_forest capture" -- \
+			python -m src.predict.runner --leagues NBA --model-type random_forest --paper
+	else
+		PAPER_FAIL=$((PAPER_FAIL + 1))
+		note_failure "paper" "NBA odds refresh failed; paper capture could not run"
+	fi
+fi
+
 log "step 1: smart history ingest"
 bucket_run ingest "ingest_manager" -- \
 	python -m src.data.ingest_manager --leagues "${LEAGUES[@]}"
@@ -190,21 +204,10 @@ fi
 if (( ! SKIP_ODDS )); then
 	log "step 2: live odds"
 	for league in "${LEAGUES[@]}"; do
+		if (( CAPTURE_PAPER_FIRST )) && [[ "$league" == NBA ]]; then continue; fi
 		log "  fetching odds: $league"
-		if bucket_run ingest "odds[$league]" -- \
-			python -m src.data.ingest_odds \
-				--league "$league" \
-				--market h2h,totals \
-				--force-refresh; then
-			if (( PAPER_ENABLED && ! SKIP_PREDICTION )) && [[ "$league" == NBA ]]; then
-				log "  capture paper decisions from fresh NBA odds"
-				bucket_run paper "NBA/random_forest capture" -- \
-					python -m src.predict.runner --leagues NBA --model-type random_forest --paper
-			fi
-		elif (( PAPER_ENABLED && ! SKIP_PREDICTION )) && [[ "$league" == NBA ]]; then
-			PAPER_FAIL=$((PAPER_FAIL + 1))
-			note_failure "paper" "NBA odds refresh failed; paper capture could not run"
-		fi
+		bucket_run ingest "odds[$league]" -- \
+			python -m src.data.ingest_odds --league "$league" --market h2h,totals --force-refresh
 	done
 
 	log "step 3: live scores"
