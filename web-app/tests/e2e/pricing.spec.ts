@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { mockCheckoutAvailability } from './_fixtures/mocks';
 
 test.describe('Pricing page', () => {
     test('shows headline, price, features, and CTA', async ({ page }) => {
+        await mockCheckoutAvailability(page, true);
         await page.goto('/pricing');
         await expect(
             page.getByRole('heading', { name: /Simple, Transparent Pricing/i })
@@ -21,11 +23,20 @@ test.describe('Pricing page', () => {
     });
 
     test('signed-out CTA routes to signup with redirect back to pricing', async ({ page }) => {
+        await mockCheckoutAvailability(page, true);
         await page.goto('/pricing');
         const cta = page.getByRole('button', { name: /Sign Up & Subscribe/i });
         await expect(cta).toBeVisible();
         await cta.click();
         await expect(page).toHaveURL(/\/signup\?redirect_url=(%2F|\/)pricing/);
+    });
+
+    test('shows paused enrollment when there are no validated picks', async ({ page }) => {
+        await mockCheckoutAvailability(page, false);
+        await page.goto('/pricing');
+        await expect(page.getByText('Subscriptions are currently paused')).toBeVisible();
+        await expect(page.getByRole('button', { name: /subscribe/i })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Explore model tracking' })).toHaveAttribute('href', '/');
     });
 
     test('canceled checkout returns to pricing without errors', async ({ page }) => {

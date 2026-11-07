@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { isCheckoutAvailable } from "@/lib/api";
 import {
     getAppUrl,
     getOrCreateCustomer,
@@ -8,24 +9,21 @@ import {
 } from "@/lib/billing";
 
 export async function POST() {
-    let stripe;
-    let priceId: string;
-    let appUrl: string;
-    try {
-        stripe = getStripe();
-        priceId = getStripePriceId();
-        appUrl = getAppUrl();
-    } catch (error) {
-        console.error("[CHECKOUT_CONFIG_ERROR]", error);
-        return new NextResponse("Billing not configured", { status: 500 });
-    }
-
     try {
         const { userId } = await auth();
-        const user = await currentUser();
-
-        if (!userId || !user) {
+        if (!userId) {
             return new NextResponse("Unauthorized", { status: 401 });
+        }
+        if (!(await isCheckoutAvailable())) {
+            return new NextResponse("Subscriptions are currently unavailable", { status: 503 });
+        }
+
+        const user = await currentUser();
+        if (!user) {
+            return new NextResponse("Unauthorized", { status: 401 });
+        }
+        if (user.publicMetadata.is_premium === true || user.publicMetadata.isPremium === true) {
+            return new NextResponse("Already subscribed", { status: 409 });
         }
 
         const email = user.emailAddresses[0]?.emailAddress;
@@ -33,8 +31,10 @@ export async function POST() {
             return new NextResponse("Email required", { status: 400 });
         }
 
+        const stripe = getStripe();
+        const priceId = getStripePriceId();
+        const appUrl = getAppUrl();
         const customerId = await getOrCreateCustomer(userId, email);
-
         const session = await stripe.checkout.sessions.create({
             customer: customerId,
             success_url: `${appUrl}/account?success=true`,

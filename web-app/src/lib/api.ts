@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.SPORTS_API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export class ApiError extends Error {
     status: number;
@@ -29,6 +29,18 @@ export async function fetchAPI<T>(endpoint: string, options?: RequestInit): Prom
     }
 
     return res.json() as Promise<T>;
+}
+
+export async function isCheckoutAvailable(): Promise<boolean> {
+    try {
+        const status = await fetchAPI<{ checkout_available?: boolean }>('/api/bets/access', {
+            cache: 'no-store',
+            signal: AbortSignal.timeout(5000),
+        });
+        return status?.checkout_available === true;
+    } catch {
+        return false;
+    }
 }
 
 // ============================================================================
@@ -63,6 +75,7 @@ export interface RawBet {
     commence_time: string;
     home_team: string;
     away_team: string;
+    market?: string;
     bet_type?: string;
     side?: string;
     prediction?: string;
@@ -71,7 +84,8 @@ export interface RawBet {
     moneyline?: number;
     edge?: number;
     stake?: number;
-    status: string;
+    status?: string;
+    is_locked?: boolean;
     result?: string;
     profit?: number;
     home_score?: number;
@@ -89,12 +103,14 @@ export interface Bet {
     commence_time: string;
     home_team: string;
     away_team: string;
+    market?: string;
     bet_type: string;
     prediction: string;
     odds: number;
     edge: number;
     stake: number;
     status: string;
+    is_locked?: boolean;
     result?: string;
     profit?: number;
     home_score?: number;
@@ -114,20 +130,26 @@ export interface PaginatedBetsResponse {
 
 export interface UpcomingBetsResponse {
     data: RawBet[];
+    is_premium?: boolean;
 }
 
 export function normalizeBet(bet: RawBet): Bet {
+    const side = bet.side ?? bet.bet_type ?? '';
+    const moneylineTeam = side === 'home' ? bet.home_team : side === 'away' ? bet.away_team : undefined;
+    const recommendation = bet.recommended_bet || moneylineTeam;
     return {
         game_id: bet.game_id,
         commence_time: bet.commence_time,
         home_team: bet.home_team,
         away_team: bet.away_team,
-        bet_type: bet.side ?? bet.bet_type ?? '',
-        prediction: bet.description ?? bet.prediction ?? '',
+        market: bet.market ?? (moneylineTeam ? 'moneyline' : undefined),
+        bet_type: side,
+        prediction: bet.description || bet.prediction || recommendation || '',
         odds: Number(bet.moneyline ?? bet.odds ?? 0),
         edge: Number(bet.edge ?? 0),
         stake: Number(bet.stake ?? 0),
-        status: bet.status,
+        status: bet.status ?? 'Pending',
+        is_locked: bet.is_locked,
         result: bet.result,
         profit: bet.profit !== undefined ? Number(bet.profit) : undefined,
         home_score: bet.home_score,
@@ -136,7 +158,7 @@ export function normalizeBet(bet: RawBet): Bet {
         book: bet.book,
         book_url: bet.book_url,
         predicted_total_points: bet.predicted_total_points,
-        recommended_bet: bet.recommended_bet,
+        recommended_bet: recommendation,
         odds_data: bet.odds_data,
     };
 }

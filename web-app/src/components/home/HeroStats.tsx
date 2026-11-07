@@ -45,6 +45,7 @@ export function HeroStats() {
         );
     }
 
+    const hasResults = stats.total_bets > 0;
     return (
         <div className={`relative bg-black/50 border-b border-white/10 transition-[padding] duration-300 ease-in-out ${isCollapsed ? 'pb-8' : 'pb-0'}`}>
             <div
@@ -54,11 +55,17 @@ export function HeroStats() {
                 <div className="overflow-hidden">
                     <div className="py-8">
                         <Container>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
+                            <div className="max-w-2xl mx-auto mb-3 text-center">
+                                <h2 className="text-sm font-semibold text-foreground">Historical totals model results</h2>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {hasResults ? 'Settled model selections using simulated stakes.' : 'No settled model selections yet.'}
+                                </p>
+                            </div>
+                            {hasResults && <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto">
                                 <StatCard
-                                    label="Total Profit"
-                                    value={`$${stats.total_profit.toLocaleString()}`}
-                                    icon={<DollarSign className="h-4 w-4 text-success" />}
+                                    label="Simulated P&L"
+                                    value={stats.total_profit.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                    icon={<DollarSign className="h-4 w-4 text-primary" />}
                                     trend="All Time"
                                 />
                                 <StatCard
@@ -71,9 +78,9 @@ export function HeroStats() {
                                     label="Win Rate"
                                     value={`${stats.win_rate}%`}
                                     icon={<Percent className="h-4 w-4 text-blue-500" />}
-                                    trend={`${stats.total_bets} Total Bets`}
+                                    trend={`${stats.total_bets.toLocaleString('en-US')} settled selections`}
                                 />
-                            </div>
+                            </div>}
                         </Container>
                     </div>
                 </div>

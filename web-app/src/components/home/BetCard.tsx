@@ -30,9 +30,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
     const now = new Date();
     const commenceDate = new Date(bet.commence_time);
     const isStarted = commenceDate <= now;
+    const showScores = (isCompleted || isStarted) && bet.away_score != null && bet.home_score != null;
 
-    // Locked when game hasn't completed yet AND user isn't premium.
-    const isLocked = !isCompleted && !isPremium;
+    const isLocked = bet.is_locked === true || (!isCompleted && !isPremium);
 
     const time = commenceDate.toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -79,9 +79,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                         <div className="font-bold text-foreground text-xs sm:text-sm md:text-base leading-tight truncate">
                             {bet.away_team}
                         </div>
-                        {(isCompleted || isStarted) && (
+                        {showScores && (
                             <div className="text-xl sm:text-2xl md:text-3xl font-black font-mono text-foreground tracking-tighter shrink-0">
-                                {bet.away_score ?? 0}
+                                {bet.away_score}
                             </div>
                         )}
                     </div>
@@ -126,7 +126,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                     {bet.prediction}
                                 </div>
 
-                                {(isCompleted || isStarted) && (
+                                {showScores && (
                                     <div className="text-[10px] font-black text-foreground whitespace-nowrap bg-muted/30 px-1.5 py-0.5 rounded">
                                         {isCompleted ? 'FINAL: ' : 'SCORE: '}
                                         {(bet.home_score ?? 0) + (bet.away_score ?? 0)}
@@ -142,7 +142,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                                             : 'text-muted-foreground'
                                     }`}
                                 >
-                                    {isCompleted ? formatMoney(bet.profit ?? 0) : oddsLabel}
+                                    {isCompleted ? (bet.profit != null ? formatMoney(bet.profit) : '–') : oddsLabel}
                                 </div>
                             </div>
                         )}
@@ -150,9 +150,9 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
 
                     {/* Right: Home Team */}
                     <div className="flex-1 min-w-0 flex items-center justify-start text-left gap-2 md:gap-3">
-                        {(isCompleted || isStarted) && (
+                        {showScores && (
                             <div className="text-xl sm:text-2xl md:text-3xl font-black font-mono text-foreground tracking-tighter shrink-0">
-                                {bet.home_score ?? 0}
+                                {bet.home_score}
                             </div>
                         )}
                         <div className="font-bold text-foreground text-xs sm:text-sm md:text-base leading-tight truncate">
@@ -175,10 +175,12 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                 awayTeam={bet.away_team}
                 commenceTime={bet.commence_time}
                 isLocked={isLocked}
+                market={bet.market}
                 predictionInfo={{
                     predicted_total_points: bet.predicted_total_points,
                     recommended_bet: bet.recommended_bet,
                     edge: bet.edge,
+                    odds: oddsLabel,
                     home_score: bet.home_score,
                     away_score: bet.away_score,
                     profit: bet.profit,

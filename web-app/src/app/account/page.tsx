@@ -50,13 +50,18 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 {email ? <>Signed in as {email}.</> : <>Manage your subscription and billing.</>}
             </p>
 
-            {showSuccess && (
+            {showSuccess && isPremium && (
                 <div
                     role="status"
                     className="mb-6 rounded-xl border border-success/30 bg-success/10 p-4 text-sm text-success"
                 >
-                    <strong className="font-semibold">Subscription confirmed.</strong> Welcome to
-                    Pro Access — your premium picks are unlocked.
+                    <strong className="font-semibold">Subscription confirmed.</strong> You have access
+                    to published premium picks.
+                </div>
+            )}
+            {showSuccess && !isPremium && (
+                <div role="status" className="mb-6 rounded-xl border border-white/10 bg-card p-4 text-sm text-muted-foreground">
+                    Billing confirmation is pending. Refresh this page to check your access.
                 </div>
             )}
 
@@ -97,7 +102,7 @@ export default async function AccountPage({ searchParams }: PageProps) {
                             href="/pricing"
                             className="inline-flex items-center justify-center bg-primary text-primary-foreground font-bold px-6 py-3 rounded-lg hover:bg-amber-500 transition-colors"
                         >
-                            Subscribe
+                            View plans
                         </Link>
                     )}
                 </div>

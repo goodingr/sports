@@ -3,9 +3,10 @@
 import { Container } from '@/components/ui/Container';
 import { Check, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
+import { isCheckoutAvailable } from '@/lib/api';
 
 function hasPremiumAccess(metadata: Record<string, unknown> | null | undefined): boolean {
     return metadata?.is_premium === true || metadata?.isPremium === true;
@@ -19,7 +20,7 @@ export default function Page() {
                     Simple, Transparent Pricing
                 </h1>
                 <p className="text-base sm:text-xl text-muted-foreground">
-                    Unlock our full library of model-driven analytics and research tools.
+                    Access pregame picks that pass our model validation checks. Pick availability varies by slate.
                 </p>
             </div>
 
@@ -32,10 +33,8 @@ export default function Page() {
                     </div>
 
                     <ul className="space-y-3 sm:space-y-4 mb-8">
-                        <Feature text="Unlimited Access to All Picks" />
-                        <Feature text="Real-time Odds & Edge Analysis" />
-                        <Feature text="Detailed Performance Tracking" />
-                        <Feature text="Email Notifications" />
+                        <Feature text="Access to published pregame picks" />
+                        <Feature text="Sportsbook prices and model edge estimates" />
                         <Feature text="Cancel Anytime" />
                     </ul>
 
@@ -63,6 +62,7 @@ export default function Page() {
 }
 
 function CheckoutButton() {
+    const [available, setAvailable] = useState<boolean | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const router = useRouter();
@@ -71,9 +71,17 @@ function CheckoutButton() {
 
     const isPremium = hasPremiumAccess(user?.publicMetadata);
 
+    useEffect(() => {
+        let active = true;
+        isCheckoutAvailable().then((open) => {
+            if (active) setAvailable(open);
+        });
+        return () => { active = false; };
+    }, []);
+
     const handleCheckout = async () => {
         setError(null);
-        if (!isLoaded) return;
+        if (!isLoaded || available !== true) return;
         if (!isSignedIn) {
             router.push('/signup?redirect_url=/pricing');
             return;
@@ -83,6 +91,10 @@ function CheckoutButton() {
             setLoading(true);
             const response = await fetch('/api/checkout', { method: 'POST' });
 
+            if (response.status === 503) {
+                setAvailable(false);
+                return;
+            }
             if (!response.ok) {
                 throw new Error(`Checkout failed (${response.status})`);
             }
@@ -105,6 +117,22 @@ function CheckoutButton() {
         return (
             <div className="block w-full text-center bg-success/10 text-success border border-success/20 py-3 rounded-lg font-bold">
                 You&apos;re subscribed
+            </div>
+        );
+    }
+
+    if (available !== true) {
+        return (
+            <div role="status" className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-sm text-muted-foreground">
+                {available === null ? (
+                    'Checking subscription availability…'
+                ) : (
+                    <>
+                        <p className="font-semibold text-foreground">Subscriptions are currently paused</p>
+                        <p className="mt-1">Enrollment opens when picks are available after validation.</p>
+                        <Link href="/" className="mt-2 inline-block text-primary hover:underline">Explore model tracking</Link>
+                    </>
+                )}
             </div>
         );
     }

@@ -43,23 +43,28 @@ export function BetFeed() {
     const [reloadKey, setReloadKey] = useState(0);
     const { user, isLoaded } = useUser();
     const { getToken } = useAuth();
+    const [apiPremium, setApiPremium] = useState<boolean | null>(null);
 
-    const isPremium = hasPremiumAccess(user?.publicMetadata);
+    const hasPremium = hasPremiumAccess(user?.publicMetadata);
+    const isPremium = apiPremium ?? hasPremium;
 
     useEffect(() => {
         let cancelled = false;
         async function loadBets() {
             setError(null);
             setPartialError(null);
+            setPage(1);
+            setLoadMoreError(null);
             setLoading(true);
             try {
                 const token = await getToken();
                 const headers = buildAuthHeaders(token);
 
                 const [upcomingResult, historyResult] = await Promise.allSettled([
-                    fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', { headers }),
+                    fetchAPI<UpcomingBetsResponse>('/api/bets/upcoming', { headers, cache: 'no-store' }),
                     fetchAPI<PaginatedBetsResponse>('/api/bets/history?limit=30&page=1', {
                         headers,
+                        cache: 'no-store',
                     }),
                 ]);
 
@@ -67,8 +72,10 @@ export function BetFeed() {
 
                 if (upcomingResult.status === 'fulfilled') {
                     setUpcoming((upcomingResult.value.data ?? []).map(normalizeBet));
+                    setApiPremium(upcomingResult.value.is_premium ?? null);
                 } else {
                     setUpcoming([]);
+                    setApiPremium(null);
                 }
                 if (historyResult.status === 'fulfilled') {
                     setHistory((historyResult.value.data ?? []).map(normalizeBet));
@@ -87,13 +94,18 @@ export function BetFeed() {
                 } else if (upcomingResult.status === 'rejected') {
                     console.error('Failed to load upcoming bets:', upcomingResult.reason);
                     setPartialError(
-                        "Live picks are temporarily unavailable. Showing recent results below.",
+                        "Upcoming picks are temporarily unavailable. Model results are available under Past.",
                     );
                 } else if (historyResult.status === 'rejected') {
                     console.error('Failed to load history:', historyResult.reason);
                     setPartialError(
-                        "Recent results are temporarily unavailable. Showing live picks below.",
+                        "Model results are temporarily unavailable. Upcoming picks are available under Odds.",
                     );
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    console.error('Failed to load bets:', err);
+                    setError("We couldn't load picks right now. Please try again in a moment.");
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -106,7 +118,7 @@ export function BetFeed() {
         return () => {
             cancelled = true;
         };
-    }, [isLoaded, getToken, reloadKey]);
+    }, [isLoaded, getToken, reloadKey, user?.id, hasPremium]);
 
     const handleLoadMore = async () => {
         if (loadingMore) return;
@@ -119,7 +131,7 @@ export function BetFeed() {
             const nextPage = page + 1;
             const data = await fetchAPI<PaginatedBetsResponse>(
                 `/api/bets/history?limit=30&page=${nextPage}`,
-                { headers }
+                { headers, cache: 'no-store' }
             );
 
             setHistory((prev) => [...prev, ...(data.data ?? []).map(normalizeBet)]);
@@ -213,9 +225,9 @@ export function BetFeed() {
                     <div className="flex items-center justify-between gap-2">
                         <h3 className="text-base sm:text-lg font-bold text-foreground flex items-center gap-2">
                             Upcoming Picks
-                            {!isPremium && <Lock className="h-4 w-4 text-primary" aria-hidden="true" />}
+                            {!isPremium && upcoming.length > 0 && <Lock className="h-4 w-4 text-primary" aria-hidden="true" />}
                         </h3>
-                        {!isPremium && (
+                        {!isPremium && upcoming.length > 0 && (
                             <Link href="/pricing" className="text-sm text-primary hover:underline shrink-0">
                                 Unlock All &rarr;
                             </Link>
@@ -243,14 +255,15 @@ export function BetFeed() {
                         ) : (
                             <div className="text-center py-12 px-4 text-muted-foreground bg-white/5 rounded-xl border border-white/10">
                                 <p className="font-medium mb-1">No upcoming picks right now</p>
-                                <p className="text-sm">Check back soon — new picks drop daily.</p>
+                                <p className="text-sm">Picks appear here after they pass our validation checks.</p>
                             </div>
                         )}
                     </div>
                 </section>
             ) : (
                 <section className="space-y-6">
-                    <h3 className="text-base sm:text-lg font-bold text-foreground">Recent Results</h3>
+                    <h3 className="text-base sm:text-lg font-bold text-foreground">Model Results</h3>
+                    <p className="text-sm text-muted-foreground">Tracked totals model results at simulated stakes.</p>
                     {historyGroups.length > 0 ? (
                         <>
                             <div className="space-y-8">
@@ -264,7 +277,7 @@ export function BetFeed() {
                                                 <BetCard
                                                     key={`${bet.game_id}-${bet.prediction}-${i}`}
                                                     bet={bet}
-                                                    isPremium
+                                                    isPremium={isPremium}
                                                 />
                                             ))}
                                         </div>
@@ -297,8 +310,8 @@ export function BetFeed() {
                         </>
                     ) : (
                         <div className="text-center py-12 px-4 text-muted-foreground bg-white/5 rounded-xl border border-white/10">
-                            <p className="font-medium mb-1">No completed picks yet</p>
-                            <p className="text-sm">Once games finish, results will appear here.</p>
+                            <p className="font-medium mb-1">No model results yet</p>
+                            <p className="text-sm">Settled model selections will appear here.</p>
                         </div>
                     )}
                 </section>

@@ -1,5 +1,26 @@
 import { test, expect } from '@playwright/test';
-import { mockBetsRoutes, MOCK_HISTORY } from './_fixtures/mocks';
+import { mockBetsRoutes, MOCK_HISTORY, MOCK_UPCOMING } from './_fixtures/mocks';
+
+test('renders the gated market selection and quoted price without a legacy description', async ({ page }) => {
+    const [totals, moneyline] = MOCK_UPCOMING;
+    await mockBetsRoutes(page, {
+        premium: true,
+        upcoming: [
+            { ...totals, prediction: undefined, market: 'totals', moneyline: -110 },
+            {
+                ...moneyline, prediction: undefined, bet_type: undefined, market: 'moneyline',
+                side: 'away', moneyline: 125, predicted_total_points: 223,
+            },
+        ],
+    });
+
+    await page.goto('/');
+    await expect(page.getByText('OVER 215.5')).toBeVisible();
+    await page.getByRole('button', { name: 'Demo Wolves at Demo Hawks, Demo Wolves, odds +125' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('+125')).toBeVisible();
+    await expect(dialog.getByText('Predicted Total')).toHaveCount(0);
+});
 
 test.describe('Premium-mock view (history tab)', () => {
     test.beforeEach(async ({ page }) => {

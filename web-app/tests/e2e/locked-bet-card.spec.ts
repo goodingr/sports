@@ -30,6 +30,8 @@ test.describe('Locked (free) view', () => {
         const dialog = page.getByRole('dialog');
         await expect(dialog).toBeVisible();
         await expect(dialog.getByText(/Premium Only/i)).toBeVisible();
+        await expect(dialog.getByText('OVER 215.5')).toHaveCount(0);
+        await expect(dialog.getByText('DraftKings')).toHaveCount(0);
         const modalCta = dialog.getByTestId('modal-paywall-cta');
         await expect(modalCta).toBeVisible();
         await expect(modalCta).toHaveAttribute('href', '/pricing');

@@ -5,7 +5,7 @@
 # switching to standalone output is documented in docs/DEPLOYMENT.md as a
 # size optimization, not a requirement.
 
-ARG NODE_VERSION=20-bookworm-slim
+ARG NODE_VERSION=22-bookworm-slim
 
 FROM node:${NODE_VERSION} AS deps
 WORKDIR /app

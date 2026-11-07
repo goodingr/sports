@@ -20,12 +20,14 @@ interface MatchDetailsModalProps {
     homeTeam: string;
     awayTeam: string;
     commenceTime?: string;
+    market?: string;
     /** When true, the body of the modal is locked behind the paywall. */
     isLocked?: boolean;
     predictionInfo?: {
         predicted_total_points?: number | null;
         recommended_bet?: string | null;
         edge?: number | null;
+        odds?: string;
         home_score?: number | null;
         away_score?: number | null;
         profit?: number | null;
@@ -65,6 +67,7 @@ export function MatchDetailsModal({
     homeTeam,
     awayTeam,
     commenceTime,
+    market,
     isLocked = false,
     predictionInfo,
     oddsData,
@@ -175,6 +178,9 @@ export function MatchDetailsModal({
     // Treat a server-masked recommendation as locked too.
     const lockedFromServer = predictionInfo?.recommended_bet === 'Premium Only';
     const showLock = isLocked || lockedFromServer;
+    const isCompleted = predictionInfo?.status === 'Completed';
+    const hasTotals = market !== 'moneyline';
+    const hasScores = predictionInfo?.away_score != null && predictionInfo.home_score != null;
 
     const dialogNode = (
         <div
@@ -218,13 +224,13 @@ export function MatchDetailsModal({
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 relative">
                     {/* Premium Lock Overlay */}
                     {showLock && (
-                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md p-6 text-center">
+                        <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
                             <div className="bg-primary/10 p-4 rounded-full mb-4 ring-1 ring-primary/20">
                                 <Lock className="h-8 w-8 text-primary" />
                             </div>
                             <h3 className="text-xl font-bold text-foreground mb-2">Premium Only</h3>
                             <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">
-                                Subscribe to view our AI predictions, edges, and best live odds for this game.
+                                Pro Access includes the published selection, sportsbook price, and model edge estimate.
                             </p>
                             <a
                                 href="/pricing"
@@ -237,26 +243,23 @@ export function MatchDetailsModal({
                     )}
 
                     {/* Prediction Section */}
-                    {predictionInfo && (predictionInfo.recommended_bet || predictionInfo.predicted_total_points || showLock) && (
-                        <div
-                            className={`grid grid-cols-2 gap-3 sm:gap-4 mb-6 ${
-                                showLock ? 'opacity-20 pointer-events-none filter blur-sm' : ''
-                            }`}
-                            aria-hidden={showLock || undefined}
-                        >
+                    {!showLock && predictionInfo && (
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
                             {/* Result Section (if completed) */}
-                            {predictionInfo.status === 'Completed' && (
+                            {isCompleted && (
                                 <>
                                     <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
                                         <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
                                             Final Total
                                         </div>
                                         <div className="text-lg font-black text-foreground">
-                                            {(predictionInfo.away_score ?? 0) + (predictionInfo.home_score ?? 0)}
+                                            {hasScores ? (predictionInfo.away_score ?? 0) + (predictionInfo.home_score ?? 0) : '–'}
                                         </div>
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                            {predictionInfo.away_score} - {predictionInfo.home_score}
-                                        </div>
+                                        {hasScores && (
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                                {predictionInfo.away_score} - {predictionInfo.home_score}
+                                            </div>
+                                        )}
                                     </div>
                                     <div
                                         className={`border rounded-lg p-4 flex flex-col items-center justify-center text-center ${
@@ -272,7 +275,7 @@ export function MatchDetailsModal({
                                                     : 'text-danger'
                                             }`}
                                         >
-                                            Profit
+                                            Simulated P&amp;L
                                         </div>
                                         <div
                                             className={`text-lg font-black ${
@@ -281,18 +284,16 @@ export function MatchDetailsModal({
                                                     : 'text-danger'
                                             }`}
                                         >
-                                            {predictionInfo.profit
-                                                ? predictionInfo.profit > 0
-                                                    ? `+$${predictionInfo.profit.toFixed(2)}`
-                                                    : `$${predictionInfo.profit.toFixed(2)}`
-                                                : '$0.00'}
+                                            {predictionInfo.profit?.toLocaleString('en-US', {
+                                                style: 'currency', currency: 'USD', signDisplay: 'exceptZero',
+                                            }) ?? '–'}
                                         </div>
                                     </div>
                                 </>
                             )}
 
                             {/* Prediction Details */}
-                            {predictionInfo.book_url ? (
+                            {!isCompleted && predictionInfo.book_url ? (
                                 <a
                                     href={predictionInfo.book_url}
                                     target="_blank"
@@ -304,8 +305,9 @@ export function MatchDetailsModal({
                                         <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" aria-hidden="true" />
                                     </div>
                                     <div className="text-lg font-black text-foreground">
-                                        {predictionInfo.recommended_bet || 'N/A'}
+                                        {predictionInfo.recommended_bet}
                                     </div>
+                                    <div className="text-xs text-muted-foreground">{predictionInfo.odds}</div>
                                     {predictionInfo.edge ? (
                                         <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
                                             {predictionInfo.book && (
@@ -317,14 +319,15 @@ export function MatchDetailsModal({
                                         </div>
                                     ) : null}
                                 </a>
-                            ) : (
+                            ) : predictionInfo.recommended_bet && (
                                 <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex flex-col items-center justify-center text-center">
                                     <div className="text-xs font-medium text-primary uppercase tracking-wider mb-1">
-                                        Recommended Bet
+                                        {isCompleted ? 'Model Selection' : 'Recommended Bet'}
                                     </div>
                                     <div className="text-lg font-black text-foreground">
-                                        {showLock ? 'OVER 215.5' : predictionInfo.recommended_bet || 'N/A'}
+                                        {predictionInfo.recommended_bet}
                                     </div>
+                                    <div className="text-xs text-muted-foreground">{predictionInfo.odds}</div>
                                     {predictionInfo.edge ? (
                                         <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
                                             {predictionInfo.book && (
@@ -334,55 +337,25 @@ export function MatchDetailsModal({
                                                 ? `+${(predictionInfo.edge * 100).toFixed(1)}% Edge`
                                                 : ''}
                                         </div>
-                                    ) : showLock ? (
-                                        <div className="text-[10px] text-success font-medium mt-1 flex items-center gap-1">
-                                            <span className="text-muted-foreground">DraftKings</span>
-                                            +4.2% Edge
-                                        </div>
                                     ) : null}
                                 </div>
                             )}
-                            <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
-                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                                    Predicted Total
+                            {hasTotals && predictionInfo.predicted_total_points != null && (
+                                <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center justify-center text-center">
+                                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                                        Predicted Total
+                                    </div>
+                                    <div className="text-lg font-black text-foreground">
+                                        {predictionInfo.predicted_total_points.toFixed(1)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">Points</div>
                                 </div>
-                                <div className="text-lg font-black text-foreground">
-                                    {showLock
-                                        ? '224.2'
-                                        : predictionInfo.predicted_total_points
-                                          ? predictionInfo.predicted_total_points.toFixed(1)
-                                          : 'N/A'}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-1">Points</div>
-                            </div>
+                            )}
                         </div>
                     )}
 
                     {/* Odds Section */}
-                    {showLock ? (
-                        <div
-                            className="grid gap-2 opacity-20 pointer-events-none filter blur-sm select-none"
-                            aria-hidden="true"
-                        >
-                            <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
-                                <div>Sportsbook</div>
-                                <div className="text-center">Line</div>
-                                <div className="text-center">Over</div>
-                                <div className="text-center">Under</div>
-                            </div>
-                            {[1, 2, 3].map((i) => (
-                                <div
-                                    key={i}
-                                    className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5"
-                                >
-                                    <div className="font-medium text-foreground">DraftKings</div>
-                                    <div className="text-center font-bold text-foreground">215.5</div>
-                                    <div className="text-center text-muted-foreground">-110</div>
-                                    <div className="text-center text-muted-foreground">-110</div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : totalsByBook.length > 0 ? (
+                    {!showLock && hasTotals && !isCompleted && totalsByBook.length > 0 && (
                         <div>
                             <div className="grid gap-2">
                                 <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
@@ -430,10 +403,6 @@ export function MatchDetailsModal({
                                     );
                                 })}
                             </div>
-                        </div>
-                    ) : (
-                        <div className="text-center py-8 text-muted-foreground">
-                            No Over/Under odds available for this game.
                         </div>
                     )}
 
