@@ -453,7 +453,9 @@ of tipoff, then includes all eligible games in the same request. This leaves one
 minimum lead. A recent NBA quote normally triggers a cooldown. At the last
 eligible scheduled tick, the collector can request a close for a pending
 decision if the sole recent snapshot is that decision's verified supplemental
-entry. The charged closing limits still apply. The provider response is retained under
+entry. Before sending a reserved request, the collector checks the UTC date and
+each fixture's remaining lead. An expired reservation still counts toward the
+daily limit. The provider response is retained under
 `data/raw/odds/basketball_nba/paper_closing/` with credential-free request
 metadata. Only paired DraftKings totals for the verified existing fixture enter
 the warehouse. The collector leaves game schedules and results intact.
