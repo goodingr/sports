@@ -478,12 +478,15 @@ poetry run python -m src.predict.paper_entry_poll --collect --official-window-fa
 ```
 
 The fallback requires the exact ordered matchup and compatible kickoff clocks.
-It checks the entry clock again before dispatch. When the priced response is
-valid, it archives the official schedule, free event response, and odds
-receipt. Entry uses the earliest verified kickoff. Inspect the command
-output and raw receipt for partial or empty responses. Offline tests cover
-this path. Live coverage from the broader odds request is unverified, and the
-scheduled Windows task uses ordinary entry.
+It excludes a known fixture if an exact official or zero-credit match puts
+tipoff more than ten minutes before the ordinary clock. If that leaves no
+ordinary fixtures, the collector keeps the daily slot available. It checks
+the entry clock again before dispatch and uses the earliest compatible kickoff
+for capture. The priced receipt retains the official schedule and free
+response used as timing evidence. Inspect the command output and raw receipt
+for partial or empty responses. Offline tests cover this path. Live coverage
+from the broader odds request is unverified, and the scheduled Windows task
+uses ordinary entry.
 
 The standalone NBA schedule discovery command previews without contacting the
 provider. With `--collect`, it requests the next 48 hours from the schedule
