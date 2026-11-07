@@ -31,13 +31,19 @@ export async function fetchAPI<T>(endpoint: string, options?: RequestInit): Prom
     return res.json() as Promise<T>;
 }
 
+export async function readCheckoutAvailability(signal?: AbortSignal): Promise<boolean> {
+    const timeout = AbortSignal.timeout(5000);
+    const status = await fetchAPI<{ checkout_available?: boolean }>('/api/bets/access', {
+        cache: 'no-store',
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (typeof status?.checkout_available !== 'boolean') throw new Error('Invalid checkout availability');
+    return status.checkout_available;
+}
+
 export async function isCheckoutAvailable(): Promise<boolean> {
     try {
-        const status = await fetchAPI<{ checkout_available?: boolean }>('/api/bets/access', {
-            cache: 'no-store',
-            signal: AbortSignal.timeout(5000),
-        });
-        return status?.checkout_available === true;
+        return await readCheckoutAvailability();
     } catch {
         return false;
     }
