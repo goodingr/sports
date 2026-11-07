@@ -44,3 +44,25 @@ It applies the frozen quote selector to the current archive and reports aggregat
 receipt counts, eligible fixtures and Eastern dates, and ambiguity. An archived
 quote can qualify before its fixture tips off. The preview reads no scores.
 Run the final review separately at the scheduled cutoff.
+
+## Reviewing from a restored warehouse
+
+The restored evidence ZIP stays beside the warehouse. The frozen quote reader
+can read its odds directly, and the frozen score reader needs a loose directory
+of the original score files. From the current checkout, inspect the ZIP
+manifest and materialize the exact NCAAB score receipts to a new directory
+under an existing parent.
+
+```powershell
+poetry run python -B -m scripts.restore_ncaab_scores --archive <restored-source_evidence.zip> --dry-run
+poetry run python -B -m scripts.restore_ncaab_scores --archive <restored-source_evidence.zip> --destination <new-score-directory>
+```
+
+The dry run inspects member names only. Materialization verifies each selected
+member's SHA-256 and size, preserving its original filename and bytes. After the
+scheduled review cutoff, run the frozen review from its pinned checkout and
+point it at the new directory.
+
+```powershell
+poetry run python -B -m reports.research.ncaab_imbalance_offset.review --db <warehouse-path> --score-dir <absolute-new-score-directory>
+```
