@@ -3,7 +3,9 @@
 import { useClerk } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 
-type InterestAction = "view" | "join" | "leave";
+type InterestAction = "view" | "join" | "leave" | "contact";
+
+type InterestState = { joined: boolean; contactAllowed: boolean };
 
 class InterestRequestError extends Error {
     constructor(readonly status: number, readonly enrollmentClosed = false) {
@@ -11,11 +13,13 @@ class InterestRequestError extends Error {
     }
 }
 
-async function requestInterest(action: InterestAction, source: string, signal?: AbortSignal) {
+async function requestInterest(
+    action: InterestAction, source: string, { consent, signal }: { consent?: boolean; signal?: AbortSignal } = {},
+): Promise<InterestState> {
     const response = await fetch("/api/interest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, source, ...(action === "join" ? { consent: true } : {}) }),
+        body: JSON.stringify({ action, source, consent }),
         signal,
     });
 
@@ -23,9 +27,11 @@ async function requestInterest(action: InterestAction, source: string, signal?: 
         const error = response.status === 409 ? await response.json().catch(() => null) : null;
         throw new InterestRequestError(response.status, error?.code === "enrollment_closed");
     }
-    const result: { joined?: unknown } = await response.json();
-    if (typeof result.joined !== "boolean") throw new Error("Invalid interest response");
-    return result.joined;
+    const result = await response.json();
+    if (typeof result.joined !== "boolean" || typeof result.contactAllowed !== "boolean") {
+        throw new Error("Invalid interest response");
+    }
+    return result;
 }
 
 interface InterestFailure {
@@ -42,7 +48,7 @@ function failureFor(action: InterestAction, cause: unknown): InterestFailure {
 
 function failureMessage(failure: InterestFailure): string {
     if (failure.status === 422) {
-        return "Verify your primary email address in your profile, then try again.";
+        return "Verify your primary email address before allowing follow-up.";
     }
     if (failure.status === 401) {
         return "Your sign-in has expired. Refresh this page and sign in again.";
@@ -55,6 +61,7 @@ function failureMessage(failure: InterestFailure): string {
     }
     if (failure.action === "view") return "We couldn’t load your interest status.";
     if (failure.action === "join") return "We couldn’t confirm that your interest was recorded.";
+    if (failure.action === "contact") return "We couldn’t confirm your email preference.";
     return "We couldn’t confirm that your interest was withdrawn.";
 }
 
@@ -66,17 +73,18 @@ export function InterestControls({
     enrollmentClosed: boolean;
 }) {
     const { openUserProfile } = useClerk();
-    const [joined, setJoined] = useState<boolean | null>(null);
-    const [consent, setConsent] = useState(false);
+    const [interest, setInterest] = useState<InterestState | null>(null);
     const [pending, setPending] = useState<InterestAction | null>("view");
     const [failure, setFailure] = useState<InterestFailure | null>(null);
     const [notice, setNotice] = useState("");
+    const joined = interest?.joined ?? null;
+    const contactAllowed = interest?.contactAllowed ?? false;
 
     useEffect(() => {
         const controller = new AbortController();
-        void requestInterest("view", source, controller.signal)
-            .then((isJoined) => {
-                if (!controller.signal.aborted) setJoined(isJoined);
+        void requestInterest("view", source, { signal: controller.signal })
+            .then((state) => {
+                if (!controller.signal.aborted) setInterest(state);
             })
             .catch((cause: unknown) => {
                 if (!controller.signal.aborted) setFailure(failureFor("view", cause));
@@ -87,17 +95,17 @@ export function InterestControls({
         return () => controller.abort();
     }, [source]);
 
-    async function submit(action: InterestAction) {
-        if (pending !== null || (action === "join" && (!consent || enrollmentClosed))) return;
+    async function submit(action: InterestAction, consent?: boolean) {
+        if (pending !== null || (action === "join" && enrollmentClosed)) return;
         setPending(action);
         setFailure(null);
         setNotice("");
         try {
-            const isJoined = await requestInterest(action, source);
-            setJoined(isJoined);
-            if (action !== "view") {
-                setConsent(false);
-                if (action === "leave" && !isJoined) setNotice("Your interest has been withdrawn.");
+            const state = await requestInterest(action, source, { consent });
+            setInterest(state);
+            if (action === "leave" && !state.joined) setNotice("Your interest has been withdrawn.");
+            if (action === "contact") {
+                setNotice(state.contactAllowed ? "Email follow-up is allowed." : "Email follow-up permission was withdrawn.");
             }
         } catch (cause) {
             setFailure(failureFor(action, cause));
@@ -110,41 +118,46 @@ export function InterestControls({
         <div className="space-y-3">
             <p role="status" className="text-sm text-foreground">
                 {pending === "view" && "Checking your interest status…"}
-                {pending === null && joined === true && "Your interest is recorded."}
-                {pending === null && joined === false
-                    && (notice || (enrollmentClosed && "You have no active interest on record."))}
+                {pending === null && (notice || (joined === true && "Your $29/month interest is recorded.")
+                    || (joined === false && enrollmentClosed && "You have no active interest on record."))}
             </p>
             {joined === true && (
-                <button
-                    type="button"
-                    onClick={() => void submit("leave")}
-                    disabled={pending !== null}
-                    className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-foreground disabled:opacity-60"
-                >
-                    {pending === "leave" ? "Withdrawing…" : "Withdraw interest"}
-                </button>
-            )}
-            {joined === false && !enrollmentClosed && (
-                <>
-                    <label className="flex items-start gap-2 text-sm text-foreground">
-                        <input
-                            type="checkbox"
-                            checked={consent}
-                            disabled={pending !== null}
-                            onChange={(event) => setConsent(event.currentTarget.checked)}
-                            className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-                        />
-                        I agree to be contacted by email about this price research.
-                    </label>
+                <div className="space-y-3">
                     <button
                         type="button"
-                        onClick={() => void submit("join")}
-                        disabled={!consent || pending !== null}
-                        className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                        onClick={() => void submit("leave")}
+                        disabled={pending !== null}
+                        className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-foreground disabled:opacity-60"
                     >
-                        {pending === "join" ? "Recording…" : "Record my interest"}
+                        {pending === "leave" ? "Withdrawing…" : "Withdraw interest"}
                     </button>
-                </>
+                    {(contactAllowed || !enrollmentClosed) && (
+                        <div className="space-y-2">
+                            <p className="text-sm text-muted-foreground">
+                                Email follow-up about this price research is optional.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => void submit("contact", !contactAllowed)}
+                                disabled={pending !== null}
+                                className="text-sm font-semibold text-primary underline disabled:opacity-60"
+                            >
+                                {pending === "contact" ? "Saving email preference…"
+                                    : contactAllowed ? "Withdraw email consent" : "Allow email follow-up"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+            {joined === false && !enrollmentClosed && (
+                <button
+                    type="button"
+                    onClick={() => void submit("join")}
+                    disabled={pending !== null}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                >
+                    {pending === "join" ? "Recording…" : "I’d consider subscribing at $29/month"}
+                </button>
             )}
             {failure && (
                 <div className="space-y-2">

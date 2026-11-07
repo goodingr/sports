@@ -37,6 +37,32 @@ function clerkUser(record?: object, status = "verified") {
     };
 }
 
+// Clerk merges nested metadata and removes keys patched to null.
+function mergeMetadata(previous: object | undefined, patch: Record<string, unknown>) {
+    const merged: Record<string, unknown> = { ...previous };
+    for (const [field, value] of Object.entries(patch)) {
+        if (value === null) delete merged[field];
+        else if (typeof value === "object") {
+            const nested = merged[field];
+            merged[field] = mergeMetadata(
+                typeof nested === "object" && nested !== null ? nested : undefined,
+                value as Record<string, unknown>,
+            );
+        } else merged[field] = value;
+    }
+    return merged;
+}
+
+function storedInterest(initial: object, status = "verified") {
+    let record = initial;
+    getUser.mockImplementation(async () => clerkUser(record, status));
+    updateUserMetadata.mockImplementation(async (_, patch) => {
+        record = mergeMetadata(record, patch.privateMetadata[key]);
+        return clerkUser(record, status);
+    });
+    return () => record;
+}
+
 function deferred() {
     let resolve!: () => void;
     const promise = new Promise<void>((done) => { resolve = done; });
@@ -68,7 +94,7 @@ describe("price-interest API", () => {
     it("records a first view and preserves source on repeat visits", async () => {
         updateUserMetadata.mockResolvedValue(clerkUser(view));
         const first = await POST(request({ action: "view", source: "community" }));
-        expect(await first.json()).toEqual({ joined: false });
+        expect(await first.json()).toEqual({ joined: false, contactAllowed: false });
         expect(updateUserMetadata).toHaveBeenCalledWith("buyer", {
             privateMetadata: { [key]: { ...view, viewedAt: expect.any(String) } },
         });
@@ -89,7 +115,7 @@ describe("price-interest API", () => {
             return original;
         });
         updateUserMetadata.mockImplementation(async (userId: string, update) => {
-            const record = { ...records.get(userId), ...update.privateMetadata[key] };
+            const record = mergeMetadata(records.get(userId), update.privateMetadata[key]);
             records.set(userId, record);
             return clerkUser(record);
         });
@@ -104,7 +130,7 @@ describe("price-interest API", () => {
         const join = POST(request({ action: "join", source: "direct", consent: true }));
         try {
             const independent = await POST(request({ action: "view", source: "email" }));
-            expect(await independent.json()).toEqual({ joined: false });
+            expect(await independent.json()).toEqual({ joined: false, contactAllowed: false });
             expect(getUser.mock.calls).toEqual([["buyer"], ["independent"]]);
             expect(records.has("buyer")).toBe(false);
         } finally {
@@ -112,9 +138,9 @@ describe("price-interest API", () => {
             await Promise.allSettled([first, repeated, join]);
         }
 
-        expect(await (await first).json()).toEqual({ joined: false });
+        expect(await (await first).json()).toEqual({ joined: false, contactAllowed: false });
         expect((await repeated).status).toBe(200);
-        expect(await (await join).json()).toEqual({ joined: true });
+        expect(await (await join).json()).toEqual({ joined: true, contactAllowed: true });
         expect(records.get("buyer")).toMatchObject({
             source: "referral", viewedAt: expect.any(String), joinedAt: expect.any(String),
         });
@@ -138,41 +164,63 @@ describe("price-interest API", () => {
         releaseWrite.resolve();
 
         expect((await first).status).toBe(503);
-        expect(await (await retry).json()).toEqual({ joined: false });
+        expect(await (await retry).json()).toEqual({ joined: false, contactAllowed: false });
         expect(updateUserMetadata).toHaveBeenCalledTimes(2);
     });
 
-    it("requires explicit consent and verified contact information", async () => {
-        expect((await POST(request({ action: "join" }))).status).toBe(400);
-        getUser.mockResolvedValue(clerkUser(view, "unverified"));
-        expect((await POST(request({ action: "join", consent: true }))).status).toBe(422);
-        expect(updateUserMetadata).not.toHaveBeenCalled();
+    it("records price intent without email permission and requires verification for follow-up", async () => {
+        const record = storedInterest(view, "unverified");
+        const join = await POST(request({ action: "join" }));
+        expect(await join.json()).toEqual({ joined: true, contactAllowed: false });
+        expect(record()).toMatchObject({ ...view, joinedAt: expect.any(String), contactConsent: { active: false } });
+
+        expect((await POST(request({ action: "contact", consent: "true" }))).status).toBe(400);
+        expect((await POST(request({ action: "contact", consent: true }))).status).toBe(422);
+        expect(updateUserMetadata).toHaveBeenCalledTimes(1);
     });
 
-    it("supports opt-in, withdrawal, and rejoin without changing original attribution", async () => {
-        const firstJoined = { ...view, joinedAt: "2026-11-06T23:01:00.000Z" };
-        const withdrawn = { ...firstJoined, withdrawnAt: "2026-11-06T23:02:00.000Z" };
-        getUser.mockResolvedValueOnce(clerkUser(view))
-            .mockResolvedValueOnce(clerkUser(firstJoined))
-            .mockResolvedValueOnce(clerkUser(withdrawn));
-        updateUserMetadata.mockResolvedValueOnce(clerkUser(firstJoined))
-            .mockResolvedValueOnce(clerkUser(withdrawn))
-            .mockResolvedValueOnce(clerkUser(firstJoined));
+    it("allows email grant, withdrawal, and re-grant without changing the first consent", async () => {
+        const record = storedInterest(view);
+        expect((await POST(request({ action: "contact", consent: true }))).status).toBe(409);
+        await POST(request({ action: "join" }));
 
-        expect(await (await POST(request({ action: "join", consent: true }))).json())
-            .toEqual({ joined: true });
-        expect(await (await POST(request({ action: "leave" }))).json()).toEqual({ joined: false });
-        expect(await (await POST(request({ action: "join", consent: true }))).json())
-            .toEqual({ joined: true });
-        expect(updateUserMetadata).toHaveBeenNthCalledWith(3, "buyer", {
-            privateMetadata: { [key]: { joinedAt: firstJoined.joinedAt, withdrawnAt: null } },
+        const allow = { action: "contact", consent: true };
+        const withdraw = { action: "contact", consent: false };
+        expect(await (await POST(request(allow))).json()).toEqual({ joined: true, contactAllowed: true });
+        const firstConsent = (record() as { contactConsent: { firstGrantedAt: string } }).contactConsent.firstGrantedAt;
+        expect(await (await POST(request(allow))).json()).toEqual({ joined: true, contactAllowed: true });
+        expect(updateUserMetadata).toHaveBeenCalledTimes(2);
+
+        expect(await (await POST(request(withdraw))).json()).toEqual({ joined: true, contactAllowed: false });
+        expect(await (await POST(request(withdraw))).json()).toEqual({ joined: true, contactAllowed: false });
+        expect(record()).toMatchObject({ contactConsent: { active: false, firstGrantedAt: firstConsent } });
+        expect(record()).not.toHaveProperty("contactConsent.grantedAt");
+        expect(updateUserMetadata).toHaveBeenCalledTimes(3);
+
+        expect(await (await POST(request(allow))).json()).toEqual({ joined: true, contactAllowed: true });
+        expect(record()).toMatchObject({ ...view, contactConsent: { active: true, firstGrantedAt: firstConsent } });
+    });
+
+    it("preserves legacy interest and consent history without restoring permission on rejoin", async () => {
+        const legacy = { ...view, joinedAt: "2026-11-06T23:01:00.000Z" };
+        const record = storedInterest(legacy);
+        expect(await (await POST(request({ action: "view" }))).json())
+            .toEqual({ joined: true, contactAllowed: true });
+
+        expect(await (await POST(request({ action: "leave" }))).json())
+            .toEqual({ joined: false, contactAllowed: false });
+        expect(await (await POST(request({ action: "join", source: "other" }))).json())
+            .toEqual({ joined: true, contactAllowed: false });
+        expect(record()).toEqual({
+            ...legacy, contactConsent: { active: false, firstGrantedAt: legacy.joinedAt },
         });
+        expect(updateUserMetadata).toHaveBeenCalledTimes(2);
     });
 
     it("closes enrollment without recording new views or blocking withdrawals", async () => {
         vi.stubEnv("COMMERCIAL_INTEREST_ENROLLMENT_CLOSED", "true");
         const firstView = await POST(request({ action: "view", source: "community" }));
-        expect(await firstView.json()).toEqual({ joined: false });
+        expect(await firstView.json()).toEqual({ joined: false, contactAllowed: false });
         expect(firstView.headers.get("cache-control")).toBe("no-store");
         expect(updateUserMetadata).not.toHaveBeenCalled();
 
@@ -183,15 +231,20 @@ describe("price-interest API", () => {
         expect(updateUserMetadata).not.toHaveBeenCalled();
 
         const active = { ...view, joinedAt: "2026-11-06T23:01:00.000Z" };
-        getUser.mockResolvedValue(clerkUser(active));
-        expect(await (await POST(request({ action: "view" }))).json()).toEqual({ joined: true });
+        const record = storedInterest(active);
+        expect(await (await POST(request({ action: "view" }))).json())
+            .toEqual({ joined: true, contactAllowed: true });
         expect(updateUserMetadata).not.toHaveBeenCalled();
-        updateUserMetadata.mockResolvedValue(clerkUser({ ...active, withdrawnAt: "2026-11-06T23:02:00.000Z" }));
+        expect(await (await POST(request({ action: "contact", consent: false }))).json())
+            .toEqual({ joined: true, contactAllowed: false });
+        expect((await POST(request({ action: "contact", consent: true }))).status).toBe(409);
         const withdrawal = await POST(request({ action: "leave" }));
-        expect(await withdrawal.json()).toEqual({ joined: false });
+        expect(await withdrawal.json()).toEqual({ joined: false, contactAllowed: false });
         expect(withdrawal.headers.get("cache-control")).toBe("no-store");
-        expect(updateUserMetadata).toHaveBeenCalledWith("buyer", {
-            privateMetadata: { [key]: { withdrawnAt: expect.any(String) } },
+        expect(record()).toMatchObject({
+            ...active,
+            withdrawnAt: expect.any(String),
+            contactConsent: { active: false, firstGrantedAt: active.joinedAt },
         });
     });
 });

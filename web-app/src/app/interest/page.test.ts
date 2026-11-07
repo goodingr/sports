@@ -65,13 +65,13 @@ describe("commercial interest page", () => {
         const markup = renderToStaticMarkup(await InterestPage({ searchParams: Promise.resolve({}) }));
 
         expect(markup).toContain("During enrollment, we record your first signed-in offer visit and link source");
-        expect(markup).toContain("We also record any opt-in or withdrawal");
-        expect(markup).toContain("only while your opt-in is active");
+        expect(markup).toContain("We record price interest and email permission separately");
+        expect(markup).toContain("only while your email permission is active");
         expect(markup).toMatch(/\/privacy#pilot-data.*Create an account/);
         const privacy = renderToStaticMarkup(PrivacyPage());
         expect(privacy).toContain('id="pilot-data"');
         expect(privacy).toContain("first signed-in view time");
-        expect(privacy).toContain("while your opt-in is active");
+        expect(privacy).toContain("only while that permission is active");
         expect(privacy).not.toContain("Billing information");
     });
 

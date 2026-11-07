@@ -47,9 +47,10 @@ export default function PrivacyPage() {
                             <li id="pilot-data">
                                 <strong className="text-foreground">Pilot research.</strong> During
                                 enrollment, we store the offer version, first signed-in view time, and
-                                link source with your Clerk account. If you opt in, we record your
-                                interest and any withdrawal. We use your verified email for pilot
-                                research contact while your opt-in is active. You can withdraw on the{" "}
+                                link source with your Clerk account. We record price interest and
+                                any withdrawal separately from your permission for email follow-up.
+                                We use your verified email for pilot research contact only while
+                                that permission is active. You can withdraw either on the{" "}
                                 <Link href="/interest" className="text-primary hover:underline">interest page</Link>.
                             </li>
                         ) : (

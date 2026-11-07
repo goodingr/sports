@@ -40,7 +40,7 @@ export default async function InterestPage({ searchParams }: InterestPageProps) 
             </h1>
             <p className="mb-8 text-muted-foreground">
                 {enrollmentClosed
-                    ? "Interest enrollment is closed. You can still review or withdraw interest you previously recorded."
+                    ? "Interest enrollment is closed. You can still review or withdraw your price interest or email permission."
                     : "We’re measuring interest in a subscription for pregame picks and their sportsbook prices. Paid subscriptions are currently unavailable while we validate the picks."}
             </p>
 
@@ -59,13 +59,15 @@ export default async function InterestPage({ searchParams }: InterestPageProps) 
                         We count signed-in visits once to measure interest in the offer.
                         Recording interest is voluntary and free. It creates no subscription
                         or payment obligation. You can withdraw your interest on this page.
+                        Email follow-up is optional and requires separate permission.
                     </p>
                 )}
                 {isPilotOnly() && (
                     <p className="text-sm text-muted-foreground">
                         During enrollment, we record your first signed-in offer visit and link source
-                        with your Clerk account. We also record any opt-in or withdrawal. We email you
-                        for pilot research only while your opt-in is active.{" "}
+                        with your Clerk account. We record price interest and email permission
+                        separately. We email you for pilot research only while your email permission
+                        is active.{" "}
                         <Link href="/privacy#pilot-data" className="text-primary underline">
                             Read how we use pilot data
                         </Link>

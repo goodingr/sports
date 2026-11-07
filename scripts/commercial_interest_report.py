@@ -24,7 +24,10 @@ from src.data.config import _load_dotenv_if_available  # noqa: E402
 
 OFFER_VERSION = "premium-29-usd-monthly-v1"
 SOURCES = ("direct", "community", "referral", "email", "other")
-METRICS = ("viewed", "active", "withdrawn", "never_opted_in", "first_opt_ins_in_window")
+METRICS = (
+    "viewed", "active", "withdrawn", "never_opted_in", "first_opt_ins_in_window",
+    "first_price_intents_in_window", "contact_consent_active",
+)
 CLERK_USERS_URL = "https://api.clerk.com/v1/users"
 PAGE_SIZE = 500
 
@@ -124,6 +127,30 @@ def _totals(by_source: dict[str, dict[str, int]]) -> dict[str, int]:
     return {metric: sum(row[metric] for row in by_source.values()) for metric in METRICS}
 
 
+def _contact_state(
+    record: dict[str, Any], joined_at: datetime | None, withdrawn_at: datetime | None
+) -> tuple[datetime | None, bool]:
+    # Older joins required consent, so their first join is also the first contact permission.
+    if "contactConsent" not in record:
+        return joined_at, joined_at is not None and withdrawn_at is None
+
+    consent = record["contactConsent"]
+    if not isinstance(consent, dict) or not isinstance(consent.get("active"), bool):
+        raise ValueError("Invalid contact consent")
+    active = consent["active"]
+    first = _parse_timestamp(consent.get("firstGrantedAt"))
+    granted = _parse_timestamp(consent.get("grantedAt"))
+    if (
+        (first is None and consent.get("firstGrantedAt") is not None)
+        or (first is not None and (joined_at is None or first < joined_at))
+        or (first is not None and withdrawn_at is not None and first > withdrawn_at)
+        or (active and (withdrawn_at is not None or first is None or granted is None or granted < first))
+        or (not active and consent.get("grantedAt") is not None)
+    ):
+        raise ValueError("Invalid contact consent")
+    return first, active
+
+
 def build_report(
     users: Iterable[dict[str, Any]],
     *,
@@ -132,7 +159,7 @@ def build_report(
     exclude_user_ids: Set[str] = frozenset(),
     qualified_user_ids: Set[str] | None = None,
 ) -> dict[str, Any]:
-    """Aggregate current states and first opt-ins for a half-open first-view cohort."""
+    """Aggregate price intent and contact consent for a half-open first-view cohort."""
     by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
     qualified_by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
     eligible_ids = qualified_user_ids - exclude_user_ids if qualified_user_ids is not None else None
@@ -172,6 +199,11 @@ def build_report(
         ):
             invalid_offer_records += 1
             continue
+        try:
+            first_contact, contact_active = _contact_state(record, joined_at, withdrawn_at)
+        except ValueError:
+            invalid_offer_records += 1
+            continue
 
         if withdrawn_at is not None:
             state = "withdrawn"
@@ -179,17 +211,24 @@ def build_report(
             state = "active"
         else:
             state = "never_opted_in"
-        # Valid opt-ins are at or after the cohort-eligible first view.
-        first_opt_in = int(
-            joined_at is not None and (viewed_before is None or joined_at < viewed_before)
-        )
-        by_source[source]["viewed"] += 1
-        by_source[source][state] += 1
-        by_source[source]["first_opt_ins_in_window"] += first_opt_in
+        # Valid intent and consent are at or after the cohort-eligible first view.
+        counts = {
+            "viewed": 1,
+            state: 1,
+            "first_opt_ins_in_window": int(
+                first_contact is not None and (viewed_before is None or first_contact < viewed_before)
+            ),
+            "first_price_intents_in_window": int(
+                joined_at is not None and (viewed_before is None or joined_at < viewed_before)
+            ),
+            "contact_consent_active": int(contact_active),
+        }
+        groups = [by_source[source]]
         if eligible_ids is not None and user_id in eligible_ids:
-            qualified_by_source[source]["viewed"] += 1
-            qualified_by_source[source][state] += 1
-            qualified_by_source[source]["first_opt_ins_in_window"] += first_opt_in
+            groups.append(qualified_by_source[source])
+        for group in groups:
+            for metric, count in counts.items():
+                group[metric] += count
 
     result: dict[str, Any] = {
         "offer_version": OFFER_VERSION,

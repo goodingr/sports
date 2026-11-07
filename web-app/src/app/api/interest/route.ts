@@ -12,6 +12,13 @@ type Interest = {
     viewedAt: string;
     joinedAt?: string | null;
     withdrawnAt?: string | null;
+    contactConsent?: ContactConsent;
+};
+
+type ContactConsent = {
+    active: boolean;
+    firstGrantedAt?: string | null;
+    grantedAt?: string | null;
 };
 
 function readInterest(value: unknown): Interest | undefined {
@@ -20,11 +27,24 @@ function readInterest(value: unknown): Interest | undefined {
     if (record.offerVersion !== OFFER_VERSION || typeof record.viewedAt !== "string") {
         return undefined;
     }
+    if ("contactConsent" in record && (
+        !record.contactConsent || typeof record.contactConsent.active !== "boolean"
+        || (record.contactConsent.firstGrantedAt != null && typeof record.contactConsent.firstGrantedAt !== "string")
+        || (record.contactConsent.active && (
+            typeof record.contactConsent.grantedAt !== "string" || typeof record.contactConsent.firstGrantedAt !== "string"
+        ))
+    )) return undefined;
     return record as Interest;
 }
 
-function response(joined: boolean) {
-    return NextResponse.json({ joined }, { headers: { "Cache-Control": "no-store" } });
+function interestState(interest: Interest | undefined) {
+    const joined = Boolean(interest?.joinedAt && !interest.withdrawnAt);
+    // Before email consent was separate, every successful join required it.
+    return { joined, contactAllowed: joined && (interest?.contactConsent?.active ?? true) };
+}
+
+function response(interest: Interest | undefined) {
+    return NextResponse.json(interestState(interest), { headers: { "Cache-Control": "no-store" } });
 }
 
 function allowsOrigin(request: Request): boolean {
@@ -52,20 +72,19 @@ export async function POST(request: Request) {
         ? body as { action?: unknown; source?: unknown; consent?: unknown }
         : {};
     const { action, source, consent } = payload;
-    if (action !== "view" && action !== "join" && action !== "leave") {
+    if (action !== "view" && action !== "join" && action !== "leave" && action !== "contact") {
         return new NextResponse("Invalid action", { status: 400 });
     }
+    if ((action === "contact" || (action === "join" && consent !== undefined)) && typeof consent !== "boolean") {
+        return new NextResponse("Invalid email consent", { status: 400 });
+    }
     const enrollmentClosed = process.env.COMMERCIAL_INTEREST_ENROLLMENT_CLOSED === "true";
-    if (action === "join" && enrollmentClosed) {
+    if (enrollmentClosed && (action === "join" || (action === "contact" && consent === true))) {
         return NextResponse.json({ code: "enrollment_closed" }, {
             status: 409,
             headers: { "Cache-Control": "no-store" },
         });
     }
-    if (action === "join" && consent !== true) {
-        return new NextResponse("Contact consent required", { status: 400 });
-    }
-
     // The pilot runs in one Node process. Keep each account's Clerk read and patch together.
     const previousRequest = pendingRequestsByUser.get(userId);
     let releaseRequest!: () => void;
@@ -80,10 +99,13 @@ export async function POST(request: Request) {
         if (stored != null && !interest) {
             return new NextResponse("Interest record unavailable", { status: 409 });
         }
-        const joined = Boolean(interest?.joinedAt && !interest.withdrawnAt);
+        const { joined, contactAllowed } = interestState(interest);
+        if (action === "contact" && consent === true && !joined) {
+            return new NextResponse("Record price interest before allowing email", { status: 409 });
+        }
         if ((action === "view" && (interest || enrollmentClosed)) || (action === "join" && joined)
-            || (action === "leave" && !joined)) {
-            return response(joined);
+            || (action === "leave" && !joined) || (action === "contact" && contactAllowed === consent)) {
+            return response(interest);
         }
 
         const now = new Date().toISOString();
@@ -94,23 +116,37 @@ export async function POST(request: Request) {
                 ? "direct"
                 : typeof source === "string" && SOURCES.has(source) ? source : "other",
         };
-        if (action === "join") {
+        const grantContact = (action === "join" || action === "contact") && consent === true;
+        if (grantContact) {
             const primary = user.emailAddresses.find(
                 (email) => email.id === user.primaryEmailAddressId
             );
             if (primary?.verification?.status !== "verified") {
-                return new NextResponse("Verify your primary email before joining", { status: 422 });
+                return new NextResponse("Verify your primary email before allowing follow-up", { status: 422 });
             }
+        }
+        if (action === "join") {
             patch.joinedAt = interest?.joinedAt ?? now;
             patch.withdrawnAt = null;
         }
         if (action === "leave") patch.withdrawnAt = now;
+        if (action !== "view") {
+            const firstConsent = interest?.contactConsent
+                ? interest.contactConsent.firstGrantedAt
+                : interest?.joinedAt;
+            patch.contactConsent = {
+                active: grantContact,
+                firstGrantedAt: firstConsent ?? (grantContact ? now : null),
+                grantedAt: grantContact ? now : null,
+            };
+        }
 
         const updated = await users.updateUserMetadata(userId, {
             privateMetadata: { [METADATA_KEY]: patch },
         });
         const saved = readInterest(updated.privateMetadata[METADATA_KEY]);
-        return response(Boolean(saved?.joinedAt && !saved.withdrawnAt));
+        if (!saved) throw new Error("Interest record could not be read after save");
+        return response(saved);
     } catch {
         return new NextResponse("Unable to save interest. Try again.", { status: 503 });
     } finally {

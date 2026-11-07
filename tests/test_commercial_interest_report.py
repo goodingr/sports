@@ -59,6 +59,8 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
         "withdrawn": 1,
         "never_opted_in": 1,
         "first_opt_ins_in_window": 0,
+        "first_price_intents_in_window": 0,
+        "contact_consent_active": 1,
     }
     assert result["by_source"]["community"] == {
         "viewed": 2,
@@ -66,6 +68,8 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
         "withdrawn": 1,
         "never_opted_in": 0,
         "first_opt_ins_in_window": 0,
+        "first_price_intents_in_window": 0,
+        "contact_consent_active": 1,
     }
     assert result["by_source"]["email"]["viewed"] == 0
     assert result["invalid_offer_records"] == 2
@@ -125,6 +129,47 @@ def test_first_window_opt_ins_stay_fixed_after_late_join_and_withdrawal():
     assert after["qualified_cohort"]["by_source"]["community"]["active"] == 1
     assert before["qualified_cohort"]["by_source"]["referral"]["active"] == 2
     assert after["qualified_cohort"]["by_source"]["referral"]["withdrawn"] == 1
+
+
+def test_price_intent_and_contact_permission_are_separate_for_the_screened_cohort():
+    legacy = user("user_legacy", joined=JOIN)
+    intent_only = user("user_intent_only", joined=JOIN)
+    late_consent = user("user_late_consent", joined=JOIN)
+    withdrawn_consent = user("user_withdrew_email", joined=JOIN)
+    malformed = user("user_malformed", joined=JOIN)
+
+    contact_states = (
+        (intent_only, {"active": False}),
+        (late_consent, {
+            "active": True,
+            "firstGrantedAt": "2026-12-01T00:00:00Z",
+            "grantedAt": "2026-12-01T00:00:00Z",
+        }),
+        (withdrawn_consent, {"active": False, "firstGrantedAt": JOIN}),
+        (malformed, {"active": True}),
+    )
+    for record, state in contact_states:
+        record["private_metadata"]["commercialPriceInterest"]["contactConsent"] = state
+
+    screened = [legacy, intent_only, late_consent, withdrawn_consent, malformed]
+    result = report.build_report(
+        [*screened, user("user_unscreened", joined=JOIN)],
+        viewed_from=datetime.fromisoformat(FIRST_VIEW),
+        viewed_before=datetime.fromisoformat("2026-12-01T00:00:00Z"),
+        qualified_user_ids={record["id"] for record in screened},
+    )
+
+    assert result["invalid_offer_records"] == 1
+    assert result["totals"]["first_price_intents_in_window"] == 5
+    assert result["qualified_cohort"]["totals"] == {
+        "viewed": 4,
+        "active": 4,
+        "withdrawn": 0,
+        "never_opted_in": 0,
+        "first_opt_ins_in_window": 2,
+        "first_price_intents_in_window": 4,
+        "contact_consent_active": 2,
+    }
 
 
 def test_cli_paginates_and_prints_only_aggregates(monkeypatch, capsys):
@@ -192,6 +237,8 @@ def test_cli_reports_screened_accounts_separately_from_raw_exposure(monkeypatch,
         "withdrawn": 1,
         "never_opted_in": 0,
         "first_opt_ins_in_window": 3,
+        "first_price_intents_in_window": 3,
+        "contact_consent_active": 2,
     }
     qualified = result["qualified_cohort"]
     assert qualified["eligible_roster_accounts"] == 4
@@ -202,6 +249,8 @@ def test_cli_reports_screened_accounts_separately_from_raw_exposure(monkeypatch,
         "withdrawn": 1,
         "never_opted_in": 0,
         "first_opt_ins_in_window": 2,
+        "first_price_intents_in_window": 2,
+        "contact_consent_active": 1,
     }
     assert qualified["by_source"]["referral"] == qualified["totals"]
     assert qualified["by_source"]["direct"]["viewed"] == 0
