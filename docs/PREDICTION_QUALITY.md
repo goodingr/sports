@@ -472,6 +472,21 @@ On Windows, `scripts/install_paper_close_task.ps1 -Discover` previews the hourly
 past the hour and expires at the capture deadline. It retains the known windows
 for the configured paper trial and writes `logs/paper_events_YYYYMMDD.log`.
 
+Use the official schedule audit to measure games missing from the provider feed.
+It compares scheduled regular-season games on the NBA Eastern slate date with
+the warehouse and the retained provider response archives. The audit reports
+whether a verified provider observation arrived by the registered decision
+deadline. The current warehouse linkage and the original source observation
+have separate clocks. The audit leaves the warehouse unchanged.
+
+```powershell
+poetry run python -m src.data.audit_nba_schedule --date 2026-11-08 --fetch
+```
+
+For an offline replay, replace `--fetch` with `--fixture` pointing to saved NBA
+HTML or Next.js JSON, and provide its original observation time via
+`--fixture-observed-at`.
+
 Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
 grades April 19 at midnight Eastern time and requires at least 150 graded
 decisions, 5% flat-unit ROI, a positive lower 95% date-clustered bootstrap bound,

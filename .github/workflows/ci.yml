@@ -10,6 +10,7 @@ env:
   RUFF_SCOPE: >-
     src/data/ingest_sources.py
     src/data/ingest_nba_events.py
+    src/data/audit_nba_schedule.py
     src/features/betting_model_input.py
     src/models/betting_benchmark.py
     src/models/prediction_quality.py
@@ -41,6 +42,7 @@ env:
   MYPY_SCOPE: >-
     src/data/ingest_sources.py
     src/data/ingest_nba_events.py
+    src/data/audit_nba_schedule.py
     src/data/sources/espn_odds.py
     src/data/sources/nba_injuries_espn.py
     src/features/betting_model_input.py
@@ -207,3 +209,27 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+
+      - name: Check private checkout storage across web containers
+        working-directory: .
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
+        run: |
+          docker compose build web
+          docker compose run --rm --no-deps -T web node --input-type=module -e '
+          import {closeSync, openSync} from "node:fs";
+          import {DatabaseSync} from "node:sqlite";
+          const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+          closeSync(openSync(path, "wx", 0o600));
+          const db = new DatabaseSync(path);
+          db.exec("PRAGMA user_version = 1");
+          db.close();'
+          docker compose run --rm --no-deps -T web node --input-type=module -e '
+          import {strictEqual} from "node:assert";
+          import {statSync} from "node:fs";
+          import {DatabaseSync} from "node:sqlite";
+          const path = process.env.SPORTS_CHECKOUT_DB_PATH;
+          strictEqual(statSync(path).mode & 0o077, 0);
+          const db = new DatabaseSync(path, {readOnly: true});
+          strictEqual(db.prepare("PRAGMA user_version").get().user_version, 1);
+          db.close();'
