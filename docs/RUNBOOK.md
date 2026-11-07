@@ -206,9 +206,11 @@ poetry run python -m scripts.paper_capture_health
 ```
 
 The check reads the local archive and ledger. It treats a completed evaluation
-with all quotes below the threshold as healthy. An empty or unverified slate,
-a missing odds receipt, and a missing or failed capture need separate triage.
-Exit `2` indicates an empty slate that the archive cannot verify independently.
+with all quotes below the threshold as healthy. It also checks the schedules
+retained by the trial through the receipt time. Any known in-window fixture
+missing from the eligible receipt or with unresolved fixture identity makes
+the check incomplete. The JSON reports those internal fixture IDs.
+Exit `2` indicates an empty slate without known eligible fixtures to verify.
 Exit `1` indicates missing, invalid, or incomplete evidence.
 The entry and closing collectors can both succeed on the same day without
 collecting anything, so their exit codes cannot confirm the daily capture.

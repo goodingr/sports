@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -17,6 +18,7 @@ from src.data.config import RAW_DATA_DIR
 from src.db.core import resolve_db_path
 from src.predict.paper_coverage import _FULLY_EVALUATED
 from src.predict.paper_ledger import DEFAULT_RULES, PaperTrial, load_trial
+from src.predict.paper_schedule import _START_TOLERANCE
 from src.predict.paper_settlement import _utc_timestamp
 
 _EASTERN = ZoneInfo("America/New_York")
@@ -128,6 +130,62 @@ def _read_receipt(
     return max(daily or invalid, key=lambda item: (item.fetched_at, item.path.name), default=None)
 
 
+def _known_slate_gaps(
+    conn: sqlite3.Connection, trial: PaperTrial, registered: datetime, receipt: _Receipt
+) -> tuple[int | None, list[str], list[str]]:
+    """Compare independently observed schedules with the eligible receipt IDs."""
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'paper_fixture_schedule'"
+    ).fetchone() is None:
+        return None, [], []
+
+    histories: dict[str, list[tuple[datetime, datetime, int, int, str | None]]] = defaultdict(list)
+    for row in conn.execute(
+        """
+        SELECT h.game_id, h.observed_at, h.start_time_utc, h.home_team_id, h.away_team_id,
+               CASE WHEN sport.league = ? AND g.home_team_id = h.home_team_id
+                        AND g.away_team_id = h.away_team_id
+                        AND NOT EXISTS (
+                            SELECT 1 FROM games other
+                            WHERE other.sport_id = g.sport_id AND other.odds_api_id = g.odds_api_id
+                              AND other.game_id <> g.game_id
+                        )
+                    THEN NULLIF(g.odds_api_id, '') END AS event_id
+        FROM paper_fixture_schedule h
+        LEFT JOIN games g ON g.game_id = h.game_id
+        LEFT JOIN sports sport ON sport.sport_id = g.sport_id
+        WHERE h.trial_id = ?
+        """,
+        (trial.league, trial.trial_id),
+    ):
+        seen = _utc_timestamp(row["observed_at"])
+        tip = _utc_timestamp(row["start_time_utc"])
+        if seen is not None and tip is not None and registered <= seen <= receipt.fetched_at:
+            histories[row["game_id"]].append(
+                (seen, tip, row["home_team_id"], row["away_team_id"], row["event_id"])
+            )
+
+    minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
+    maximum_lead = timedelta(hours=trial.max_hours_before_start)
+    eligible = 0
+    missing = []
+    unresolved = []
+    for game_id, versions in sorted(histories.items()):
+        latest_seen = max(version[0] for version in versions)
+        latest = [version for version in versions if version[0] == latest_seen]
+        if not any(minimum_lead <= tip - receipt.fetched_at <= maximum_lead for _, tip, *_ in latest):
+            continue
+        eligible += 1
+        identities = {(home, away) for _, _, home, away, _ in versions}
+        starts = [tip for _, tip, *_ in versions]
+        event_id = latest[0][4]
+        if len(latest) != 1 or len(identities) != 1 or max(starts) - min(starts) > _START_TOLERANCE or not event_id:
+            unresolved.append(game_id)
+        elif event_id not in receipt.eligible_events:
+            missing.append(game_id)
+    return eligible, missing, unresolved
+
+
 def assess_capture_health(
     conn: sqlite3.Connection,
     trial: PaperTrial,
@@ -162,6 +220,15 @@ def assess_capture_health(
     base.update(receipt_at=receipt.fetched_at.isoformat(), receipt_file=receipt.path.name)
     if receipt.status != "valid":
         return {**base, "status": receipt.status}
+    known_eligible, known_missing, known_unresolved = _known_slate_gaps(
+        conn, trial, registered, receipt
+    )
+    base.update(
+        known_eligible_fixtures=known_eligible,
+        known_missing_fixture_ids=known_missing,
+        known_unresolved_fixture_ids=known_unresolved,
+    )
+    known_gap = bool(known_missing or known_unresolved)
 
     runs = []
     for row in conn.execute(
@@ -177,7 +244,7 @@ def assess_capture_health(
     base.update(capture_at=captured.isoformat(), eligible_fixtures=len(receipt.eligible_events))
     if status == "failed":
         return {**base, "status": "capture_failed"}
-    if not receipt.eligible_events:
+    if not receipt.eligible_events and not known_gap:
         return {**base, "status": "empty_slate_unverified"}
 
     evaluated = {}
@@ -210,7 +277,7 @@ def assess_capture_health(
         evaluated_fixtures=len(evaluated),
         below_edge_fixtures=sum(outcome == "below_edge_threshold" for outcome in evaluated.values()),
     )
-    healthy = status == "evaluated" and evaluated.keys() == receipt.eligible_events
+    healthy = not known_gap and status == "evaluated" and evaluated.keys() == receipt.eligible_events
     return {**base, "status": "healthy" if healthy else "capture_incomplete"}
 
 
