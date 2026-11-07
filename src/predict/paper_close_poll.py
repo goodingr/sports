@@ -6,6 +6,7 @@ import argparse
 import json
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -183,7 +184,9 @@ def _provider_get(
     return response
 
 
-def _budgeted_key(*, request_credits: int = 1) -> str | None:
+def _budgeted_key(
+    *, request_credits: int = 1, on_free_events: Callable[[requests.Response], None] | None = None
+) -> str | None:
     keys = OddsAPIKeyManager.get_available_keys()
     index = OddsAPIKeyManager.get_current_index()
     if not 0 <= index < len(keys):
@@ -200,6 +203,8 @@ def _budgeted_key(*, request_credits: int = 1) -> str | None:
         if remaining < 0:
             return None
         if remaining >= _CREDIT_RESERVE + request_credits:
+            if on_free_events is not None and response.headers.get("x-requests-last") == "0":
+                on_free_events(response)
             return key
     return None
 

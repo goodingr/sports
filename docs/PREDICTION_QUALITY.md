@@ -456,6 +456,10 @@ schedule has 169 such games across 47 dates at the modeled times, so the
 supplement could use up to 94 credits on the listed fixtures if all 47 dates
 require a provider request. Fixture discovery, quote availability, the credit
 reserve, and the host schedule determine actual coverage.
+When a known game triggers the quota check, the collector can reuse its verified
+zero-credit events response to include newly listed games in the same early
+batch. This receipt has its own source key and does not reset the hourly
+discovery clock.
 
 The standalone NBA schedule discovery command previews without contacting the
 provider. With `--collect`, it requests the next 48 hours from the schedule

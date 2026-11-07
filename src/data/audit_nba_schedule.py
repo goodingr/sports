@@ -21,7 +21,7 @@ import requests
 
 from scripts.backup_evidence import read_raw_evidence
 from src.data.config import PROJECT_ROOT, load_env
-from src.data.ingest_nba_events import _EVENT_ID, _SOURCE, _SPORT, _URL, _utc
+from src.data.ingest_nba_events import _ENTRY_PROBE_SOURCE, _EVENT_ID, _SOURCE, _SPORT, _URL, _utc
 from src.data.team_mappings import NBA_ALIASES
 from src.db.core import resolve_db_path
 from src.predict.paper_entry_poll import _DAILY_CAPTURE_ET
@@ -135,26 +135,35 @@ def _provider_evidence(
 ) -> tuple[dict[tuple[str, str], list[_ProviderEvent]], dict[str, int]]:
     captures = conn.execute(
         """
-        SELECT f.captured_at AS observed_at, f.storage_path AS raw_path, f.hash, 'events' AS source
+        SELECT f.captured_at AS observed_at, f.storage_path AS raw_path, f.hash, d.source_key AS source
         FROM source_files f JOIN data_sources d ON d.source_id = f.source_id
-        WHERE d.source_key = ? AND julianday(f.captured_at) BETWEEN julianday(?) AND julianday(?)
+        WHERE d.source_key IN (?, ?) AND julianday(f.captured_at) BETWEEN julianday(?) AND julianday(?)
         UNION
         SELECT o.fetched_at_utc, o.raw_path, NULL, 'odds'
         FROM odds_snapshots o JOIN sports s ON s.sport_id = o.sport_id
         WHERE s.league = 'NBA' AND o.source = 'the-odds-api'
           AND o.raw_path IS NOT NULL AND julianday(o.fetched_at_utc) BETWEEN julianday(?) AND julianday(?)
         """,
-        (_SOURCE, since.isoformat(), now.isoformat(), since.isoformat(), now.isoformat()),
+        (
+            _SOURCE,
+            _ENTRY_PROBE_SOURCE,
+            since.isoformat(),
+            now.isoformat(),
+            since.isoformat(),
+            now.isoformat(),
+        ),
     )
     events: dict[tuple[str, str], list[_ProviderEvent]] = defaultdict(list)
     coverage = {"archives_checked": 0, "archives_unavailable_or_invalid": 0}
+    event_sources = {_SOURCE: "events", _ENTRY_PROBE_SOURCE: "entry_probe"}
     for row in captures:
         coverage["archives_checked"] += 1
         try:
             raw = read_raw_evidence(row["raw_path"], data_dir)
             payload = json.loads(raw)
             observed = _utc(row["observed_at"])
-            is_events = row["source"] == "events"
+            source = row["source"]
+            is_events = source in event_sources
             if (
                 observed is None
                 or not since <= observed <= now
@@ -164,7 +173,7 @@ def _provider_evidence(
                 or (
                     is_events
                     and (
-                        payload.get("source") != _SOURCE
+                        payload.get("source") != source
                         or payload.get("request_credits") != 0
                         or hashlib.sha256(raw).hexdigest() != row["hash"]
                     )
@@ -198,7 +207,13 @@ def _provider_evidence(
             away_code = NBA_ALIASES.get(away.strip().lower())
             if home_code and away_code and home_code != away_code:
                 events[(home_code, away_code)].append(
-                    _ProviderEvent(event_id, start, observed, row["source"], row["raw_path"])
+                    _ProviderEvent(
+                        event_id,
+                        start,
+                        observed,
+                        event_sources.get(source, source),
+                        row["raw_path"],
+                    )
                 )
     return events, coverage
 
@@ -442,7 +457,9 @@ def main() -> None:
     parser.add_argument(
         "--fixture-observed-at", help="Original ISO 8601 observation time for a local fixture"
     )
-    parser.add_argument("--save", action="store_true", help="Save this audit for the paper dashboard")
+    parser.add_argument(
+        "--save", action="store_true", help="Save this audit for the paper dashboard"
+    )
     args = parser.parse_args()
     load_env()
     observed_at = _utc(args.fixture_observed_at)

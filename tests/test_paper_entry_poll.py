@@ -8,8 +8,9 @@ import pandas as pd
 import pytest
 import requests
 
+from src.data import audit_nba_schedule, ingest_nba_events
 from src.db.core import connect, initialize
-from src.db.loaders import load_odds_snapshot
+from src.db.loaders import _generate_internal_id, load_odds_snapshot
 from src.predict import paper_entry_poll, paper_ledger
 from src.predict.paper_close_poll import OddsAPIKeyManager
 
@@ -206,7 +207,8 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
     quota = []
     calls = []
 
-    def budget(*, request_credits):
+    def budget(*, request_credits, on_free_events):
+        assert callable(on_free_events)
         quota.append(request_credits)
         return "test-key"
 
@@ -246,18 +248,15 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
         snapshot = conn.execute(
             "SELECT * FROM odds_snapshots WHERE raw_path IS NOT NULL"
         ).fetchone()
-        assert (
-            dict(
-                conn.execute(
-                    """
+        assert dict(
+            conn.execute(
+                """
                 SELECT game_id, observed_start_utc FROM odds_snapshot_game_starts
                 WHERE snapshot_id = ?
                 """,
-                    (snapshot["snapshot_id"],),
-                )
+                (snapshot["snapshot_id"],),
             )
-            == {event["id"]: event["commence_time"] for event in events[:2]}
-        )
+        ) == {event["id"]: event["commence_time"] for event in events[:2]}
         assert (
             conn.execute(
                 "SELECT count(*) FROM odds WHERE snapshot_id = ?", (snapshot["snapshot_id"],)
@@ -269,6 +268,115 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
     raw_json = archived.read_text(encoding="utf-8")
     assert "test-key" not in raw_json
     assert json.loads(raw_json)["results"] == events
+
+
+@pytest.mark.parametrize("probe_cost", ["0", "1", None])
+def test_winning_entry_probe_can_add_a_fixture_without_another_call(
+    warehouse, monkeypatch, probe_cost
+):
+    path, raw, events, clock, predictions = warehouse
+    zero_credit = probe_cost == "0"
+    monkeypatch.setattr(ingest_nba_events, "RAW_DATA_DIR", raw)
+    monkeypatch.setattr(ingest_nba_events, "datetime", clock)
+    monkeypatch.setattr(OddsAPIKeyManager, "get_available_keys", lambda: ["low-key", "test-key"])
+    original, new, regular = events
+    original["id"], new["id"], regular["id"] = "a" * 32, "b" * 32, "c" * 32
+    regular["commence_time"] = (NOW + timedelta(minutes=145)).isoformat()
+    future = {
+        **regular,
+        "id": "d" * 32,
+        "commence_time": (NOW + timedelta(days=1)).isoformat(),
+    }
+    only_low_key = {
+        **regular,
+        "id": "e" * 32,
+        "commence_time": (NOW + timedelta(minutes=40)).isoformat(),
+    }
+    with connect(path) as conn:
+        conn.execute(
+            "UPDATE games SET odds_api_id = ? WHERE game_id = 'early-one'", (original["id"],)
+        )
+        conn.execute("DELETE FROM games WHERE game_id = 'early-two'")
+        conn.execute("UPDATE games SET odds_api_id = NULL WHERE game_id = 'regular'")
+        conn.execute(
+            "INSERT INTO data_sources (source_id, source_key, name, category) VALUES (10, ?, 'Schedule', 'schedule')",
+            (ingest_nba_events._SOURCE,),
+        )
+        conn.execute(
+            "INSERT INTO source_runs (run_id, source_id, started_at, status) VALUES ('schedule-run', 10, ?, 'success')",
+            ((NOW - timedelta(minutes=59)).isoformat(),),
+        )
+    calls = []
+
+    def get(url, *, params, **kwargs):
+        endpoint = url.rsplit("/", 1)[-1]
+        calls.append((endpoint, params.copy()))
+        if endpoint == "odds":
+            return _response([original, new])
+        if params["apiKey"] == "low-key":
+            result = _response([only_low_key], quota="201")
+            result.headers["x-requests-last"] = "0"
+            return result
+        result = _response([original, new, regular, future])
+        if probe_cost is not None:
+            result.headers["x-requests-last"] = probe_cost
+        return result
+
+    monkeypatch.setattr(requests, "get", get)
+    result = paper_entry_poll.poll_entry(collect=True)
+    count = 2 if zero_credit else 1
+    assert result == {
+        "status": "collected",
+        "due_events": count,
+        "events_loaded": count,
+        "decisions_recorded": count,
+    }
+    assert [call[0] for call in calls] == ["events", "events", "odds"]
+    assert [call[1]["apiKey"] for call in calls] == ["low-key", "test-key", "test-key"]
+    assert calls[-1][1]["eventIds"].split(",") == (
+        [original["id"], new["id"]] if zero_credit else [original["id"]]
+    )
+    generated = _generate_internal_id(
+        "NBA", new["commence_time"], new["home_team"], new["away_team"]
+    )
+    assert predictions == [{"early-one", generated} if zero_credit else {"early-one"}]
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+        assert {row[0] for row in conn.execute("SELECT odds_api_id FROM games")} == (
+            {original["id"], new["id"], None} if zero_credit else {original["id"], None}
+        )
+        assert not ingest_nba_events._recent_attempt(conn, NOW + timedelta(minutes=1))
+        probe = conn.execute(
+            """
+            SELECT r.raw_path, f.hash, r.records_ingested
+            FROM source_runs r JOIN data_sources s USING (source_id)
+            JOIN source_files f ON f.storage_path = r.raw_path
+            WHERE s.source_key = ?
+            """,
+            (ingest_nba_events._ENTRY_PROBE_SOURCE,),
+        ).fetchone()
+        if not zero_credit:
+            assert probe is None
+            return
+        assert probe is not None and probe["records_ingested"] == 1
+        assert (
+            conn.execute("SELECT provider_event_id FROM nba_event_discovery_links").fetchone()[0]
+            == new["id"]
+        )
+        retained, coverage = audit_nba_schedule._provider_evidence(
+            conn, path.parent, NOW - timedelta(hours=1), NOW
+        )
+        assert coverage["archives_unavailable_or_invalid"] == 0
+        assert any(
+            event.source == "entry_probe" and event.event_id == new["id"]
+            for event in retained[("MIA", "ATL")]
+        )
+    archive = Path(probe["raw_path"])
+    assert archive.is_relative_to(raw)
+    assert "test-key" not in archive.read_text(encoding="utf-8")
+    payload = json.loads(archive.read_bytes())
+    assert payload["request"] == {"url": ingest_nba_events._URL, "params": {}}
+    assert payload["results"] == [original, new, regular, future]
 
 
 def test_fresh_exact_pairs_reuse_without_quota_or_daily_reservation(warehouse):

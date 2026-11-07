@@ -14,8 +14,10 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 
 from src.data.config import RAW_DATA_DIR, load_env
+from src.data.ingest_nba_events import retain_entry_probe
 from src.data.ingest_odds import _request_metadata, write_snapshot
 from src.data.team_mappings import NBA_ALIASES
 from src.db.core import connect, resolve_db_path, store_odds_snapshot_game_starts
@@ -501,9 +503,29 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
         raise RuntimeError("The pinned paper totals model is unavailable")
     key = None
     if status == "due":
-        key = _budgeted_key(request_credits=_REQUEST_CREDITS)
+        probe: list[requests.Response] = []
+        key = _budgeted_key(request_credits=_REQUEST_CREDITS, on_free_events=probe.append)
         if key is None:
             return {**result, "status": "quota_reserve"}
+        if probe:
+            fetched = datetime.now(timezone.utc)
+            local_day = fetched.astimezone(_EASTERN).date()
+            evening = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
+            minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
+            window = (
+                fetched + minimum_lead,
+                min(
+                    fetched + timedelta(hours=trial.max_hours_before_start),
+                    evening + minimum_lead - timedelta(microseconds=1),
+                ),
+            )
+            if fetched < evening:
+                try:
+                    counts = retain_entry_probe(path, probe[0], fetched, window)
+                    if counts and (counts["linked"] or counts["created"]):
+                        LOGGER.info("NBA entry quota probe discovered fixtures: %s", counts)
+                except (RuntimeError, OSError, sqlite3.Error):
+                    LOGGER.warning("Could not retain the optional NBA entry event response")
         status, due, fresh = _reserve(path, trial)
         result.update(status=status, due_events=len(due))
     if status == "reusable":

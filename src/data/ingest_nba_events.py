@@ -15,6 +15,8 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import requests
+
 from src.data.config import RAW_DATA_DIR, OddsAPIKeyManager, load_env
 from src.data.ingest_odds import _request_metadata, _request_odds, write_snapshot
 from src.data.team_mappings import NBA_ALIASES
@@ -28,6 +30,7 @@ from src.db.loaders import (
 _SPORT = "basketball_nba"
 _URL = f"https://api.the-odds-api.com/v4/sports/{_SPORT}/events"
 _SOURCE = "the-odds-api-nba-events"
+_ENTRY_PROBE_SOURCE = "the-odds-api-nba-entry-probe"
 _INTERVAL = timedelta(hours=1)
 _HORIZON = timedelta(hours=48)
 _MATCH_TOLERANCE = timedelta(minutes=10)
@@ -72,22 +75,26 @@ def _recent_attempt(conn: sqlite3.Connection, now: datetime) -> bool:
     return now - started < _INTERVAL
 
 
-def _reserve(path: Path) -> tuple[str, int, datetime] | None:
+def _reserve(path: Path, *, source: str = _SOURCE) -> tuple[str, int, datetime] | None:
     with connect(path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
-        if _recent_attempt(conn, now):
+        if source == _SOURCE and _recent_attempt(conn, now):
             return None
+        frequency = "hourly" if source == _SOURCE else "manual"
+        name = (
+            "The Odds API NBA events" if source == _SOURCE else "The Odds API NBA entry quota probe"
+        )
         conn.execute(
             """
             INSERT INTO data_sources (source_key, name, league, category, uri, default_frequency)
-            VALUES (?, 'The Odds API NBA events', 'NBA', 'schedule', ?, 'hourly')
+            VALUES (?, ?, 'NBA', 'schedule', ?, ?)
             ON CONFLICT (source_key) DO NOTHING
             """,
-            (_SOURCE, _URL),
+            (source, name, _URL, frequency),
         )
         source_id = conn.execute(
-            "SELECT source_id FROM data_sources WHERE source_key = ?", (_SOURCE,)
+            "SELECT source_id FROM data_sources WHERE source_key = ?", (source,)
         ).fetchone()["source_id"]
         run_id = uuid4().hex
         conn.execute(
@@ -184,6 +191,7 @@ def _link_event(
     teams: dict[str, int],
     now: datetime,
     fetched: datetime,
+    window: tuple[datetime, datetime] | None,
 ) -> str:
     home_id, away_id = teams.get(event.home_code), teams.get(event.away_code)
     if home_id is None or away_id is None or event.start <= now:
@@ -213,6 +221,11 @@ def _link_event(
         if conn.execute("SELECT 1 FROM games WHERE game_id = ?", (game_id,)).fetchone():
             return "skipped"
         fixture_start, action = event.start, "created"
+
+    if window is not None and not (
+        window[0] <= min(event.start, fixture_start) <= max(event.start, fixture_start) <= window[1]
+    ):
+        return "skipped"
 
     inserted = conn.execute(
         """
@@ -268,6 +281,8 @@ def _store(
     fetched: datetime,
     cutoff: datetime,
     raw_path: Path,
+    *,
+    window: tuple[datetime, datetime] | None = None,
 ) -> dict[str, int]:
     events = _eligible_events(payload, fetched, cutoff)
     digest = hashlib.sha256(raw_path.read_bytes()).hexdigest()
@@ -296,7 +311,7 @@ def _store(
         )
         now = datetime.now(timezone.utc)
         for event in events:
-            counts[_link_event(conn, run_id, event, sport_id[0], teams, now, fetched)] += 1
+            counts[_link_event(conn, run_id, event, sport_id[0], teams, now, fetched, window)] += 1
         conn.execute(
             """
             INSERT INTO source_files (source_id, captured_at, storage_path, hash)
@@ -319,6 +334,65 @@ def _store(
             ),
         )
     return counts
+
+
+def _archive_events(
+    payload: list,
+    response: requests.Response,
+    fetched: datetime,
+    params: dict[str, str],
+    source: str,
+) -> Path:
+    folder = "events" if source == _SOURCE else "entry_probe"
+    return write_snapshot(
+        {
+            "source": source,
+            "fetched_at": fetched.isoformat(),
+            "request": _request_metadata(_URL, params),
+            "results": payload,
+            "rate_limit_remaining": response.headers.get("x-requests-remaining"),
+            "request_credits": 0,
+        },
+        RAW_DATA_DIR / "odds" / _SPORT / folder,
+    )
+
+
+def _mark_failed(path: Path, run_id: str, raw_path: Path | None) -> None:
+    with connect(path) as conn:
+        conn.execute(
+            "UPDATE source_runs SET status = 'failed', finished_at = ?, raw_path = ? WHERE run_id = ?",
+            (datetime.now(timezone.utc).isoformat(), str(raw_path) if raw_path else None, run_id),
+        )
+
+
+def retain_entry_probe(
+    path: Path,
+    response: requests.Response,
+    fetched: datetime,
+    window: tuple[datetime, datetime],
+) -> dict[str, int] | None:
+    """Retain an already received zero-credit response without spending the discovery slot."""
+    if response.status_code != 200 or response.headers.get("x-requests-last") != "0":
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, list) or not any(
+        event.start >= window[0] for event in _eligible_events(payload, fetched, window[1])
+    ):
+        return None
+
+    reservation = _reserve(path, source=_ENTRY_PROBE_SOURCE)
+    assert reservation is not None
+    run_id, source_id, _ = reservation
+    raw_path = None
+    try:
+        raw_path = _archive_events(payload, response, fetched, {}, _ENTRY_PROBE_SOURCE)
+        return _store(path, run_id, source_id, payload, fetched, window[1], raw_path, window=window)
+    except (RuntimeError, OSError, sqlite3.Error):
+        _mark_failed(path, run_id, raw_path)
+        raise
 
 
 def discover_events(*, collect: bool = False) -> dict[str, str | int]:
@@ -365,28 +439,10 @@ def discover_events(*, collect: bool = False) -> dict[str, str | int]:
             raise RuntimeError("Odds API events returned invalid JSON") from None
         if not isinstance(payload, list):
             raise RuntimeError("Odds API events returned an unexpected response")
-        raw_path = write_snapshot(
-            {
-                "source": _SOURCE,
-                "fetched_at": fetched.isoformat(),
-                "request": _request_metadata(_URL, params),
-                "results": payload,
-                "rate_limit_remaining": response.headers.get("x-requests-remaining"),
-                "request_credits": 0,
-            },
-            RAW_DATA_DIR / "odds" / _SPORT / "events",
-        )
+        raw_path = _archive_events(payload, response, fetched, params, _SOURCE)
         counts = _store(path, run_id, source_id, payload, fetched, cutoff, raw_path)
     except (RuntimeError, OSError, sqlite3.Error) as exc:
-        with connect(path) as conn:
-            conn.execute(
-                "UPDATE source_runs SET status = 'failed', finished_at = ?, raw_path = ? WHERE run_id = ?",
-                (
-                    datetime.now(timezone.utc).isoformat(),
-                    str(raw_path) if raw_path else None,
-                    run_id,
-                ),
-            )
+        _mark_failed(path, run_id, raw_path)
         if isinstance(exc, RuntimeError):
             raise
         raise RuntimeError("Could not persist the NBA event discovery batch") from exc
