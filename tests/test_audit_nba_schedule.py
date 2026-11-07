@@ -318,6 +318,41 @@ def test_fetch_uses_only_official_public_url_and_preserves_observation_metadata(
     assert result["official_source"]["etag"] == '"official-etag"'
 
 
+def test_next_eastern_day_cli_archives_one_public_response_after_utc_midnight(
+    warehouse, monkeypatch, capsys
+):
+    observed = datetime(2026, 11, 8, 0, 4, tzinfo=timezone.utc)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return observed.astimezone(tz)
+
+    monkeypatch.setattr(audit, "datetime", Clock)
+    monkeypatch.setattr(audit, "AUDIT_REPORTS_DIR", warehouse.parent / "audits")
+    raw = _official([_card(1, NOW + timedelta(minutes=10), 1, 2)])
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = raw
+        return response
+
+    monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setattr(sys, "argv", ["audit_nba_schedule", "--next-eastern-day", "--fetch", "--save"])
+    audit.main()
+
+    assert calls == ["https://www.nba.com/games?date=2026-11-08"]
+    report = json.loads(capsys.readouterr().out)
+    assert report["eastern_date"] == DAY.isoformat()
+    assert report["official_source"]["observed_at_utc"] == observed.isoformat()
+    assert audit.read_official_schedule_evidence(DAY, report["official_source"], warehouse.parent) == raw
+    (saved,) = (warehouse.parent / "raw/schedules/nba/audits" / DAY.isoformat()).glob("*.json")
+    assert json.loads(saved.read_bytes()) == report
+
+
 def test_saved_audit_retains_original_bytes_for_replay_after_restore(warehouse, monkeypatch):
     data_dir = warehouse.parent
     audits = data_dir / "audits"

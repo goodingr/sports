@@ -43,7 +43,10 @@ def pipeline(request, tmp_path):
             "    print(*args, sep='\\t', file=trace)\n"
             "if os.getenv('PROVIDER_TEST_FAIL_QUALITY') == '1' and args == "
             "['-m', 'src.data.quality', '--leagues', 'NBA,NHL,EPL,LALIGA,BUNDESLIGA,SERIEA,LIGUE1']:\n"
-            "    sys.exit(1)\n",
+            "    sys.exit(1)\n"
+            "if os.getenv('PROVIDER_TEST_FAIL_SCHEDULE') == '1' and args[:2] == "
+            "['-m', 'src.data.audit_nba_schedule']:\n"
+            "    sys.exit(23)\n",
             encoding="utf-8",
         )
         wrapper = '@echo off\n"%PROVIDER_TEST_PYTHON%" "%PROVIDER_TEST_STUB%" %*\n'
@@ -56,9 +59,13 @@ def pipeline(request, tmp_path):
         )
         command = [
             shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-            str(scripts / "pipeline.ps1"), "-SkipBenchmark",
+            str(scripts / "pipeline.ps1"),
         ]
-        flags = {"focus": "-ResearchProviderLeagues", "skip": "-SkipOdds", "soccer": "-SoccerOnly"}
+        flags = {
+            "focus": "-ResearchProviderLeagues", "skip": "-SkipOdds", "soccer": "-SoccerOnly",
+            "hourly": "-SkipTraining", "skip_benchmark": "-SkipBenchmark",
+            "skip_paper": "-SkipPaper", "skip_prediction": "-SkipPrediction",
+        }
     else:
         git_bash = Path("C:/Program Files/Git/bin/bash.exe")
         shell = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
@@ -73,18 +80,31 @@ def pipeline(request, tmp_path):
     if [[ "${{PROVIDER_TEST_FAIL_QUALITY:-}}" == 1 && "$*" == $'-m\\tsrc.data.quality\\t--leagues\\t{PAID}' ]]; then
         return 1
     fi
+    if [[ "${{PROVIDER_TEST_FAIL_SCHEDULE:-}}" == 1 && "${{2:-}}" == src.data.audit_nba_schedule ]]; then
+        return 23
+    fi
     return 0
 }}
 export -f python
-"$BASH" scripts/pipeline.sh --skip-benchmark "$@"
+"$BASH" scripts/pipeline.sh "$@"
 """
         command = [shell, "--noprofile", "--norc", "-c", stub, "pipeline-test"]
-        flags = {"focus": "--research-provider-leagues", "skip": "--skip-odds", "soccer": "--soccer-only"}
+        flags = {
+            "focus": "--research-provider-leagues", "skip": "--skip-odds", "soccer": "--soccer-only",
+            "hourly": "--skip-training", "skip_benchmark": "--skip-benchmark",
+            "skip_paper": "--skip-paper", "skip_prediction": "--skip-prediction",
+        }
 
-    def run(*options, fail_quality=False):
+    def run(*options, fail_quality=False, fail_schedule=False, daily=False):
+        if not daily:
+            options += ("skip_benchmark",)
         result = subprocess.run(
             [*command, *(flags[option] for option in options)], cwd=tmp_path,
-            env={**environment, "PROVIDER_TEST_FAIL_QUALITY": str(int(fail_quality))},
+            env={
+                **environment,
+                "PROVIDER_TEST_FAIL_QUALITY": str(int(fail_quality)),
+                "PROVIDER_TEST_FAIL_SCHEDULE": str(int(fail_schedule)),
+            },
             capture_output=True, text=True, timeout=45,
         )
         trace = tmp_path / "provider_calls.tsv"
@@ -121,6 +141,7 @@ def test_provider_scope_preserves_pipeline(pipeline, options, expected_odds, exp
         league for league in LEAGUES for _ in range(3)
     ]
     assert commands(calls, "src.predict.paper_ledger") == [["update"]]
+    assert commands(calls, "src.data.audit_nba_schedule") == []
     assert ["--leagues", PAID] in commands(calls, "src.data.quality")
     assert commands(calls, "src.predict.publishable_bets")[0][0] == "publish"
     if odds:
@@ -144,3 +165,25 @@ def test_conflicting_scope_exits_before_any_commands(pipeline):
     assert result.returncode == 64
     assert "cannot be combined" in result.stderr
     assert calls == []
+
+
+def test_daily_schedule_audit_runs_after_quote_timing_and_is_diagnostic_only(pipeline):
+    result, calls = pipeline("focus", daily=True, fail_schedule=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Next-day NBA schedule audit could not run." in result.stdout
+    assert commands(calls, "src.data.audit_nba_schedule") == [["--next-eastern-day", "--fetch", "--save"]]
+    modules = [call[1] for call in calls if call[0] == "-m"]
+    assert (
+        modules.index("src.predict.paper_ledger")
+        < modules.index("src.predict.publishable_bets")
+        < modules.index("scripts.nba_quote_timing")
+        < modules.index("src.data.audit_nba_schedule")
+        < modules.index("src.models.train_betting")
+    )
+
+
+@pytest.mark.parametrize("flag", ["skip", "soccer", "hourly", "skip_paper"])
+def test_schedule_audit_is_skipped_without_daily_paper_and_live_odds(pipeline, flag):
+    result, calls = pipeline(flag, "skip_prediction", daily=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert commands(calls, "src.data.audit_nba_schedule") == []

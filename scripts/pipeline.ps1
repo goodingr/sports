@@ -169,6 +169,22 @@ if (-not $SkipPublish -and $releaseQualityPassed) {
 }
 Write-NbaQuoteTiming
 
+if ($runBenchmark -and $paperEnabled -and -not ($SkipOdds -or $SoccerOnly)) {
+    Write-Host "=== Saving Next-Day NBA Schedule Audit ==="
+    $previousExitCode = $global:LASTEXITCODE
+    try {
+        & poetry run python -m src.data.audit_nba_schedule --next-eastern-day --fetch --save 2>&1 |
+            ForEach-Object { "$_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Next-day NBA schedule audit could not run."
+        }
+    } catch {
+        Write-Warning "Next-day NBA schedule audit could not run."
+    } finally {
+        $global:LASTEXITCODE = $previousExitCode
+    }
+}
+
 # 4. Benchmark after publishing so research does not delay the prediction refresh.
 if ($runBenchmark -and $releaseQualityPassed) {
     Write-Host "=== Starting Rolling-Origin Betting Benchmark ==="

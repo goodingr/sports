@@ -348,6 +348,12 @@ if [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
 		|| log "WARN: NBA quote timing could not run."
 fi
 
+if (( PAPER_ENABLED && ! SKIP_ODDS && ! SOCCER_ONLY && ! SKIP_TRAINING )); then
+	log "step: save next-day NBA schedule audit"
+	python -m src.data.audit_nba_schedule --next-eastern-day --fetch --save \
+		|| log "WARN: Next-day NBA schedule audit could not run."
+fi
+
 # Research runs after the prediction refresh and cannot delay the paid feed.
 if (( ! SKIP_TRAINING && RELEASE_QUALITY_PASSED )); then
 	log "step 7: rolling-origin paid-picks benchmark"

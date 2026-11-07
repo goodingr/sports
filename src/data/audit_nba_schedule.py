@@ -505,8 +505,10 @@ def save_schedule_audit(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--date", required=True, type=date.fromisoformat, help="NBA Eastern slate date"
+    slate = parser.add_mutually_exclusive_group(required=True)
+    slate.add_argument("--date", type=date.fromisoformat, help="NBA Eastern slate date")
+    slate.add_argument(
+        "--next-eastern-day", action="store_true", help="Use tomorrow's Eastern calendar date"
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--fetch", action="store_true", help="Read the public NBA games page")
@@ -522,9 +524,12 @@ def main() -> None:
     observed_at = _utc(args.fixture_observed_at)
     if args.fixture_observed_at is not None and observed_at is None:
         parser.error("--fixture-observed-at requires a timezone-aware ISO 8601 timestamp")
+    day = args.date
+    if args.next_eastern_day:
+        day = datetime.now(timezone.utc).astimezone(_EASTERN).date() + timedelta(days=1)
     try:
         result = audit_schedule(
-            args.date,
+            day,
             fetch=args.fetch,
             fixture_path=args.fixture,
             fixture_observed_at=observed_at,
