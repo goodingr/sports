@@ -174,11 +174,19 @@ fi
 # Step 1: ingest
 # ----------------------------------------------------------------------------
 CAPTURE_PAPER_FIRST=0
+NBA_QUOTE_RECEIPT=""
 if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${LEAGUES[@]}" | grep -qx NBA; then
 	CAPTURE_PAPER_FIRST=1
+	receipt_args=()
+	if NBA_QUOTE_RECEIPT=$(mktemp -t sports-nba-receipt-XXXXXXXX); then
+		trap 'rm -f -- "$NBA_QUOTE_RECEIPT"' EXIT
+		receipt_args=(--receipt-output "$NBA_QUOTE_RECEIPT")
+	else
+		log "WARN: NBA quote timing could not create a receipt pointer."
+	fi
 	log "step: fetch NBA odds for paper capture before history ingestion"
 	if bucket_run ingest "odds[NBA]" -- \
-		python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh; then
+		python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh "${receipt_args[@]}"; then
 		bucket_run paper "NBA/random_forest capture" -- \
 			python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only
 	else
@@ -300,17 +308,27 @@ fi
 # ----------------------------------------------------------------------------
 # Step 4: paid-picks publish gate. Empty output is a valid fail-closed state.
 # ----------------------------------------------------------------------------
+paid_timing_args=()
 if (( ! SKIP_PUBLISH && RELEASE_QUALITY_PASSED )); then
 	log "step 6: paid-picks publish gate"
-	bucket_run publish "publishable_bets" -- \
+	if [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
+		paid_timing_args=(--paid-started-at "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)")
+	fi
+	if bucket_run publish "publishable_bets" -- \
 		python -m src.predict.publishable_bets publish \
 			--rules config/published_rules.yml \
 			--output "$PAID_OUTPUT" \
 			--quality-output reports/publishable_bets/latest_quality_report.json \
 			--leagues "$PAID_LEAGUES_CSV" \
-			--allow-empty
+		--allow-empty && [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
+		paid_timing_args+=(--paid-finished-at "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)")
+	fi
 else
 	log "skipping paid-picks publish gate"
+fi
+if [[ -n "$NBA_QUOTE_RECEIPT" ]]; then
+	python -m scripts.nba_quote_timing --receipt-file "$NBA_QUOTE_RECEIPT" "${paid_timing_args[@]}" \
+		|| log "WARN: NBA quote timing could not run."
 fi
 
 # Research runs after the prediction refresh and cannot delay the paid feed.

@@ -25,6 +25,29 @@ $paperFailed = $false
 $runBenchmark = -not $SkipTraining -and -not $SkipBenchmark
 $releaseQualityPassed = $true
 $paidOutput = "reports/publishable_bets/latest_publishable_bets.json"
+$nbaQuoteReceipt = ""
+$paidGateStarted = ""
+$paidGateFinished = ""
+if ($paperEnabled -and -not ($SkipPrediction -or $SkipOdds -or $SoccerOnly)) {
+    $nbaQuoteReceipt = Join-Path ([IO.Path]::GetTempPath()) ("sports-nba-receipt-" + [guid]::NewGuid())
+}
+
+function Write-NbaQuoteTiming {
+    if (-not $nbaQuoteReceipt) { return }
+    $previousExitCode = $global:LASTEXITCODE
+    $timingArgs = @("--receipt-file", $nbaQuoteReceipt)
+    if ($paidGateStarted) { $timingArgs += @("--paid-started-at", $paidGateStarted) }
+    if ($paidGateFinished) { $timingArgs += @("--paid-finished-at", $paidGateFinished) }
+    try {
+        & python -m scripts.nba_quote_timing @timingArgs
+        if ($LASTEXITCODE -ne 0) { Write-Warning "NBA quote timing could not run." }
+    } catch {
+        Write-Warning "NBA quote timing could not run."
+    } finally {
+        Remove-Item -LiteralPath $nbaQuoteReceipt -ErrorAction SilentlyContinue
+        $global:LASTEXITCODE = $previousExitCode
+    }
+}
 
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $logFile = "logs/pipeline_${timestamp}.log"
@@ -53,13 +76,16 @@ if ($LASTEXITCODE -ne 0) {
 
 # 1. Ingest All Data
 Write-Host "=== Starting Data Ingestion ==="
-& "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds -Paper:($paperEnabled -and -not $SkipPrediction)
+& "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds `
+    -Paper:($paperEnabled -and -not $SkipPrediction) -NbaQuoteReceipt $nbaQuoteReceipt
 if ($LASTEXITCODE -eq 2) {
     Write-Warning "The immediate NBA paper capture failed. Data ingestion continued."
     $paperFailed = $true
 } elseif ($LASTEXITCODE -ne 0) {
+    $ingestExitCode = $LASTEXITCODE
     Write-Host "ERROR: Data ingestion failed."
-    exit $LASTEXITCODE
+    Write-NbaQuoteTiming
+    exit $ingestExitCode
 }
 
 # 1b. Paid-release data hygiene
@@ -75,8 +101,10 @@ if ($runBenchmark -or -not $SkipPublish) {
         if (-not $SkipPublish) {
             python -m src.predict.publishable_bets revoke --output $paidOutput --reason data_quality_failed
             if ($LASTEXITCODE -ne 0) {
+                $revokeExitCode = $LASTEXITCODE
                 Write-Error "Failed to revoke the active paid release."
-                exit $LASTEXITCODE
+                Write-NbaQuoteTiming
+                exit $revokeExitCode
             }
         }
     }
@@ -100,8 +128,10 @@ if (-not $SkipPrediction) {
         Write-Warning "The NBA paper capture run failed. Other predictions completed."
         $paperFailed = $true
     } elseif ($LASTEXITCODE -ne 0) {
+        $predictionExitCode = $LASTEXITCODE
         Write-Host "ERROR: Prediction pipeline failed."
-        exit $LASTEXITCODE
+        Write-NbaQuoteTiming
+        exit $predictionExitCode
     }
 } else {
     Write-Host "=== Skipping Current Prediction Refresh ==="
@@ -111,6 +141,7 @@ if (-not $SkipPrediction) {
 # failing automation.
 if (-not $SkipPublish -and $releaseQualityPassed) {
     Write-Host "=== Starting Paid-Picks Publish Gate ==="
+    if ($nbaQuoteReceipt) { $paidGateStarted = [DateTimeOffset]::UtcNow.ToString("o") }
     python -m src.predict.publishable_bets publish `
         --rules config/published_rules.yml `
         --output $paidOutput `
@@ -118,12 +149,16 @@ if (-not $SkipPublish -and $releaseQualityPassed) {
         --leagues $paidReleaseLeagues `
         --allow-empty
     if ($LASTEXITCODE -ne 0) {
+        $publishExitCode = $LASTEXITCODE
         Write-Host "ERROR: Paid-picks publish gate failed."
-        exit $LASTEXITCODE
+        Write-NbaQuoteTiming
+        exit $publishExitCode
     }
+    if ($nbaQuoteReceipt) { $paidGateFinished = [DateTimeOffset]::UtcNow.ToString("o") }
 } else {
     Write-Host "=== Skipping Paid-Picks Publish Gate ==="
 }
+Write-NbaQuoteTiming
 
 # 4. Benchmark after publishing so research does not delay the prediction refresh.
 if ($runBenchmark -and $releaseQualityPassed) {

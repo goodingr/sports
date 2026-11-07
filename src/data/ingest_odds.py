@@ -312,14 +312,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Bypass the cache and fail if The Odds API returns an error",
     )
-    return parser.parse_args()
+    parser.add_argument("--receipt-output", type=Path, help="Optional fresh receipt path pointer")
+    args = parser.parse_args()
+    if args.receipt_output is not None and not args.require_fresh:
+        parser.error("--receipt-output requires --require-fresh")
+    return args
 
 
 def main() -> None:
     args = _parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level))
     sport_key = _resolve_sport_key(args.league, args.sport)
-    run(
+    receipt = run(
         args.dotenv,
         sport_key=sport_key,
         market=args.market,
@@ -327,6 +331,11 @@ def main() -> None:
         force_refresh=args.force_refresh,
         require_fresh=args.require_fresh,
     )
+    if args.receipt_output is not None:
+        try:
+            args.receipt_output.write_text(str(receipt), encoding="utf-8")
+        except OSError:
+            LOGGER.warning("Could not write the fresh odds receipt timing pointer")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,8 @@
 param(
     [switch]$SoccerOnly = $false,
     [switch]$SkipOdds = $false,
-    [switch]$Paper = $false
+    [switch]$Paper = $false,
+    [string]$NbaQuoteReceipt = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -28,7 +29,9 @@ Write-Host "=== Starting Data Ingestion ==="
 if ($capturePaperFirst) {
     try {
         Write-Host "Fetching NBA odds for paper capture before history ingestion..."
-        & poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh 2>&1 | ForEach-Object { "$_" }
+        $receiptArgs = @()
+        if ($NbaQuoteReceipt) { $receiptArgs = @("--receipt-output", $NbaQuoteReceipt) }
+        & poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh @receiptArgs 2>&1 | ForEach-Object { "$_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "NBA odds refresh failed. Paper capture could not run."
             $paperFailed = $true
