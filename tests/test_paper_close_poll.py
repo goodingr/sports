@@ -42,7 +42,7 @@ def warehouse(tmp_path, monkeypatch):
     monkeypatch.setenv("SPORTS_DB_PATH", str(path))
     monkeypatch.setattr(paper_close_poll, "datetime", FrozenDateTime)
     monkeypatch.setattr(ingest_odds, "datetime", FrozenDateTime)
-    monkeypatch.setattr(paper_close_poll, "RAW_DATA_DIR", tmp_path / "raw")
+    monkeypatch.setattr(paper_close_poll, "RAW_DATA_DIR", tmp_path / "data" / "raw")
     monkeypatch.setattr(paper_close_poll, "load_env", lambda: None)
     monkeypatch.setattr(
         paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["test-key"]
@@ -96,7 +96,7 @@ def test_dry_run_and_no_due_are_network_free(warehouse, monkeypatch):
     assert paper_close_poll.poll_closes(collect=True) == {"status": "no_close_due", "due_events": 0}
 
 
-def test_existing_close_skips_provider_only_with_observed_start(warehouse, monkeypatch):
+def test_existing_close_skips_provider_only_with_original_quote(warehouse, monkeypatch):
     monkeypatch.setattr(requests, "get", _unexpected_request)
     with connect(warehouse) as conn:
         conn.execute(
@@ -119,6 +119,19 @@ def test_existing_close_skips_provider_only_with_observed_start(warehouse, monke
             """,
             ((NOW + timedelta(minutes=30)).isoformat(),),
         )
+    assert paper_close_poll.poll_closes() == {"status": "due", "due_events": 1}
+    raw = warehouse.parent / "data" / "raw" / "odds" / "basketball_nba" / "existing.json"
+    raw.parent.mkdir(parents=True)
+    event = _provider_event("event", NOW + timedelta(minutes=30))
+    for outcome in event["bookmakers"][0]["markets"][0]["outcomes"]:
+        outcome["point"] = 226
+    raw.write_text(json.dumps({
+        "fetched_at": (NOW - timedelta(minutes=30)).isoformat(),
+        "request": {"url": f"{paper_close_poll._BASE_URL}/odds"},
+        "results": [event],
+    }), encoding="utf-8")
+    with connect(warehouse) as conn:
+        conn.execute("UPDATE odds_snapshots SET raw_path = ?", (str(raw),))
     assert paper_close_poll.poll_closes(collect=True)["status"] == "no_close_due"
 
 
@@ -364,7 +377,7 @@ def test_collects_and_loads_only_a_due_draftkings_totals_batch(warehouse, monkey
         ]
         assert conn.execute("SELECT COUNT(*) FROM paper_close_requests").fetchone()[0] == 1
     raw_path = Path(snapshot["raw_path"])
-    raw_dir = warehouse.parent / "raw" / "odds" / "basketball_nba" / "paper_closing"
+    raw_dir = warehouse.parent / "data" / "raw" / "odds" / "basketball_nba" / "paper_closing"
     assert raw_path.is_relative_to(raw_dir)
     assert raw_path.parent.name == snapshot["snapshot_id"]
     archived = raw_path.read_text(encoding="utf-8")
@@ -409,7 +422,7 @@ def test_rejected_provider_rows_are_archived_without_loading(
     with connect(warehouse) as conn:
         assert conn.execute("SELECT COUNT(*) FROM odds_snapshots").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM odds").fetchone()[0] == 0
-    [raw_path] = (warehouse.parent / "raw").rglob("odds_*.json")
+    [raw_path] = (warehouse.parent / "data" / "raw").rglob("odds_*.json")
     assert json.loads(raw_path.read_text(encoding="utf-8"))["results"] == payload
 
 
@@ -457,7 +470,7 @@ def test_snapshot_and_paired_outcomes_roll_back_together(warehouse, monkeypatch)
         assert conn.execute("SELECT COUNT(*) FROM odds").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM odds_snapshot_game_starts").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM paper_close_requests").fetchone()[0] == 1
-    assert len(list((warehouse.parent / "raw").rglob("odds_*.json"))) == 1
+    assert len(list((warehouse.parent / "data" / "raw").rglob("odds_*.json"))) == 1
 
 
 def test_archive_failure_keeps_request_count_and_skips_load(warehouse, monkeypatch):

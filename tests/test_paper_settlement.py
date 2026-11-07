@@ -15,7 +15,8 @@ CAPTURE = START - timedelta(hours=2)
 
 
 @pytest.fixture
-def ledger():
+def ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr(paper_settlement, "RAW_DATA_DIR", tmp_path / "data" / "raw")
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -48,10 +49,10 @@ def _decision(
 ):
     conn.execute(
         """
-        INSERT INTO games (game_id, sport_id, start_time_utc, home_team_id, away_team_id, status)
-        VALUES (?, 1, ?, 1, 2, ?)
+        INSERT INTO games (game_id, sport_id, start_time_utc, home_team_id, away_team_id, status, odds_api_id)
+        VALUES (?, 1, ?, 1, 2, ?, ?)
         """,
-        (game, start.isoformat(), status),
+        (game, start.isoformat(), status, f"provider-{game}"),
     )
     conn.execute(
         "INSERT INTO game_results (game_id, home_score, away_score) VALUES (?, ?, ?)",
@@ -81,6 +82,29 @@ def _quote(
     raw_path=None,
 ):
     fetched = START + offset
+    if raw_path is None and provider_start is not None:
+        provider_id = conn.execute(
+            "SELECT odds_api_id FROM games WHERE game_id = ?", (game,)
+        ).fetchone()[0]
+        archive = paper_settlement.RAW_DATA_DIR / "odds" / "basketball_nba" / f"{snapshot}.json"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_text(json.dumps({
+            "fetched_at": fetched.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+            "results": [{
+                "id": provider_id, "sport_key": "basketball_nba",
+                "home_team": "San Antonio Spurs", "away_team": "Sacramento Kings",
+                "commence_time": provider_start.isoformat(),
+                "bookmakers": [{"key": "draftkings", "markets": [{
+                    "key": market,
+                    "outcomes": [
+                        {"name": side, "price": price, "point": line}
+                        for (side, price), line in zip((("Over", -108), ("Under", -112)), lines)
+                    ],
+                }]}],
+            }],
+        }), encoding="utf-8")
+        raw_path = str(archive)
     conn.execute(
         """
         INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path)
@@ -113,6 +137,13 @@ def test_grades_original_price_and_keeps_latest_verified_close(ledger):
     _quote(ledger, "game", "wrong_source", timedelta(minutes=-2), source="other")
     _quote(ledger, "game", "wrong_market", timedelta(minutes=-3), market="alternate_totals")
     _quote(ledger, "game", "mismatched_pair", timedelta(minutes=-4), lines=(221.5, 222.5))
+    _quote(ledger, "game", "extra_outcome", timedelta(minutes=-3))
+    ledger.execute(
+        """
+        INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american, line)
+        VALUES ('extra_outcome', 'game', 1, 'totals', 'Other', -110, 222)
+        """
+    )
     _quote(ledger, "game", "at_start", timedelta())
     _quote(ledger, "game", "in_play", timedelta(minutes=1))
     assert settle_open_trials(ledger, START) == 0
@@ -452,3 +483,24 @@ def test_corrected_start_uses_the_frozen_trial_minimum_lead(ledger):
     assert unreconciled_grades(ledger, "pilot", first + timedelta(hours=1)) == 1
     assert settle_open_trials(ledger, first + timedelta(hours=1)) == 1
     assert ledger.execute("SELECT outcome FROM paper_settlements").fetchone()[0] == "void"
+
+
+@pytest.mark.parametrize("normalized_clock", [False, True])
+def test_disputed_latest_close_cannot_fall_back_to_earlier_quote(ledger, normalized_clock):
+    _decision(ledger, "game")
+    _quote(ledger, "game", "earlier", timedelta(minutes=-20), lines=(222, 222))
+    _quote(ledger, "game", "latest", timedelta(minutes=-10), lines=(224, 224))
+    path = paper_settlement.RAW_DATA_DIR / "odds" / "basketball_nba" / "latest.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    for outcome in receipt["results"][0]["bookmakers"][0]["markets"][0]["outcomes"]:
+        outcome["point"] = 219
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    if not normalized_clock:
+        ledger.execute("DELETE FROM odds_snapshot_game_starts WHERE snapshot_id = 'latest'")
+
+    assert settle_open_trials(ledger, START + timedelta(hours=3)) == 1
+    grade = ledger.execute("SELECT * FROM paper_settlements").fetchone()
+    assert grade["outcome"] == "win"
+    assert grade["profit_units"] == pytest.approx(100 / 110)
+    assert grade["close_snapshot_id"] is None
+    assert grade["clv_points"] is None

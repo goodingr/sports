@@ -242,6 +242,14 @@ def _close_for_decision(
     if start != min(captured_start, current_start) or latest_start - start > _START_TOLERANCE:
         return None
     window_start = start - _CLOSE_WINDOW - _START_TOLERANCE
+
+    def inside_closing_window(fetched: datetime, provider_start: datetime) -> bool:
+        earliest = min(start, provider_start)
+        return (
+            max(latest_start, provider_start) - earliest <= _START_TOLERANCE
+            and timedelta(0) < earliest - fetched <= _CLOSE_WINDOW
+        )
+
     candidates = conn.execute(
         """
         SELECT o.snapshot_id, o.game_id, s.sport_id, s.source, s.fetched_at_utc,
@@ -250,8 +258,9 @@ def _close_for_decision(
                MAX(CASE WHEN LOWER(o.outcome) = 'under' THEN o.price_american END) AS under_price
         FROM odds o
         JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id
+        JOIN books b ON b.book_id = o.book_id
         WHERE o.game_id = ? AND o.book_id = ? AND s.source = ? AND s.sport_id = ?
-          AND o.market = 'totals' AND LOWER(o.outcome) IN ('over', 'under')
+          AND o.market = 'totals' AND lower(trim(b.name)) = 'draftkings'
           AND julianday(s.fetched_at_utc) BETWEEN julianday(?) AND julianday(?)
         GROUP BY o.snapshot_id, s.fetched_at_utc
         HAVING COUNT(*) = 2 AND COUNT(DISTINCT LOWER(o.outcome)) = 2
@@ -278,16 +287,12 @@ def _close_for_decision(
             and _valid_american_odds(row["under_price"])
         ):
             continue
-        raw_start = _quote_source_start(conn, row, fetched)
-        if raw_start is None:
+        provider_start = _quote_source_start(conn, row, fetched)
+        if provider_start is not None and not inside_closing_window(fetched, provider_start):
             continue
-        earliest = min(start, raw_start)
-        if (
-            max(latest_start, raw_start) - earliest > _START_TOLERANCE
-            or not timedelta(0) < earliest - fetched <= _CLOSE_WINDOW
-        ):
-            continue
-        candidate = (fetched, row["snapshot_id"], row["line"], row[f"{decision['side']}_price"])
+        # Keep an otherwise eligible unresolved quote in the ordering. A
+        # disputed newest receipt cannot turn an earlier price into the close.
+        candidate = (fetched, row)
         if latest is None or fetched > latest[0]:
             latest = candidate
             ambiguous = False
@@ -295,13 +300,18 @@ def _close_for_decision(
             ambiguous = True
     if latest is None or ambiguous:
         return None
-    fetched, snapshot_id, close_line, close_price = latest
+    fetched, quote = latest
+    provider_start = _quote_source_start(conn, quote, fetched, require_original=True)
+    if provider_start is None or not inside_closing_window(fetched, provider_start):
+        return None
+    close_line = quote["line"]
+    close_price = quote[f"{decision['side']}_price"]
     clv = (
         close_line - decision["line"]
         if decision["side"] == "over"
         else decision["line"] - close_line
     )
-    return snapshot_id, fetched.isoformat(), close_line, close_price, clv
+    return quote["snapshot_id"], fetched.isoformat(), close_line, close_price, clv
 
 
 def _final_nba_scores(decision: sqlite3.Row) -> tuple[int, int] | None:

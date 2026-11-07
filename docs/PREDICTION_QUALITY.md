@@ -427,10 +427,10 @@ start for lead time and closing eligibility. A decision with less than 15 minute
 of lead time against the corrected start is voided. Closing line value uses the latest
 paired totals quote from the same book and feed after the decision and within
 90 minutes before the earliest captured, current, or provider-recorded tipoff.
-The three kickoff times must agree within ten minutes. New snapshots retain
-the provider's kickoff for each verified fixture. A legacy snapshot needs a
-matching raw receipt to establish its kickoff. A missing close stays missing
-in the report.
+The three kickoff times must agree within ten minutes. The newest eligible
+closing pair must match both prices and its total in the original provider
+receipt. A missing or disputed receipt leaves closing line value missing.
+The original receipt can also establish the provider kickoff for legacy rows.
 
 Ledger updates re-evaluate source results and retain grade revisions, including
 official score corrections and retracted final scores. Reports select the latest

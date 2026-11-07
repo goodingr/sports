@@ -24,6 +24,42 @@ from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_
 from src.predict.publishable_bets import main as publish_main
 from src.predict.published_ledger import checkout_has_recent_delivery
 
+_NBA_TEAMS = ("Boston Celtics", "New York Knicks")
+_CURRENT_EVENT = "c" * 32
+
+
+def _raw_nba_event(event_id, start, line, totals_price, *, moneyline=None):
+    home, away = _NBA_TEAMS
+    markets = [{
+        "key": "totals",
+        "outcomes": [
+            {"name": side, "point": line, "price": totals_price} for side in ("Over", "Under")
+        ],
+    }]
+    if moneyline is not None:
+        markets.append({
+            "key": "h2h",
+            "outcomes": [{"name": team, "price": moneyline} for team in _NBA_TEAMS],
+        })
+    return {
+        "id": event_id, "sport_key": "basketball_nba", "commence_time": start,
+        "home_team": home, "away_team": away,
+        "bookmakers": [{"key": "draftkings", "markets": markets}],
+    }
+
+
+def _raw_nba_path(db_path, name):
+    return db_path.parent / "data" / "raw" / "odds" / "basketball_nba" / f"{name}.json"
+
+
+def _write_nba_receipt(path, fetched, events):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "fetched_at": fetched, "source": "the-odds-api",
+        "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+        "results": events,
+    }), encoding="utf-8")
+
 
 def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
     specification = {
@@ -45,14 +81,14 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
             CREATE TABLE IF NOT EXISTS books (book_id INTEGER PRIMARY KEY, name TEXT);
             CREATE TABLE IF NOT EXISTS games (
                 game_id TEXT PRIMARY KEY, sport_id INTEGER, start_time_utc TEXT,
-                home_team_id INTEGER, away_team_id INTEGER, status TEXT
+                home_team_id INTEGER, away_team_id INTEGER, status TEXT, odds_api_id TEXT
             );
             CREATE TABLE IF NOT EXISTS game_results (
                 game_id TEXT PRIMARY KEY, home_score INTEGER, away_score INTEGER,
                 home_moneyline_close REAL, away_moneyline_close REAL, total_close REAL
             );
             CREATE TABLE IF NOT EXISTS odds_snapshots (
-                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT, raw_path TEXT
             );
             CREATE TABLE IF NOT EXISTS odds (
                 snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
@@ -61,7 +97,7 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
             INSERT OR IGNORE INTO sports (sport_id, name, league, default_market)
             VALUES (1, 'Basketball', 'NBA', 'totals');
             INSERT OR IGNORE INTO teams (team_id, sport_id, code, name)
-            VALUES (1, 1, 'HOME', 'Home Team'), (2, 1, 'AWAY', 'Away Team');
+            VALUES (1, 1, 'BOS', 'Boston Celtics'), (2, 1, 'NYK', 'New York Knicks');
             INSERT OR IGNORE INTO books (book_id, name) VALUES (1, 'DraftKings');
         """)
         conn.executescript(PAPER_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -72,6 +108,7 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
             """,
             (trial_id, json.dumps(specification)),
         )
+        receipts = {}
         for index in range(150):
             game_id = f"forward{index}"
             captured = datetime(2026, 1, 2, 18, tzinfo=timezone.utc) + timedelta(days=index % 10)
@@ -79,13 +116,19 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
             entry = f"{game_id}_entry"
             close = f"{game_id}_close"
             fetched_at = captured - timedelta(minutes=1)
+            close_at = (start - timedelta(minutes=30)).isoformat()
+            event_id = f"{index:032x}"
+            archive = _raw_nba_path(db_path, f"forward_close_{index % 10}")
+            receipts.setdefault((archive, close_at), []).append(
+                _raw_nba_event(event_id, start.isoformat(), 201.0, -110)
+            )
             conn.execute(
                 """
                 INSERT INTO games (
-                    game_id, sport_id, start_time_utc, home_team_id, away_team_id, status
-                ) VALUES (?, 1, ?, 1, 2, 'final')
+                    game_id, sport_id, start_time_utc, home_team_id, away_team_id, status, odds_api_id
+                ) VALUES (?, 1, ?, 1, 2, 'final', ?)
                 """,
-                (game_id, start.isoformat()),
+                (game_id, start.isoformat(), event_id),
             )
             conn.execute(
                 "INSERT INTO game_results (game_id, home_score, away_score) VALUES (?, ?, ?)",
@@ -108,12 +151,12 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
             )
             conn.executemany(
                 """
-                INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source)
-                VALUES (?, ?, 1, 'the-odds-api')
+                INSERT INTO odds_snapshots (snapshot_id, fetched_at_utc, sport_id, source, raw_path)
+                VALUES (?, ?, 1, 'the-odds-api', ?)
                 """,
                 [
-                    (entry, fetched_at.isoformat()),
-                    (close, (start - timedelta(minutes=30)).isoformat()),
+                    (entry, fetched_at.isoformat(), None),
+                    (close, close_at, str(archive)),
                 ],
             )
             store_odds_snapshot_game_starts(conn, close, {game_id: start.isoformat()})
@@ -129,6 +172,8 @@ def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
                     for side in ("Over", "Under")
                 ],
             )
+        for (archive, fetched), events in receipts.items():
+            _write_nba_receipt(archive, fetched, events)
         assert settle_open_trials(conn, datetime(2026, 1, 12, tzinfo=timezone.utc)) == 150
         conn.commit()
 
@@ -155,7 +200,8 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                 start_time_utc TEXT NOT NULL,
                 home_team_id INTEGER NOT NULL,
                 away_team_id INTEGER NOT NULL,
-                status TEXT
+                status TEXT,
+                odds_api_id TEXT
             );
             CREATE TABLE game_results (
                 game_id TEXT PRIMARY KEY,
@@ -190,8 +236,8 @@ def _create_publish_db(path, *, include_history: bool) -> None:
                 predicted_total_points REAL
             );
             INSERT INTO sports VALUES (1, 'Basketball', 'NBA', 'totals');
-            INSERT INTO teams VALUES (1, 1, 'HOME', 'Home Team');
-            INSERT INTO teams VALUES (2, 1, 'AWAY', 'Away Team');
+            INSERT INTO teams VALUES (1, 1, 'BOS', 'Boston Celtics');
+            INSERT INTO teams VALUES (2, 1, 'NYK', 'New York Knicks');
             """
         )
         prediction_id = 1
@@ -204,7 +250,7 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             ]
             for game_id, start_time, home_score, away_score in history:
                 conn.execute(
-                    "INSERT INTO games VALUES (?, 1, ?, 1, 2, 'final')",
+                    "INSERT INTO games VALUES (?, 1, ?, 1, 2, 'final', NULL)",
                     (game_id, start_time),
                 )
                 conn.execute(
@@ -229,9 +275,10 @@ def _create_publish_db(path, *, include_history: bool) -> None:
         conn.execute(
             """
             INSERT INTO games VALUES (
-                'CUR1', 1, '2026-02-02T20:00:00+00:00', 1, 2, 'scheduled'
+                'CUR1', 1, '2026-02-02T20:00:00+00:00', 1, 2, 'scheduled', ?
             )
-            """
+            """,
+            (_CURRENT_EVENT,),
         )
         conn.execute(
             """
@@ -258,9 +305,9 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             CREATE TABLE books (book_id INTEGER PRIMARY KEY, name TEXT);
             INSERT INTO books VALUES (1, 'DraftKings');
             CREATE TABLE odds_snapshots (
-                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT
+                snapshot_id TEXT PRIMARY KEY, fetched_at_utc TEXT, sport_id INTEGER, source TEXT, raw_path TEXT
             );
-            INSERT INTO odds_snapshots VALUES ('current', '2026-02-01T11:55:00+00:00', 1, 'the-odds-api');
+            INSERT INTO odds_snapshots VALUES ('current', '2026-02-01T11:55:00+00:00', 1, 'the-odds-api', NULL);
             CREATE TABLE odds (
                 snapshot_id TEXT, game_id TEXT, book_id INTEGER, market TEXT,
                 outcome TEXT, price_american REAL, line REAL
@@ -276,6 +323,12 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             WHERE game_id = 'CUR1';
             """
         )
+        current_raw = _raw_nba_path(path, "current")
+        _write_nba_receipt(
+            current_raw, "2026-02-01T11:55:00+00:00",
+            [_raw_nba_event(_CURRENT_EVENT, "2026-02-02T20:00:00+00:00", 210.5, 100, moneyline=-110)],
+        )
+        conn.execute("UPDATE odds_snapshots SET raw_path = ? WHERE snapshot_id = 'current'", (str(current_raw),))
         store_odds_snapshot_game_starts(
             conn, "current", {"CUR1": "2026-02-02T20:00:00+00:00"}
         )
@@ -728,7 +781,10 @@ def test_late_material_grade_changes_revoke_approval_without_rewriting_frozen_me
     assert review["metrics"] == original_metrics
 
 
-def test_source_correction_blocks_promotion_before_and_after_settlement_reconciliation(tmp_path):
+@pytest.mark.parametrize("correction", ["score", "original_close"])
+def test_source_correction_blocks_promotion_before_and_after_settlement_reconciliation(
+    tmp_path, correction
+):
     db_path = tmp_path / "paper.db"
     _seed_paper_evidence(db_path)
     trial_id = "nba_totals_fixture"
@@ -741,9 +797,15 @@ def test_source_correction_blocks_promotion_before_and_after_settlement_reconcil
     frozen_metrics = dict(initial["metrics"])
     assert initial["unreconciled_grades"] == 0
     assert paper_rule_result(canonical, initial, QualityGate())["passes_launch_gate"]
-    with closing(sqlite3.connect(db_path)) as conn:
-        conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
-        conn.commit()
+    if correction == "score":
+        with closing(sqlite3.connect(db_path)) as conn, conn:
+            conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
+    else:
+        receipt = _raw_nba_path(db_path, "forward_close_0")
+        envelope = json.loads(receipt.read_text(encoding="utf-8"))
+        for outcome in envelope["results"][0]["bookmakers"][0]["markets"][0]["outcomes"]:
+            outcome["point"] = 200.0
+        receipt.write_text(json.dumps(envelope), encoding="utf-8")
 
     stale = paper_reviews(db_path, observed)[trial_id]
     stale_result = paper_rule_result(canonical, stale, QualityGate())
@@ -765,6 +827,17 @@ def test_source_correction_blocks_promotion_before_and_after_settlement_reconcil
             "SELECT outcome FROM paper_settlements WHERE game_id = 'forward0'"
         ).fetchone()[0] == "win"
         assert settle_open_trials(conn, observed) == 1
+        if correction == "original_close":
+            history = conn.execute(
+                """
+                SELECT outcome, profit_units, close_snapshot_id, settled_at
+                FROM paper_settlement_history WHERE game_id = 'forward0' ORDER BY revision_id
+                """
+            ).fetchall()
+            assert [tuple(row) for row in history] == [
+                ("win", 1.0, "forward0_close", datetime(2026, 1, 12, tzinfo=timezone.utc).isoformat()),
+                ("win", 1.0, None, observed.isoformat()),
+            ]
         conn.commit()
 
     reconciled = paper_reviews(db_path, observed + timedelta(hours=1))[trial_id]
