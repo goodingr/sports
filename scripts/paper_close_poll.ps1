@@ -22,7 +22,7 @@ $startedAt = [DateTime]::UtcNow
 $logPath = Join-Path $logDirectory ("paper_close_{0}.log" -f $startedAt.ToString("yyyyMMdd"))
 $pythonArgs = @("-B", "-m", "src.predict.paper_close_poll")
 if ($Collect) {
-    $pythonArgs += "--collect"
+    $pythonArgs += @("--collect", "--batch-scheduled")
 }
 
 # Windows PowerShell 5.1 represents redirected native stderr as ErrorRecord.

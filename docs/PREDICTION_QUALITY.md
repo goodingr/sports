@@ -277,7 +277,7 @@ publication.
 
 ```powershell
 poetry run python -m src.predict.publishable_bets promote-paper `
-  --trial-id nba_totals_random_forest_draftkings_v1 `
+  --trial-id nba_totals_random_forest_draftkings_v2 `
   --rules config/published_rules.yml
 ```
 
@@ -343,19 +343,19 @@ The private trial in `config/paper_trial.yml` tests full-game NBA totals at
 DraftKings. It pins the random forest artifact by SHA-256 and records the first
 qualifying decision per fixture. A decision requires a model edge of at least
 20 percentage points against the two-sided no-vig market and positive modeled
-value at the quoted price. The model's two moneyline inputs must match the
-snapshot that supplied the totals pair. The pinned model has zero dependence on
-its spread input.
+value at the quoted price. The model's two moneyline inputs must come from the
+same book and snapshot as the totals pair. Both markets must contain exactly two
+valid outcomes. The pinned model has zero dependence on its spread input.
 
 The capture window runs from 12 hours to 15 minutes before scheduled tipoff.
 The latest totals snapshot for the fixture must have been fetched within 10 minutes of
 capture. This measures the quote the feed returned, without assuming sportsbook
 acceptance or recording any wager.
 
-The scheduled pipeline captures eligible decisions immediately after a successful
-NBA odds download, reusing that download. It runs settlement updates after data
-ingestion. To run the same steps locally,
-use these commands from the repository root.
+The scheduled pipeline downloads NBA odds and captures eligible decisions after
+the preflight backup and before history ingestion. It reuses that download for
+the daily odds refresh. Settlement updates run after data ingestion. To run the
+same steps locally, use these commands from the repository root.
 
 ```powershell
 poetry run python -m src.predict.paper_ledger report
@@ -405,6 +405,14 @@ only reads the warehouse. For collection, free quota probes check the active key
 and then distinct configured keys. A qualifying key is used locally for that
 request, under the shared attempt cap and cooldown.
 
+The scheduled collector waits until the first eligible game is within 28 minutes
+of tipoff, then includes all eligible games in the same request. This leaves one
+15-minute polling interval and three minutes of delay before the ten-minute
+minimum lead. The provider response is retained under
+`data/raw/odds/basketball_nba/paper_closing/` with credential-free request
+metadata. Only paired DraftKings totals for the verified existing fixture enter
+the warehouse. The collector leaves game schedules and results intact.
+
 On Windows, run `scripts/install_paper_close_task.ps1` to preview the local task
 definition. Add `-Apply` to register `SportsPaperClosingQuotes`. It checks every
 15 minutes while the task owner is logged on and the machine is awake. The
@@ -412,9 +420,25 @@ trigger expires at the trial's final review. Logs are written to
 `logs/paper_close_YYYYMMDD.log` using the UTC date. The task can be paused in
 Windows Task Scheduler.
 
-Capture ends February 1, 2027 at midnight Eastern time. The final report freezes
-grades one week later and requires at least 150 graded decisions, 5% flat-unit
-ROI, a positive lower 95% date-clustered bootstrap bound, a lower Brier score than
+The active v2 trial runs through the regular season. It replaces the February
+capture window for new decisions. The original v1 registration remains in the
+ledger with zero decisions and grades when v2 was registered. The artifact,
+book, timing requirements, thresholds, and grading rules carry forward.
+
+The published NBA schedule lists 579 dated games from November 7 through
+January 31 and 1,068 through April 11, excluding the 30 games whose matchups
+were pending at publication. Eighteen of 104 archived games passed the pinned
+decision rule. Applying that historical rate gives about 100 decisions by the
+February cutoff with complete coverage, below the 150 grade minimum. Through
+April 11, 899 dated games start at least 15 minutes after a modeled 6:10 p.m.
+Eastern capture, which would give about 156 decisions at the same rate if every
+eligible quote were captured and every decision graded. These are planning
+estimates from previously examined data. [Published NBA schedule by date](https://ak-static.cms.nba.com/wp-content/uploads/sites/46/2026/08/2026-27-NBA-Regular-Season-Schedule-By-Date.pdf)
+
+Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
+grades April 19 at midnight Eastern time and requires at least 150 graded
+decisions, 5% flat-unit ROI, a positive lower 95% date-clustered bootstrap bound,
+a lower Brier score than
 the quoted no-vig market, and at least 80% same-book closing coverage with
 positive average CLV and positive CLV on more than half the matched decisions.
 Unresolved decisions at the grading cutoff fail review. This verdict remains

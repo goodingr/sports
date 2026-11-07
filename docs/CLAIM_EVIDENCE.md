@@ -43,7 +43,7 @@ failed to establish a profitable edge; their evidence is in
 `reports/research/nhl_market_offset/result.json` and
 `reports/research/soccer_poisson_offset/result.json`. These findings do not support
 a profitability claim. The NBA prospective trial is collecting evidence and its
-scheduled final review is February 8, 2027 at midnight Eastern time.
+scheduled final review is April 19, 2027 at midnight Eastern time.
 
 ## Blocked Claims
 

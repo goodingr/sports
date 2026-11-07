@@ -68,8 +68,9 @@ if ($metadataExitCode -ne 0) {
 }
 $metadata = ($metadataOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
 $expiresAt = [DateTimeOffset]::Parse($metadata.end_boundary).ToLocalTime()
-$startsAt = [DateTimeOffset]::Now.AddMinutes(1)
-$startsAt = $startsAt.AddTicks(-($startsAt.Ticks % [TimeSpan]::TicksPerSecond))
+$startsAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
+$intervalTicks = [TimeSpan]::FromMinutes(15).Ticks
+$startsAt = $startsAt.AddTicks($intervalTicks - ($startsAt.Ticks % $intervalTicks)).ToLocalTime()
 if ($expiresAt -le $startsAt.AddMinutes(15)) {
     throw "The trial deadline does not allow another closing-quote interval."
 }

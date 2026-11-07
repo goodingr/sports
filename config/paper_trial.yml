@@ -1,5 +1,5 @@
-# Fixed prospective experiment for the existing NBA totals model.
-trial_id: nba_totals_random_forest_draftkings_v1
+# Prospective experiment through the end of the 2026–27 NBA regular season.
+trial_id: nba_totals_random_forest_draftkings_v2
 league: NBA
 market: totals
 model_type: random_forest
@@ -13,4 +13,4 @@ max_hours_before_start: 12
 min_decisions: 150
 min_roi: 0.05
 min_clv_coverage: 0.80
-review_at: "2027-02-01T05:00:00+00:00"
+review_at: "2027-04-12T04:00:00+00:00"
