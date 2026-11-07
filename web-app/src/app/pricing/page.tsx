@@ -129,7 +129,7 @@ function CheckoutButton() {
                 ) : (
                     <>
                         <p className="font-semibold text-foreground">Subscriptions are currently paused</p>
-                        <p className="mt-1">Enrollment opens when picks are available after validation.</p>
+                        <p className="mt-1">Enrollment opens after the picks pass validation and the service is ready.</p>
                         <Link href="/" className="mt-2 inline-block text-primary hover:underline">Explore model tracking</Link>
                     </>
                 )}

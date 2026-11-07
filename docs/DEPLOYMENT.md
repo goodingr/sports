@@ -126,6 +126,16 @@ See [docs/RUNBOOK.md](RUNBOOK.md) for the full rollback procedure.
 requires `docker compose build web`. Server-only secrets (Clerk secret key,
 Stripe secret key) are read at runtime from `.env`.
 
+`PAID_ENROLLMENT_ENABLED` defaults to `false`. After verifying the paid launch
+checklist, set it to `true` in the API environment and recreate the API service.
+The endpoint for starting new Checkout sessions still requires a passing publisher
+run within 30 hours and at least one genuine pick issued by a currently passing
+rule in the past seven days. A clean publisher run with zero qualifying bets can
+still satisfy the first condition. Revoked releases, failed runs, and voided picks
+cannot satisfy the relevant checks. Quote expiry still controls each pick shown
+to subscribers. Set the flag back to `false` and recreate the API service to close
+new enrollment.
+
 ## Networking
 
 - All services share the `sports` Compose network.

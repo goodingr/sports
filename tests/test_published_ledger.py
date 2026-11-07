@@ -10,7 +10,12 @@ import pytest
 
 import src.predict.published_ledger as ledger
 from src.db.core import initialize
-from src.predict.published_ledger import load_active_release, publish_release, published_record
+from src.predict.published_ledger import (
+    checkout_has_recent_delivery,
+    load_active_release,
+    publish_release,
+    published_record,
+)
 
 
 @pytest.fixture
@@ -59,6 +64,60 @@ def release(start):
 
 def publish_at_evaluation(payload, path):
     return publish_release(payload, path, commit_at=datetime.fromisoformat(payload["generated_at"]))
+
+
+@pytest.mark.parametrize(
+    ("release_change", "hours_after_refresh", "game_status", "expected"),
+    [
+        ({}, 0, "scheduled", True),
+        ({}, 31, "scheduled", False),
+        ({}, 0, "voided", False),
+        ({"reason": "data_quality_failed"}, 0, "scheduled", False),
+        ({"passing_approved_rule_ids": []}, 0, "scheduled", False),
+        ({"skipped_passing_rule_ids": ["validated"]}, 0, "scheduled", False),
+        ({"passing_approved_rule_ids": ["other"], "approved_rule_ids": ["other"]}, 0, "scheduled", False),
+    ],
+)
+def test_checkout_requires_recent_delivery_and_current_passing_release(
+    warehouse, release_change, hours_after_refresh, game_status, expected
+):
+    path, start = warehouse
+    original = release(start)
+    original["approved_rule_ids"] = ["validated"]
+    original["bets"][0]["quality_summary"]["evidence_source"] = "prospective_paper"
+    issued = publish_at_evaluation(original, path)
+    assert len(issued["bets"]) == 1
+    assert checkout_has_recent_delivery(path, now=datetime.fromisoformat(issued["published_at"]))
+    refresh_at = start + timedelta(hours=1)
+    refresh = {
+        "generated_at": refresh_at.isoformat(),
+        "approved_rule_ids": ["validated"],
+        "passing_approved_rule_ids": ["validated"],
+        "reason": "no_current_bets_matching_passing_rules",
+        "bets": [],
+        **release_change,
+    }
+    publish_at_evaluation(refresh, path)
+    assert load_active_release(path)["bets"] == []
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE games SET status = ?", (game_status,))
+    assert checkout_has_recent_delivery(path, now=refresh_at + timedelta(hours=hours_after_refresh)) is expected
+    later = refresh_at + timedelta(days=8)
+    publish_at_evaluation({**refresh, "generated_at": later.isoformat()}, path)
+    assert not checkout_has_recent_delivery(path, now=later)
+
+
+def test_checkout_cannot_open_with_only_trial_approval_and_no_issued_pick(warehouse):
+    path, start = warehouse
+    observed = start - timedelta(hours=1)
+    publish_at_evaluation({
+        "generated_at": observed.isoformat(),
+        "approved_rule_ids": ["validated"],
+        "passing_approved_rule_ids": ["validated"],
+        "reason": "no_current_bets_matching_passing_rules",
+        "bets": [],
+    }, path)
+    assert not checkout_has_recent_delivery(path, now=observed)
 
 
 def test_published_quote_is_immutable_and_retries_do_not_add_bets(warehouse):

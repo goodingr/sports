@@ -21,6 +21,7 @@ from src.predict.paper_ledger import SCHEMA_PATH as PAPER_SCHEMA_PATH
 from src.predict.paper_settlement import settle_open_trials
 from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_rule
 from src.predict.publishable_bets import main as publish_main
+from src.predict.published_ledger import checkout_has_recent_delivery
 
 
 def _seed_paper_evidence(db_path, trial_id="nba_totals_fixture"):
@@ -454,6 +455,7 @@ def test_publish_command_writes_expected_list_with_passing_rule(tmp_path):
     assert bet["market_probability"] == 0.5
     assert bet["quality_summary"]["passes_launch_gate"] is True
     assert bet["quality_summary"]["roi"] > 0.5
+    assert checkout_has_recent_delivery(db_path, now=datetime(2026, 2, 1, 12, 20, tzinfo=timezone.utc))
 
 
 def test_revocation_committed_before_export_prevents_stale_artifacts(tmp_path, monkeypatch):

@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.data.config import PROJECT_ROOT, _load_dotenv_if_available
 
-
 DEFAULT_RELEASE_LEAGUES = (
     "NBA",
     "NFL",
@@ -74,6 +73,7 @@ class APISettings(BaseModel):
     predictions_freshness_minutes: int = Field(default=24 * 60, ge=0)
     min_disk_free_mb: int = Field(default=512, ge=0)
     models_dir: Path = PROJECT_ROOT / "models"
+    paid_enrollment_enabled: bool = False
 
     clerk_secret_key: str | None = None
     clerk_api_url: str = "https://api.clerk.com"
@@ -128,6 +128,7 @@ def get_settings() -> APISettings:
         predictions_freshness_minutes=_int_env("PREDICTIONS_FRESHNESS_MINUTES", 24 * 60),
         min_disk_free_mb=_int_env("MIN_DISK_FREE_MB", 512),
         models_dir=models_dir,
+        paid_enrollment_enabled=os.getenv("PAID_ENROLLMENT_ENABLED", "").strip().lower() == "true",
         clerk_secret_key=os.getenv("CLERK_SECRET_KEY"),
         clerk_api_url=os.getenv("CLERK_API_URL", "https://api.clerk.com"),
         clerk_frontend_api_url=frontend_api_url,

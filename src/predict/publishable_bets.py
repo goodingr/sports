@@ -50,6 +50,8 @@ QUOTE_METADATA_FIELDS = (
 )
 
 QUALITY_SUMMARY_FIELDS = (
+    "evidence_source",
+    "evidence_cutoff",
     "bets",
     "required_min_bets",
     "roi",

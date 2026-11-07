@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sqlite3
 
 import pandas as pd
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from src.api.auth import get_current_user
 from src.api.main import app
 from src.api.routes import bets
+from src.api.settings import APISettings
 
 LOCKED_FIELD_NAMES = {
     "predicted_prob",
@@ -349,27 +351,29 @@ def test_loader_keys_bets_by_game_market_side(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("artifact_hours_ago", "game_in_hours", "rule_passed", "expected"),
-    [(1, 2, True, True), (31, 2, True, False), (1, -1, True, False), (1, 2, False, False)],
+    ("enabled", "eligible", "expected"),
+    [(False, True, False), (True, True, True), (True, False, False), (True, None, False)],
 )
-def test_checkout_availability_uses_current_passing_feed(
-    api_client, monkeypatch, tmp_path, artifact_hours_ago, game_in_hours, rule_passed, expected
+def test_checkout_requires_enablement_and_delivery_evidence(
+    api_client, monkeypatch, tmp_path, enabled, eligible, expected
 ):
-    now = pd.Timestamp.now(tz="UTC")
-    artifact = {
-        "publishable_profitable_list_exists": True,
-        "generated_at": (now - pd.Timedelta(hours=artifact_hours_ago)).isoformat(),
-        "passing_approved_rule_ids": ["nba_totals_rule"] if rule_passed else ["other_rule"],
-        "bets": [{
-            **_publishable_future_bet(),
-            "start_time_utc": (now + pd.Timedelta(hours=game_in_hours)).isoformat(),
-            "quality_summary": {"passes_launch_gate": True},
-        }],
-    }
-    monkeypatch.setattr(bets, "load_active_release", lambda _: artifact)
+    db_path = tmp_path / "warehouse.db"
+    monkeypatch.setattr(
+        bets, "get_settings", lambda: APISettings(db_path=db_path, paid_enrollment_enabled=enabled)
+    )
+    checked = []
+
+    def delivery(path):
+        checked.append(path)
+        if eligible is None:
+            raise sqlite3.OperationalError("unavailable")
+        return eligible
+
+    monkeypatch.setattr(bets, "checkout_has_recent_delivery", delivery)
 
     response = api_client.get("/api/bets/access")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == {"checkout_available": expected}
+    assert checked == ([db_path] if enabled else [])

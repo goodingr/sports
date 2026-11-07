@@ -21,10 +21,14 @@ from src.dashboard.data import (
 )
 from src.data.sportsbook_urls import get_sportsbook_url
 from src.data.team_mappings import get_full_team_name
-from src.predict.published_ledger import load_active_release, published_record
+from src.predict.published_ledger import (
+    MAX_RELEASE_AGE,
+    checkout_has_recent_delivery,
+    load_active_release,
+    published_record,
+)
 
 router = APIRouter(prefix="/api/bets", tags=["bets"])
-PUBLISHABLE_BETS_MAX_AGE = pd.Timedelta(hours=30)
 
 
 def _load_gated_publishable_bets() -> dict[tuple[str, str, str], dict[str, Any]]:
@@ -47,7 +51,7 @@ def _load_gated_publishable_bets() -> dict[tuple[str, str, str], dict[str, Any]]
         return {}
     generated = pd.to_datetime(generated_at, utc=True, errors="coerce")
     now = pd.Timestamp.now(tz="UTC")
-    if pd.isna(generated) or not now - PUBLISHABLE_BETS_MAX_AGE <= generated <= now:
+    if pd.isna(generated) or not now - MAX_RELEASE_AGE <= generated <= now:
         return {}
     passing_ids = payload.get("passing_approved_rule_ids")
     bets_list = payload.get("bets")
@@ -515,7 +519,13 @@ def _upcoming_publishable_bets() -> pd.DataFrame:
 def get_access(response: Response) -> AccessResponse:
     """Expose checkout availability without revealing any pick details."""
     response.headers["Cache-Control"] = "no-store"
-    return AccessResponse(checkout_available=not _upcoming_publishable_bets().empty)
+    settings = get_settings()
+    if not settings.paid_enrollment_enabled:
+        return AccessResponse(checkout_available=False)
+    try:
+        return AccessResponse(checkout_available=checkout_has_recent_delivery(settings.db_path))
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return AccessResponse(checkout_available=False)
 
 
 @router.get("/record")

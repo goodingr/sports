@@ -22,6 +22,8 @@ from src.models.prediction_quality import (
 SCHEMA_PATH = Path(__file__).with_name("published_schema.sql")
 VOID_STATUSES = {"cancelled", "canceled", "voided", "no_contest", "postponed"}
 QUOTE_FIELDS = ("rule_id", "side", "moneyline", "total_line", "book", "start_time_utc")
+MAX_RELEASE_AGE = timedelta(hours=30)
+RECENT_DELIVERY_WINDOW = timedelta(days=7)
 
 
 def _utc(value: str) -> datetime:
@@ -388,6 +390,72 @@ def load_active_release(db_path: Path | None = None) -> dict[str, Any]:
                 active.append(pick)
         return {**payload, "bets": active, "bet_count": len(active),
                 "publishable_profitable_list_exists": bool(active)}
+
+
+def checkout_has_recent_delivery(db_path: Path, *, now: datetime | None = None) -> bool:
+    """Require a fresh passing release and a recent issued pick from a passing rule."""
+    now = _utc(now.isoformat()) if now is not None else datetime.now(timezone.utc)
+    with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN")
+        row = conn.execute(
+            "SELECT published_at, payload FROM published_releases ORDER BY release_id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return False
+        payload = json.loads(row["payload"])
+        if not isinstance(payload, dict) or not isinstance(payload.get("generated_at"), str):
+            return False
+        generated_at = _utc(payload["generated_at"])
+        published_at = _utc(row["published_at"])
+        if not now - MAX_RELEASE_AGE <= generated_at <= published_at <= now:
+            return False
+        reason = payload.get("reason")
+        bets = payload.get("bets")
+        if not isinstance(bets, list):
+            return False
+        if reason is None:
+            if not bets or payload.get("publishable_profitable_list_exists") is not True:
+                return False
+        elif reason != "no_current_bets_matching_passing_rules" or bets:
+            return False
+        passing = payload.get("passing_approved_rule_ids")
+        approved = payload.get("approved_rule_ids")
+        skipped = payload.get("skipped_passing_rule_ids", [])
+        if (
+            not isinstance(passing, list)
+            or not isinstance(approved, list)
+            or not isinstance(skipped, list)
+            or not passing
+            or any(not isinstance(rule, str) or not rule or rule not in approved for rule in passing)
+        ):
+            return False
+        delivering_rules = [rule for rule in passing if rule not in skipped]
+        match = conn.execute(
+            """
+            SELECT 1 FROM published_picks p
+            JOIN games g USING (game_id)
+            LEFT JOIN published_settlements s USING (pick_id)
+            WHERE julianday(p.published_at) BETWEEN julianday(?) AND julianday(?)
+              AND json_extract(p.payload, '$.rule_id') IN (SELECT value FROM json_each(?))
+              AND json_extract(p.payload, '$.quality_summary.evidence_source') = 'prospective_paper'
+              AND json_type(p.payload, '$.quality_summary.passes_launch_gate') = 'true'
+              AND g.home_team_id = p.home_team_id AND g.away_team_id = p.away_team_id
+              AND lower(g.status) NOT IN (SELECT value FROM json_each(?))
+              AND julianday(g.start_time_utc) > julianday(p.published_at)
+              AND abs(unixepoch(g.start_time_utc)
+                      - unixepoch(json_extract(p.payload, '$.start_time_utc'))) <= 600
+              AND (s.outcome IS NULL OR s.outcome <> 'void')
+            LIMIT 1
+            """,
+            (
+                (now - RECENT_DELIVERY_WINDOW).isoformat(),
+                published_at.isoformat(),
+                json.dumps(delivering_rules),
+                json.dumps(sorted(VOID_STATUSES)),
+            ),
+        ).fetchone()
+    return match is not None
 
 
 def published_record(
