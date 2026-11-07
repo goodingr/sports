@@ -367,6 +367,23 @@ poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --reg
 poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only
 ```
 
+For an internal price audit of graded decisions, run the read-only report with
+`--price-diagnostics`.
+
+```powershell
+poetry run python -m src.predict.paper_ledger report --price-diagnostics
+```
+
+The report matches both sides of the original entry and grade-linked close to
+the same book, snapshot and raw receipt. It counts verified changed lines
+separately and excludes missing, ambiguous or corrected evidence. At an
+identical line, price CLV is entry decimal odds divided by close decimal odds
+minus one. Closing benchmark EV is the closing pair's proportional no-vig
+probability times entry decimal odds minus one. For integer totals, this EV
+is conditional on a non-push. The report counts observed pushes separately.
+These are quote comparisons at recorded prices. The frozen review uses its
+registered performance gates.
+
 The update command registers the trial on its first run and appends available
 settlements. The report command reads the existing ledger. The refresh command
 consumes live odds quota. The warehouse backup includes trial registrations,

@@ -487,7 +487,13 @@ def main() -> None:
     parser.add_argument("command", choices=["update", "report"])
     parser.add_argument("--db", type=Path)
     parser.add_argument("--rules", type=Path, default=DEFAULT_RULES)
+    parser.add_argument(
+        "--price-diagnostics", action="store_true",
+        help="Include verified same-line closing prices in the read-only report",
+    )
     args = parser.parse_args()
+    if args.price_diagnostics and args.command != "report":
+        parser.error("--price-diagnostics requires report")
     db_path = resolve_db_path(args.db)
     if args.command == "update":
         result = update(load_trial(args.rules), db_path)
@@ -495,7 +501,16 @@ def main() -> None:
         with closing(sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("BEGIN")
-            result = build_paper_report(conn, datetime.now(timezone.utc))
+            observed_at = datetime.now(timezone.utc)
+            result = build_paper_report(conn, observed_at)
+            if args.price_diagnostics:
+                from src.predict.paper_price_diagnostics import closing_price_diagnostics
+
+                for trial in result["trials"]:
+                    trial["closing_price_diagnostics"] = closing_price_diagnostics(
+                        conn, trial["trial_id"], _utc(trial["review_at"]),
+                        _utc(trial["evidence_cutoff"]), observed_at,
+                    )
     print(json.dumps(result, indent=2, allow_nan=False))
 
 
