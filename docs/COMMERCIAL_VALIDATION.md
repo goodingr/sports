@@ -85,6 +85,34 @@ The isolated production build and `next start` browser check passed on November 
 
 After the release gates clear, export live Stripe Billing cohorts and the itemized Balance report for the same time zone and dates. Use the subscription price ID to isolate this product, reconcile charges, fees, refunds, and disputes by transaction, and calculate monthly contribution and operating result. Reconcile paid invoices to actual funds collected. Review two completed renewal cohorts before increasing acquisition spend. Keep customer-level exports out of the repository. [Stripe Billing analytics](https://docs.stripe.com/billing/subscriptions/analytics) · [Stripe Balance report](https://docs.stripe.com/reports/balance) · [Stripe event types](https://docs.stripe.com/api/events/types)
 
+The [cash report](../scripts/commercial_cash_report.py) checks whether a paid
+invoice for the intended price matches a positive charge in Stripe Balance
+activity. Use the full live history from launch through the last month under
+review. That history lets the report attribute later adjustments and find each
+customer's first observed payment. Keep both exports outside the repository.
+
+- Prepare one invoice-register CSV row per Stripe invoice. Include
+  `invoice_id,customer_id,price_ids,livemode,status,currency,amount_paid_cents,tax_cents`.
+  Use all invoice lines and join their price IDs with `|`, retaining an empty
+  entry for any unpriced line. Copy the live flag and paid amount from the
+  invoice. Enter tax in cents from the invoice's tax totals.
+- Export itemized USD Stripe Balance activity with
+  `balance_transaction_id,created_utc,currency,gross,fee,net,reporting_category,invoice_id,charge_id`.
+  Use a decimal point for the USD amounts. Export all activity categories so
+  refunds, reversals, and disputes stay visible. [Stripe Balance columns](https://docs.stripe.com/reports/report-types/balance)
+
+```powershell
+poetry run python scripts/commercial_cash_report.py --invoices C:/private/invoices.csv --balance C:/private/balance.csv --price-id price_replace_me
+```
+
+Repeat `--exclude-customer-id` for staff or other known internal accounts. The
+report emits aggregates by UTC posting month and counts exceptions without
+customer identifiers. The automatic match covers paid, live, single-price USD
+invoices with zero tax and one charge for the exact paid amount. Review the
+audit counts and reconcile excluded invoices, standalone fees, taxes, and
+other cash adjustments separately. The report measures Stripe balance activity.
+Use billing periods for renewals and actual business costs for operating profit.
+
 ## Paid launch evidence
 
 - A current approved and passing pick rule and release audit under the existing claim policy. [Claim evidence](CLAIM_EVIDENCE.md)
