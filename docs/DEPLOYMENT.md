@@ -81,16 +81,37 @@ Budget for both markets per available league and scores. The paper reserve
 and request caps cover supplemental collection only.
 [Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
 
+Set both league scopes explicitly in the host's `.env`. For a future
+NBA-only paid release, use:
+
+```dotenv
+PAID_RELEASE_LEAGUES=NBA
+RELEASE_LEAGUES=NBA
+```
+
+`PAID_RELEASE_LEAGUES` scopes the worker's data hygiene, strict data-quality
+checks, and publication candidates. On a publication run, a quality failure
+in any listed league revokes the active release. Select provider collection
+separately using the job settings above. Each issued pick requires a passing
+approved prospective rule and an exact fresh pregame quote. Checkout also
+requires recent delivery from a passing rule and the enrollment flag.
+
+`RELEASE_LEAGUES` scopes API readiness. Each listed league needs recent priced
+odds, recent predictions in the warehouse, and a model artifact. Compose
+waits for the API's `/ready` health check before starting the web app and proxy.
+A league left in either list can block its respective gate even if no rule for
+that league is approved.
+
 ```bash
 docker compose up -d api worker
 ```
 
-The default readiness window for odds is three hours. With one daily
-refresh, start the dependent services while the required leagues have
-recent priced receipts. If the warehouse needs a fresh receipt, wait for
-an opted-in broad job or run one manual refresh in its place. The command
-below fetches live odds and scores. Count it against the same daily budget
-and run it only on the collection owner.
+The default readiness limits are three hours for odds and 24 hours for
+predictions. With one daily refresh, start the dependent services while the
+required leagues have recent priced receipts. If the warehouse needs a fresh
+receipt, wait for an opted-in broad job or run one manual refresh in its place.
+The command below fetches live odds and scores. Count it against the same
+daily budget and run it only on the collection owner.
 
 ```bash
 docker compose run --rm --no-deps --user app --entrypoint /app/scripts/pipeline.sh worker --skip-training

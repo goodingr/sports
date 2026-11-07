@@ -46,8 +46,10 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       docker compose run --rm worker python -m src.data.ingest_odds \
         --league NFL --market h2h,totals --force-refresh
       ```
-- [ ] `RELEASE_LEAGUES` contains only leagues that are validated for public
-      release. Anything else stays masked.
+- [ ] `PAID_RELEASE_LEAGUES` scopes worker quality checks and publication
+      candidates. `RELEASE_LEAGUES` scopes API readiness. Set both to the
+      intended leagues, for example `NBA` for an NBA-only release.
+      [Configure the league scopes](DEPLOYMENT.md)
 
 ## 5. Backups
 
@@ -70,10 +72,10 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
 
 - [ ] `docker compose ps` shows all four services running and `healthy`.
 - [ ] `curl -fsS https://${API_DOMAIN}/health` returns `200`.
-- [ ] `curl -fsS https://${API_DOMAIN}/ready` returns `200` and reports
-      fresh data (`odds_age_minutes < ODDS_FRESHNESS_MINUTES`,
-      `predictions_age_minutes < PREDICTIONS_FRESHNESS_MINUTES`,
-      `disk_free_mb > MIN_DISK_FREE_MB`).
+- [ ] API `/ready` returns `200` before Compose starts the web app and proxy.
+      Check priced odds and prediction freshness and model artifact presence
+      for every league in `RELEASE_LEAGUES`, plus the database, schema,
+      restore, and disk checks.
 - [ ] `curl -fsS https://${APP_DOMAIN}/` returns `200` and the HTML mentions
       the app shell (not the Next.js error page).
 - [ ] Worker crontab installed:
@@ -82,19 +84,19 @@ checked. Anything you can't tick is a launch blocker, not a wish-list item.
       ```
       shows five lines (predict, train, benchmark, backup_local, backup_remote).
 - [ ] `docker compose logs --since=15m worker` contains no `ERROR` lines.
-- [ ] Paid-picks publish gate is fail-closed:
-      ```
-      docker compose exec -u app worker python -m src.predict.publishable_bets \
-        --allow-empty
-      ```
-      exits `0` when no approved rule passes and does not leave a stale paid
-      list behind.
+- [ ] Check the worker's publication result. A failed data-quality gate
+      revokes the active release. Issuing a pick also requires a passing
+      approved prospective rule and a verified quote. If the run finds no
+      passing approved rule, it commits an empty release and checkout stays
+      closed.
 
 ## 7. End-to-end validation
 
 - [ ] Sign up a fresh user via the live web app and confirm sign-in works.
-- [ ] Visit a release league page; predictions render with non-zero rows.
-- [ ] Visit a non-release league page; predictions are masked as designed.
+- [ ] Compare upcoming picks with the active issued release. When it is
+      empty, the app shows an empty feed. When it has active picks, the
+      subscriber view shows the issued quotes and the public view shows locked
+      previews.
 - [ ] Force a prediction refresh:
       ```
       docker compose exec -u app worker /app/scripts/pipeline.sh --skip-training
