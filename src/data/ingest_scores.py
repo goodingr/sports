@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 import requests
 
 from src.data.config import RAW_DATA_DIR, OddsAPIKeyManager, OddsAPISettings
+from src.data.score_backfill import _SCORE_START_TOLERANCE
 from src.data.team_mappings import NBA_ALIASES
 from src.db.core import connect
 from src.db.loaders import _parse_utc_datetime
@@ -171,7 +172,7 @@ def _update_nba_scores(scores_data: List[Dict]) -> int:
                 continue
             matches = conn.execute(
                 """
-                SELECT g.game_id, g.home_team_id, g.away_team_id, g.status,
+                SELECT g.game_id, g.home_team_id, g.away_team_id, g.status, g.start_time_utc,
                        h.code AS home_code, a.code AS away_code,
                        r.home_score, r.away_score, r.source_version
                 FROM games g
@@ -193,6 +194,17 @@ def _update_nba_scores(scores_data: List[Dict]) -> int:
                 away_code,
             ):
                 continue
+            if kickoff is not None:
+                try:
+                    current_start = _parse_utc_datetime(game["start_time_utc"])
+                except OverflowError:
+                    continue
+                if (
+                    current_start is None
+                    or abs(kickoff - current_start) > _SCORE_START_TOLERANCE
+                    or observed <= current_start
+                ):
+                    continue
             game_id = game["game_id"]
             previous = conn.execute(
                 "SELECT * FROM nba_odds_api_score_state WHERE game_id = ?", (game_id,)

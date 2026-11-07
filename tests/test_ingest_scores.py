@@ -307,3 +307,36 @@ def test_nba_updater_rejects_ambiguous_event_ids(nba_warehouse):
     with connect(nba_warehouse) as conn:
         assert _nba_result(conn) == ("scheduled", None, None, "the-odds-api")
         assert conn.execute("SELECT COUNT(*) FROM nba_odds_api_score_state").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("kickoff_offset", "update_offset"),
+    [
+        (timedelta(hours=-4), timedelta(minutes=-1)),
+        (timedelta(hours=-4), timedelta(hours=4)),
+        (timedelta(minutes=-10), timedelta(0)),
+        (timedelta(minutes=10, microseconds=1), timedelta(hours=4)),
+    ],
+)
+def test_nba_final_score_requires_current_fixture_clock(nba_warehouse, kickoff_offset, update_offset):
+    stale = _nba_event(
+        TIPOFF + update_offset,
+        home_score=110,
+        commence_time=(TIPOFF + kickoff_offset).isoformat(),
+    )
+    assert ingest_scores.update_database([stale], "NBA") == 0
+    with connect(nba_warehouse) as conn:
+        assert _nba_result(conn) == ("scheduled", None, None, "the-odds-api")
+        assert conn.execute("SELECT COUNT(*) FROM nba_odds_api_score_state").fetchone()[0] == 0
+        assert settle_open_trials(conn, FINAL_AT + timedelta(minutes=10)) == 0
+
+    final = _nba_event(
+        FINAL_AT - timedelta(minutes=1),
+        commence_time=(TIPOFF - timedelta(minutes=10)).isoformat(),
+    )
+    assert ingest_scores.update_database([final], "NBA") == 1
+    with connect(nba_warehouse) as conn:
+        assert conn.execute("SELECT start_time_utc FROM games").fetchone()[0] == TIPOFF.isoformat()
+        assert _nba_result(conn) == ("final", 105, 120, "the-odds-api-scores")
+        assert settle_open_trials(conn, FINAL_AT + timedelta(minutes=11)) == 1
+        assert conn.execute("SELECT outcome FROM paper_settlements").fetchone()[0] == "loss"
