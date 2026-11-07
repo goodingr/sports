@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -74,6 +75,20 @@ def test_required_fresh_odds_distinguishes_provider_error_from_empty_success(tmp
     ingest_odds.run(require_fresh=True)
     assert "error" not in loaded[-1]
     assert loaded[-1]["results"] == []
+
+
+def test_odds_snapshot_writes_in_the_same_second_keep_both_source_responses(tmp_path, monkeypatch) -> None:
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 7, 5, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(ingest_odds, "datetime", FixedClock)
+    first = ingest_odds.write_snapshot({"results": ["first"]}, tmp_path)
+    second = ingest_odds.write_snapshot({"results": ["second"]}, tmp_path)
+    assert first != second
+    assert json.loads(first.read_text(encoding="utf-8")) == {"results": ["first"]}
+    assert json.loads(second.read_text(encoding="utf-8")) == {"results": ["second"]}
 
 
 def test_entry_run_mode_defaults() -> None:

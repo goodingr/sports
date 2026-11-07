@@ -1108,7 +1108,7 @@ def _advance_odds_api_schedule_clock(
             WHERE o.game_id = ? AND s.source = 'the-odds-api'
               AND '/' || replace(s.raw_path, char(92), '/') GLOB ?
             """,
-            (game_id, f"*/odds/{sport_key}/odds_????-??-??T??-??-??Z.json"),
+            (game_id, f"*/odds/{sport_key}/odds_????-??-??T??-??-??Z*.json"),
         )
         timestamps = [_parse_utc_datetime(row[0]) for row in legacy]
         latest = max((timestamp for timestamp in timestamps if timestamp is not None), default=None)

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from uuid import uuid4
 
 import requests
 
@@ -103,9 +104,16 @@ def write_snapshot(data: Dict[str, Any], out_dir: Path) -> Path:
     """Persist odds snapshot to data/raw/odds/<timestamp>.json."""
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    payload = json.dumps(data, indent=2)
     out_dir.mkdir(parents=True, exist_ok=True)
     output_path = out_dir / f"odds_{timestamp}.json"
-    output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        output = output_path.open("x", encoding="utf-8")
+    except FileExistsError:
+        output_path = out_dir / f"odds_{timestamp}_{uuid4().hex}.json"
+        output = output_path.open("x", encoding="utf-8")
+    with output:
+        output.write(payload)
     return output_path
 
 

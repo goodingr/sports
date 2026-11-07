@@ -331,8 +331,9 @@ def test_delayed_snapshot_keeps_newer_fixture_schedule_and_records_quotes(
         ).fetchall() == [("Over", 220.5), ("Under", 220.5)]
 
 
+@pytest.mark.parametrize("suffix", ["", "_01ab2345cd6789ef01ab2345cd6789ef"])
 def test_existing_fixture_bootstraps_schedule_clock_from_ordinary_archive_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
 ) -> None:
     db_path = tmp_path / "odds.db"
     with sqlite3.connect(db_path) as conn:
@@ -342,7 +343,7 @@ def test_existing_fixture_bootstraps_schedule_clock_from_ordinary_archive_only(
     ordinary = _nba_schedule_snapshot("2026-11-07T23:01:00Z", "2026-11-08T03:10:00Z", "new-id")
     loaders.load_odds_snapshot(
         ordinary,
-        raw_path=r"C:\sports\data\raw\odds\basketball_nba\odds_2026-11-07T23-01-00Z.json",
+        raw_path=rf"C:\sports\data\raw\odds\basketball_nba\odds_2026-11-07T23-01-00Z{suffix}.json",
         sport_key="basketball_nba",
     )
     with sqlite3.connect(db_path) as conn:
