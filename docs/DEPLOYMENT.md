@@ -214,19 +214,23 @@ Keep Stripe's single-subscription setting enabled as a separate control.
 New Checkout sessions return to `/account` with the Stripe session ID. The
 signed-in account can confirm a paid session and recover access while webhook
 delivery is pending. The same reconciliation handles webhook updates, including
-later cancellations. Stored access ends at the verified billing period
-boundary or an earlier applicable cancellation or trial end. A signed-in
-subscriber can use **Refresh subscription status** on the account page if a
-renewal webhook is delayed. The refresh reads the existing Stripe account,
-customer, and subscription. It works while new enrollment is closed.
-The paid feed can take up to the configured Clerk cache lifetime to reflect
-the update.
+later cancellations. Regular subscriber access requires a positive paid Stripe
+invoice with an exact recurring line for the configured price and subscription
+item. Access ends at the paid service boundary or an earlier verified cutoff.
+A renewal advances that boundary once the new paid service period starts.
+Provider-authorized trial access ends at its explicit trial cutoff.
+
+A signed-in subscriber can use **Refresh subscription status** on the account
+page if a renewal webhook is delayed. The refresh checks the existing Stripe
+account, customer, subscription, and billing evidence while enrollment is
+closed. The paid feed can take up to the configured Clerk cache lifetime to
+reflect the update.
 
 During the test-mode drill, complete Checkout with webhook delivery paused and
-confirm access on the return page. Simulate a missed cancellation across the
-stored period boundary and verify access expires. Simulate a renewal across
-the same boundary and verify the account refresh restores access. Resume
-webhook delivery and verify cancellation handling.
+confirm access on the return page. Keep a renewal invoice unpaid and verify
+access expires at the previous paid boundary. Pay the renewal and verify the
+account refresh restores access. Resume webhook delivery and verify the
+cancellation cutoff.
 [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment?ui=full-page) ·
 [Stripe subscription webhook guidance](https://docs.stripe.com/billing/subscriptions/webhooks#track-active-subscriptions)
 
