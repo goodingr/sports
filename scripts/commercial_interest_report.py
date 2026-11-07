@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Iterable, Iterator, Sequence, Set
 from datetime import datetime, timezone
@@ -72,6 +73,19 @@ def _read_clerk_key(dotenv_path: Path | None, expected_mode: str) -> str:
     return secret_key
 
 
+def _read_qualified_user_ids(path: Path) -> set[str]:
+    try:
+        user_ids = {line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines()}
+    except (OSError, ValueError):
+        raise ReportError("Qualified user ID file could not be read.") from None
+    user_ids.discard("")
+    if not user_ids or any(
+        not re.fullmatch(r"user_[A-Za-z0-9_-]+", user_id) for user_id in user_ids
+    ):
+        raise ReportError("Qualified user ID file must contain one Clerk user ID per nonblank line.")
+    return user_ids
+
+
 def fetch_users(secret_key: str) -> Iterator[dict[str, Any]]:
     """Page through the Clerk REST API in ascending creation order."""
     with requests.Session() as session:
@@ -106,15 +120,22 @@ def fetch_users(secret_key: str) -> Iterator[dict[str, Any]]:
             offset += len(users)
 
 
+def _totals(by_source: dict[str, dict[str, int]]) -> dict[str, int]:
+    return {metric: sum(row[metric] for row in by_source.values()) for metric in METRICS}
+
+
 def build_report(
     users: Iterable[dict[str, Any]],
     *,
     viewed_from: datetime | None = None,
     viewed_before: datetime | None = None,
     exclude_user_ids: Set[str] = frozenset(),
+    qualified_user_ids: Set[str] | None = None,
 ) -> dict[str, Any]:
     """Aggregate current states for an optional half-open cohort of first views."""
     by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
+    qualified_by_source = {source: dict.fromkeys(METRICS, 0) for source in SOURCES}
+    eligible_ids = qualified_user_ids - exclude_user_ids if qualified_user_ids is not None else None
     seen: set[str] = set()
     invalid_offer_records = 0
     for user in users:
@@ -152,25 +173,36 @@ def build_report(
             invalid_offer_records += 1
             continue
 
-        counts = by_source[source]
-        counts["viewed"] += 1
         if withdrawn_at is not None:
-            counts["withdrawn"] += 1
+            state = "withdrawn"
         elif joined_at is not None:
-            counts["active"] += 1
+            state = "active"
         else:
-            counts["never_opted_in"] += 1
+            state = "never_opted_in"
+        by_source[source]["viewed"] += 1
+        by_source[source][state] += 1
+        if eligible_ids is not None and user_id in eligible_ids:
+            qualified_by_source[source]["viewed"] += 1
+            qualified_by_source[source][state] += 1
 
-    return {
+    result: dict[str, Any] = {
         "offer_version": OFFER_VERSION,
         "population": "signed_in_price_offer_viewers",
         "observed_at_utc": datetime.now(timezone.utc).isoformat(),
         "viewed_from": viewed_from.isoformat() if viewed_from else None,
         "viewed_before": viewed_before.isoformat() if viewed_before else None,
-        "totals": {metric: sum(row[metric] for row in by_source.values()) for metric in METRICS},
+        "totals": _totals(by_source),
         "by_source": by_source,
         "invalid_offer_records": invalid_offer_records,
     }
+    if eligible_ids is not None:
+        result["qualified_cohort"] = {
+            "eligible_roster_accounts": len(eligible_ids),
+            "matched_accounts": len(seen & eligible_ids),
+            "totals": _totals(qualified_by_source),
+            "by_source": qualified_by_source,
+        }
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -191,6 +223,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--viewed-before", type=_cohort_timestamp, help="exclusive first-view timestamp"
     )
     parser.add_argument(
+        "--qualified-user-ids-file",
+        type=Path,
+        help="private UTF-8 file containing one screened Clerk user ID per nonblank line",
+    )
+    parser.add_argument(
         "--exclude-user-id", action="append", default=[], help="omit a team or test user"
     )
     args = parser.parse_args(argv)
@@ -198,12 +235,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--viewed-from must be earlier than --viewed-before")
 
     try:
+        qualified_user_ids = (
+            _read_qualified_user_ids(args.qualified_user_ids_file)
+            if args.qualified_user_ids_file is not None
+            else None
+        )
         secret_key = _read_clerk_key(args.dotenv, args.expected_mode)
         report = build_report(
             fetch_users(secret_key),
             viewed_from=args.viewed_from,
             viewed_before=args.viewed_before,
             exclude_user_ids=set(args.exclude_user_id),
+            qualified_user_ids=qualified_user_ids,
         )
     except ReportError as exc:
         print(exc, file=sys.stderr)

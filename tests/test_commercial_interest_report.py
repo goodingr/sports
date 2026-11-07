@@ -52,6 +52,7 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
     )
 
     assert result["population"] == "signed_in_price_offer_viewers"
+    assert "qualified_cohort" not in result
     assert result["totals"] == {"viewed": 3, "active": 1, "withdrawn": 1, "never_opted_in": 1}
     assert result["by_source"]["community"] == {
         "viewed": 2,
@@ -61,6 +62,7 @@ def test_aggregates_current_states_for_unique_users_in_first_view_cohort():
     }
     assert result["by_source"]["email"]["viewed"] == 0
     assert result["invalid_offer_records"] == 2
+    assert "qualified_cohort" not in result
     serialized = json.dumps(result)
     assert "private@example.test" not in serialized
     assert "arbitrary account data" not in serialized
@@ -88,6 +90,83 @@ def test_cli_paginates_and_prints_only_aggregates(monkeypatch, capsys):
     assert json.loads(output.out)["totals"]["active"] == 1
     assert [call.kwargs["params"]["offset"] for call in session.get.call_args_list] == [0, 2]
     assert all(call.args[0] == report.CLERK_USERS_URL for call in session.get.call_args_list)
+
+
+def test_cli_reports_screened_accounts_separately_from_raw_exposure(monkeypatch, capsys, tmp_path):
+    roster = tmp_path / "private roster.txt"
+    roster.write_text(
+        "user_screened\nuser_screened\n\n user_withdrawn \nuser_excluded\n"
+        "user_outside\nuser_missing\n",
+        encoding="utf-8-sig",
+    )
+    screened = user("user_screened", source="referral", joined=JOIN)
+    monkeypatch.setattr(report, "_read_clerk_key", lambda *_: "sk_live_mock-secret")
+    monkeypatch.setattr(
+        report,
+        "fetch_users",
+        lambda _: iter(
+            [
+                screened,
+                screened,
+                user("user_unscreened", source="referral", joined=JOIN),
+                user("user_withdrawn", source="referral", joined=JOIN, withdrawn=WITHDRAW),
+                user("user_excluded", source="referral", joined=JOIN),
+                user("user_outside", viewed="2026-10-31T23:59:59Z"),
+            ]
+        ),
+    )
+
+    assert report.main(
+        [
+            "--qualified-user-ids-file", str(roster),
+            "--viewed-from", FIRST_VIEW,
+            "--viewed-before", "2026-12-01T00:00:00Z",
+            "--exclude-user-id", "user_excluded",
+        ]
+    ) == 0
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["totals"] == {"viewed": 3, "active": 2, "withdrawn": 1, "never_opted_in": 0}
+    qualified = result["qualified_cohort"]
+    assert qualified["eligible_roster_accounts"] == 4
+    assert qualified["matched_accounts"] == 3
+    assert qualified["totals"] == {"viewed": 2, "active": 1, "withdrawn": 1, "never_opted_in": 0}
+    assert qualified["by_source"]["referral"] == qualified["totals"]
+    assert qualified["by_source"]["direct"]["viewed"] == 0
+    assert all(
+        private not in output.out
+        for private in ("user_screened", "user_unscreened", "user_missing", roster.name, "@example.test")
+    )
+    assert output.err == ""
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected_error"),
+    [
+        (None, "Qualified user ID file could not be read.\n"),
+        (b"\xff", "Qualified user ID file could not be read.\n"),
+        (b"\n  \n", "Qualified user ID file must contain one Clerk user ID per nonblank line.\n"),
+        (
+            b"user_screened\nprivate@example.test\n",
+            "Qualified user ID file must contain one Clerk user ID per nonblank line.\n",
+        ),
+    ],
+)
+def test_invalid_roster_fails_before_clerk_access(monkeypatch, capsys, tmp_path, contents, expected_error):
+    read_key = MagicMock()
+    fetch_users = MagicMock()
+    monkeypatch.setattr(report, "_read_clerk_key", read_key)
+    monkeypatch.setattr(report, "fetch_users", fetch_users)
+    roster = tmp_path / "private roster.txt"
+    if contents is not None:
+        roster.write_bytes(contents)
+
+    assert report.main(["--qualified-user-ids-file", str(roster)]) == 1
+    read_key.assert_not_called()
+    fetch_users.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == expected_error
 
 
 def test_failed_page_emits_no_partial_report_or_private_error(monkeypatch, capsys):

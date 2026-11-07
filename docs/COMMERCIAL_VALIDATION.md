@@ -43,6 +43,8 @@ For a first read, use a 30-day window with one offer version. Aim to show it to 
 
 Use the [interest report](../scripts/commercial_interest_report.py) with the Clerk credentials for the relevant instance. The command expects a live key by default and labels the report with its Clerk mode. Use `--expected-mode test` for development only. If you pass `--dotenv`, that file supplies the key independently of the shell. Pass the cohort start to `--viewed-from` and its end to `--viewed-before` as ISO timestamps with UTC offsets. Repeat `--exclude-user-id` for team and test accounts. The report returns current opt-in and withdrawal counts for the selected first-view cohort by source. It emits aggregate counts without customer records.
 
+For the screened audience totals, pass `--qualified-user-ids-file` with a private UTF-8 roster containing one screened Clerk user ID per nonblank line. Keep the roster outside the repository. Use the report's `qualified_cohort` counts for the visitor and opt-in targets. The top-level counts describe raw signed-in exposure, and source tags describe acquisition. The qualified section reports how many roster accounts remain eligible after exclusions, how many of those accounts were found in Clerk, and how many had valid offer records in the selected window. The report uses current opt-in and withdrawal status when it runs.
+
 ### Recruit the pilot
 
 Start with participants already confirmed to fit the intended bettor audience, using individually authorized invitations with `source=referral`. Community visits and builder feedback are raw exposure until the participants' fit is established. Keep them separate when judging the 200-visitor target.
