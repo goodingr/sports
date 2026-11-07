@@ -1,5 +1,6 @@
 import { Container } from "@/components/ui/Container";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { isPilotOnly } from "@/lib/pilot";
 
 export const metadata: Metadata = {
@@ -10,7 +11,8 @@ export const metadata: Metadata = {
 const LAST_UPDATED = "April 26, 2026";
 
 export default function PrivacyPage() {
-    const pilotContact = isPilotOnly() ? process.env.COMMERCIAL_PILOT_CONTACT_EMAIL : undefined;
+    const pilotOnly = isPilotOnly();
+    const pilotContact = pilotOnly ? process.env.COMMERCIAL_PILOT_CONTACT_EMAIL : undefined;
     const contactEmail = pilotContact || "privacy@sportsanalytics.example";
     return (
         <Container className="py-16 max-w-3xl">
@@ -41,11 +43,22 @@ export default function PrivacyPage() {
                             email, and authentication identifiers provided through our identity
                             provider (Clerk).
                         </li>
-                        <li>
-                            <strong className="text-foreground">Billing information:</strong> processed
-                            by our payment provider (Stripe). We do not store full card numbers on our
-                            servers.
-                        </li>
+                        {pilotOnly ? (
+                            <li id="pilot-data">
+                                <strong className="text-foreground">Pilot research.</strong> During
+                                enrollment, we store the offer version, first signed-in view time, and
+                                link source with your Clerk account. If you opt in, we record your
+                                interest and any withdrawal. We use your verified email for pilot
+                                research contact while your opt-in is active. You can withdraw on the{" "}
+                                <Link href="/interest" className="text-primary hover:underline">interest page</Link>.
+                            </li>
+                        ) : (
+                            <li>
+                                <strong className="text-foreground">Billing information:</strong> processed
+                                by our payment provider (Stripe). We do not store full card numbers on our
+                                servers.
+                            </li>
+                        )}
                         <li>
                             <strong className="text-foreground">Usage data:</strong> pages viewed,
                             features used, device and browser metadata, IP address, and approximate
@@ -62,7 +75,9 @@ export default function PrivacyPage() {
                     <h2 className="text-2xl font-bold text-foreground mb-3">3. How We Use Information</h2>
                     <ul className="list-disc pl-6 space-y-2">
                         <li>To operate, maintain, and improve the Service.</li>
-                        <li>To process subscriptions, payments, and refunds.</li>
+                        {pilotOnly
+                            ? <li>To measure interest in the proposed subscription.</li>
+                            : <li>To process subscriptions, payments, and refunds.</li>}
                         <li>To authenticate users and prevent fraud or abuse.</li>
                         <li>To communicate with you about your account or service updates.</li>
                         <li>To comply with legal obligations.</li>
@@ -83,9 +98,11 @@ export default function PrivacyPage() {
                     <p>We share information only with:</p>
                     <ul className="list-disc pl-6 space-y-2 mt-2">
                         <li>
-                            Service providers acting on our behalf (e.g., authentication, payment
-                            processing, hosting, analytics, email delivery), under contractual
-                            confidentiality obligations.
+                            Service providers acting on our behalf under contractual confidentiality
+                            obligations, including{" "}
+                            {pilotOnly
+                                ? "authentication, hosting, and email delivery."
+                                : "authentication, payment processing, hosting, analytics, and email delivery."}
                         </li>
                         <li>
                             Authorities or other parties when required by law, subpoena, or to protect

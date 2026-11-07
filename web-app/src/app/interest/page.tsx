@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Container } from "@/components/ui/Container";
+import { isPilotOnly } from "@/lib/pilot";
 import { InterestControls } from "./InterestControls";
 
 const SOURCES = new Set(["direct", "community", "referral", "email", "other"]);
@@ -58,6 +59,16 @@ export default async function InterestPage({ searchParams }: InterestPageProps) 
                         We count signed-in visits once to measure interest in the offer.
                         Recording interest is voluntary and free. It creates no subscription
                         or payment obligation. You can withdraw your interest on this page.
+                    </p>
+                )}
+                {isPilotOnly() && (
+                    <p className="text-sm text-muted-foreground">
+                        During enrollment, we record your first signed-in offer visit and link source
+                        with your Clerk account. We also record any opt-in or withdrawal. We email you
+                        for pilot research only while your opt-in is active.{" "}
+                        <Link href="/privacy#pilot-data" className="text-primary underline">
+                            Read how we use pilot data
+                        </Link>
                     </p>
                 )}
 

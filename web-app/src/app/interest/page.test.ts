@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import PrivacyPage from "../privacy/page";
 import InterestPage from "./page";
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
@@ -53,6 +54,25 @@ describe("commercial interest page", () => {
         expect(markup).toContain("We count signed-in visits once");
         expect(markup).toContain("Interest controls");
         expect(markup).not.toContain("Sign in to record interest");
+    });
+
+    it("discloses stored research data before the pilot signup link", async () => {
+        vi.stubEnv("COMMERCIAL_PILOT_ONLY", "true");
+        vi.stubEnv("COMMERCIAL_INTEREST_ENABLED", "true");
+        vi.stubEnv("COMMERCIAL_INTEREST_ENROLLMENT_CLOSED", "false");
+        vi.mocked(auth).mockResolvedValue({ userId: null } as Awaited<ReturnType<typeof auth>>);
+
+        const markup = renderToStaticMarkup(await InterestPage({ searchParams: Promise.resolve({}) }));
+
+        expect(markup).toContain("During enrollment, we record your first signed-in offer visit and link source");
+        expect(markup).toContain("We also record any opt-in or withdrawal");
+        expect(markup).toContain("only while your opt-in is active");
+        expect(markup).toMatch(/\/privacy#pilot-data.*Create an account/);
+        const privacy = renderToStaticMarkup(PrivacyPage());
+        expect(privacy).toContain('id="pilot-data"');
+        expect(privacy).toContain("first signed-in view time");
+        expect(privacy).toContain("while your opt-in is active");
+        expect(privacy).not.toContain("Billing information");
     });
 
     it("shows closed enrollment with a login to manage interest and no sign-up link", async () => {

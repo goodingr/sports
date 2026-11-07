@@ -12,8 +12,11 @@ test('the pilot entry preserves source attribution and serves legal contact page
     await expect(page.getByRole('link', { name: 'Sign in to record interest' })).toHaveAttribute(
         'href', '/login?redirect_url=%2Finterest%3Fsource%3Dreferral',
     );
-    await page.getByRole('link', { name: 'Privacy Policy' }).click();
+    await expect(page.getByText(/first signed-in offer visit and link source/)).toBeVisible();
+    await page.getByRole('link', { name: 'Read how we use pilot data' }).click();
+    await expect(page).toHaveURL(/\/privacy#pilot-data$/);
     await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
+    await expect(page.getByText(/first signed-in view time/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'pilot-contact@example.invalid' }).first()).toHaveAttribute(
         'href', 'mailto:pilot-contact@example.invalid',
     );
