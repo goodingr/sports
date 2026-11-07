@@ -10,6 +10,7 @@ from collections import Counter
 from contextlib import closing
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -17,7 +18,7 @@ import pandas as pd
 import requests
 
 from src.data.config import RAW_DATA_DIR, load_env
-from src.data.ingest_nba_events import retain_entry_probe
+from src.data.ingest_nba_events import _write_game_mapping, retain_entry_probe
 from src.data.ingest_odds import _request_metadata, write_snapshot
 from src.data.team_mappings import NBA_ALIASES
 from src.db.core import connect, resolve_db_path, store_odds_snapshot_game_starts
@@ -51,6 +52,9 @@ from src.predict.paper_settlement import (
     _valid_total_line,
 )
 from src.predict.storage import _apply_deterministic_odds
+
+if TYPE_CHECKING:
+    from src.predict.paper_entry_fallback import FallbackPlan
 
 LOGGER = logging.getLogger(__name__)
 _EASTERN = ZoneInfo("America/New_York")
@@ -178,12 +182,7 @@ def _plan(
     fresh = _fresh_quotes(conn, trial, due, now)
     if len(fresh) == len(due):
         return "reusable", due, fresh
-    if (
-        _has_table(conn, "paper_entry_requests")
-        and conn.execute(
-            "SELECT 1 FROM paper_entry_requests WHERE entry_date_et = ?", (local_day.isoformat(),)
-        ).fetchone()
-    ):
+    if _entry_slot_taken(conn, now):
         return "daily_cap", due, {}
     return "due", due, {}
 
@@ -267,14 +266,51 @@ def _fresh_quotes(
     return fresh
 
 
+def _entry_slot_taken(conn: sqlite3.Connection, now: datetime) -> bool:
+    day = now.astimezone(_EASTERN).date().isoformat()
+    return (
+        _has_table(conn, "paper_entry_requests")
+        and conn.execute(
+            "SELECT 1 FROM paper_entry_requests WHERE entry_date_et = ?", (day,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _plan_entry_path(
+    conn: sqlite3.Connection,
+    trial: PaperTrial,
+    now: datetime,
+    official: tuple[bytes, datetime] | None,
+) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, FallbackPlan | None]:
+    status, due, fresh = _plan(conn, trial, now)
+    if official is not None and status == "no_entry_due":
+        from src.predict.paper_entry_fallback import plan_missing_ids
+
+        if _entry_slot_taken(conn, now):
+            return "daily_cap", due, fresh, None
+        raw, observed_at = official
+        status, window = plan_missing_ids(conn, trial, raw, observed_at, now)
+        return status, due, fresh, window
+    return status, due, fresh, None
+
+
 def _reserve(
-    db_path: Path, trial: PaperTrial
-) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes]:
+    db_path: Path,
+    trial: PaperTrial,
+    official: tuple[bytes, datetime] | None = None,
+    free_events: list | None = None,
+) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, FallbackPlan | None]:
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
-        status, due, fresh = _plan(conn, trial, now)
-        if status == "due":
+        status, due, fresh, window = _plan_entry_path(conn, trial, now, official)
+        if window is not None:
+            from src.predict.paper_entry_fallback import classify_probe
+
+            if free_events is None or classify_probe(free_events, window) != "absent":
+                return "provider_probe_conflict", {}, {}, None
+        if status in {"due", "window_due"}:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS paper_entry_requests (
@@ -286,7 +322,7 @@ def _reserve(
                 "INSERT INTO paper_entry_requests VALUES (?, ?)",
                 (now.astimezone(_EASTERN).date().isoformat(), now.isoformat()),
             )
-        return status, due, fresh
+        return status, due, fresh, window
 
 
 def _moneyline_pair(event: dict, book_key: str) -> tuple[float, float] | None:
@@ -322,6 +358,24 @@ def _moneyline_pair(event: dict, book_key: str) -> tuple[float, float] | None:
     return prices[home], prices[away]
 
 
+def _valid_window_market_clocks(event: dict, book_key: str, fetched: datetime) -> bool:
+    book = next(
+        book
+        for book in event["bookmakers"]
+        if isinstance(book, dict) and book.get("key") == book_key
+    )
+    for market in book["markets"]:
+        if (
+            isinstance(market, dict)
+            and market.get("key") in ("h2h", "totals")
+            and "last_update" in market
+        ):
+            updated = _utc_timestamp(market["last_update"])
+            if updated is None or updated > fetched:
+                return False
+    return True
+
+
 def _append_entry_quotes(
     db_path: Path,
     trial: PaperTrial,
@@ -330,13 +384,10 @@ def _append_entry_quotes(
     fetched_at: datetime,
     snapshot_id: str,
     raw_path: Path,
-) -> dict[str, datetime]:
-    requested = [
-        event
-        for event in payload
-        if isinstance(event, dict) and isinstance(event.get("id"), str) and event["id"] in due
-    ]
-    counts = Counter(event["id"] for event in requested)
+    window: FallbackPlan | None = None,
+) -> tuple[dict[str, _ClosingFixture], dict[str, datetime]]:
+    if window is not None and due:
+        raise RuntimeError("An official NBA entry window cannot be combined with a targeted batch")
     quoted = {}
     rows = []
     provider_starts = {}
@@ -345,28 +396,71 @@ def _append_entry_quotes(
     daily_capture = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
+        matches = {}
+        if window is not None:
+            from src.predict.paper_entry_fallback import match_window_fixtures
+
+            books = conn.execute(
+                "SELECT book_id FROM books WHERE lower(name) = ? LIMIT 2", (trial.book,)
+            ).fetchall()
+            if len(books) != 1:
+                return {}, {}
+            matches = match_window_fixtures(
+                conn, trial, window, payload, fetched_at, books[0]["book_id"]
+            )
+        candidates = (
+            {event_id: match.fixture for event_id, match in matches.items()} if window else due
+        )
+        requested = [
+            event
+            for event in payload
+            if isinstance(event, dict)
+            and isinstance(event.get("id"), str)
+            and event["id"] in candidates
+        ]
+        counts = Counter(event["id"] for event in requested)
         for event in requested:
-            if counts[event["id"]] != 1:
+            event_id = event["id"]
+            if counts[event_id] != 1:
                 continue
-            fixture = due[event["id"]]
+            fixture = candidates[event_id]
+            match = matches.get(event_id)
             totals = _totals_pair(event)
-            if totals is None or not _matches_fixture(conn, event, fixture, fetched_at):
-                continue
-            game = _eligible_game(conn, fixture.game_id, trial.league)
-            if game is None:
-                continue
-            moneyline = _moneyline_pair(event, trial.book)
             provider_start = _utc_timestamp(event.get("commence_time"))
-            current_start = _utc_timestamp(game["start_time_utc"])
-            if moneyline is None or provider_start is None or current_start is None:
+            if totals is None or provider_start is None:
                 continue
-            earliest_start = min(fixture.start, provider_start, current_start)
-            latest_start = max(provider_start, current_start)
+            if match is None:
+                if not _matches_fixture(conn, event, fixture, fetched_at):
+                    continue
+                game = _eligible_game(conn, fixture.game_id, trial.league)
+                current_start = _utc_timestamp(game["start_time_utc"]) if game is not None else None
+                if current_start is None:
+                    continue
+                earliest_start = min(fixture.start, provider_start, current_start)
+                latest_start = max(provider_start, current_start)
+            else:
+                earliest_start, latest_start = fixture.start, fixture.latest_start
+            moneyline = _moneyline_pair(event, trial.book)
             if (
-                earliest_start - fetched_at < minimum_lead
+                moneyline is None
+                or earliest_start - fetched_at < minimum_lead
                 or latest_start - minimum_lead >= daily_capture
             ):
                 continue
+            if match is not None:
+                if not _valid_window_market_clocks(event, trial.book, fetched_at):
+                    continue
+                if match.action is not None:
+                    _write_game_mapping(
+                        conn,
+                        match.provider,
+                        fixture.sport_id,
+                        fixture.game_id,
+                        (fixture.home_team_id, fixture.away_team_id),
+                        fetched_at,
+                        create=match.action == "created",
+                    )
+                due[event_id] = fixture
             line, over, under = totals
             home, away = moneyline
             quoted[fixture.game_id] = earliest_start
@@ -430,7 +524,7 @@ def _append_entry_quotes(
                 """,
                 [(snapshot_id, game_id, start.isoformat()) for game_id, start in quoted.items()],
             )
-    return quoted
+    return due, quoted
 
 
 def _capture(
@@ -482,7 +576,9 @@ def _capture(
     return counts.get("recorded", 0)
 
 
-def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str, str | int]:
+def poll_entry(
+    *, collect: bool = False, rules: Path | None = None, official_window_fallback: bool = False
+) -> dict[str, str | int]:
     load_env()
     trial = load_trial(rules if rules is not None else DEFAULT_RULES)
     path = resolve_db_path().resolve()
@@ -491,25 +587,69 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
     with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN")
-        status, due, fresh = _plan(conn, trial, datetime.now(timezone.utc))
-    result: dict[str, str | int] = {"status": status, "due_events": len(due)}
-    if not collect or status not in {"due", "reusable"}:
+        now = datetime.now(timezone.utc)
+        status, due, fresh = _plan(conn, trial, now)
+        if (
+            collect
+            and official_window_fallback
+            and status == "no_entry_due"
+            and _entry_slot_taken(conn, now)
+        ):
+            status = "daily_cap"
+    official = None
+    window = None
+    if collect and official_window_fallback and status == "no_entry_due":
+        from src.predict.paper_entry_fallback import fetch_official_slate
+
+        official = fetch_official_slate(now.astimezone(_EASTERN).date())
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            status, due, fresh, window = _plan_entry_path(
+                conn, trial, datetime.now(timezone.utc), official
+            )
+    result: dict[str, str | int] = {
+        "status": status,
+        "due_events": len(window.targets) if window else len(due),
+    }
+    if not collect or status not in {"due", "reusable", "window_due"}:
         return result
 
     engine = PredictionEngine(model_type=trial.model_type)
     engine.load_pinned_totals(trial.league, trial.model_sha256)
     key = None
-    if status == "due":
+    probe_evidence = None
+    probe_payload = None
+    if status in {"due", "window_due"}:
         probe: list[requests.Response] = []
         key = _budgeted_key(request_credits=_REQUEST_CREDITS, on_free_events=probe.append)
         if key is None:
             return {**result, "status": "quota_reserve"}
+        if window is not None and not probe:
+            return {**result, "status": "unverified_zero_credit_probe"}
         if probe:
             fetched = datetime.now(timezone.utc)
+            if window is not None:
+                try:
+                    probe_payload = probe[0].json()
+                except ValueError:
+                    probe_payload = None
+                if not isinstance(probe_payload, list):
+                    return {**result, "status": "invalid_zero_credit_probe"}
+                from src.predict.paper_entry_fallback import classify_probe
+
+                if classify_probe(probe_payload, window) == "conflict":
+                    return {**result, "status": "provider_probe_conflict"}
+                probe_evidence = {
+                    "url": f"{_BASE_URL}/events",
+                    "observed_at": fetched.isoformat(),
+                    "request_credits": 0,
+                    "results": probe_payload,
+                }
             local_day = fetched.astimezone(_EASTERN).date()
             evening = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
             minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
-            window = (
+            probe_window = (
                 fetched + minimum_lead,
                 min(
                     fetched + timedelta(hours=trial.max_hours_before_start),
@@ -518,25 +658,29 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
             )
             if fetched < evening:
                 try:
-                    counts = retain_entry_probe(path, probe[0], fetched, window)
+                    counts = retain_entry_probe(path, probe[0], fetched, probe_window)
                     if counts and (counts["linked"] or counts["created"]):
                         LOGGER.info("NBA entry quota probe discovered fixtures: %s", counts)
                 except (RuntimeError, OSError, sqlite3.Error):
                     LOGGER.warning("Could not retain the optional NBA entry event response")
-        status, due, fresh = _reserve(path, trial)
-        result.update(status=status, due_events=len(due))
+                    if window is not None:
+                        return {**result, "status": "zero_credit_probe_retention_failed"}
+        status, due, fresh, window = _reserve(path, trial, official, probe_payload)
+        result.update(status=status, due_events=len(window.targets) if window else len(due))
     if status == "reusable":
         quoted = {game_id: start for game_id, (_, start) in fresh.items()}
         snapshots = {game_id: snapshot_id for game_id, (snapshot_id, _) in fresh.items()}
         recorded = _capture(path, trial, engine, due, quoted, snapshots)
         return {**result, "status": "reused", "decisions_recorded": recorded}
-    if status != "due":
+    if status not in {"due", "window_due"}:
         return result
     assert key is not None
-    if (
-        datetime.now(timezone.utc).astimezone(_EASTERN).date()
-        != next(iter(due.values())).start.astimezone(_EASTERN).date()
-    ):
+    entry_day = (
+        window.eastern_date
+        if window
+        else next(iter(due.values())).start.astimezone(_EASTERN).date()
+    )
+    if datetime.now(timezone.utc).astimezone(_EASTERN).date() != entry_day:
         return {**result, "status": "entry_date_changed"}
 
     params = {
@@ -544,9 +688,13 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
         "regions": "us",
         "markets": _ENTRY_MARKETS,
         "bookmakers": trial.book,
-        "eventIds": ",".join(sorted(due)),
         "oddsFormat": "american",
     }
+    if window is not None:
+        params.update(window.odds_window())
+        result["mode"] = "official_window"
+    else:
+        params["eventIds"] = ",".join(sorted(due))
     response = _provider_get("odds", params)
     fetched_at = datetime.now(timezone.utc)
     try:
@@ -557,23 +705,32 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
         raise RuntimeError("Odds API returned an unexpected entry odds response")
 
     snapshot_id = str(uuid4())
+    directory = RAW_DATA_DIR / "odds" / _SPORT / "paper_entry" / snapshot_id
+    archive = {
+        "source": trial.odds_source,
+        "fetched_at": fetched_at.isoformat(),
+        "request": _request_metadata(f"{_BASE_URL}/odds", params),
+        "results": payload,
+        "rate_limit_remaining": response.headers.get("x-requests-remaining"),
+        "rate_limit_reset": response.headers.get("x-requests-reset"),
+    }
     try:
-        raw_path = write_snapshot(
-            {
-                "source": trial.odds_source,
-                "fetched_at": fetched_at.isoformat(),
-                "request": _request_metadata(f"{_BASE_URL}/odds", params),
-                "results": payload,
-                "rate_limit_remaining": response.headers.get("x-requests-remaining"),
-                "rate_limit_reset": response.headers.get("x-requests-reset"),
-            },
-            RAW_DATA_DIR / "odds" / _SPORT / "paper_entry" / snapshot_id,
-        )
+        if window is not None:
+            from src.predict.paper_entry_fallback import archive_official_slate
+
+            assert official is not None and probe_evidence is not None
+            archive["official_schedule"] = archive_official_slate(directory, official[0], window)
+            archive["provider_events_probe"] = probe_evidence
+        raw_path = write_snapshot(archive, directory)
     except OSError as exc:
         raise RuntimeError("Could not archive the entry odds response") from exc
-    quoted = _append_entry_quotes(path, trial, payload, due, fetched_at, snapshot_id, raw_path)
+    due, quoted = _append_entry_quotes(
+        path, trial, payload, due, fetched_at, snapshot_id, raw_path, window
+    )
 
-    recorded = _capture(path, trial, engine, due, quoted, dict.fromkeys(quoted, snapshot_id))
+    recorded = (
+        _capture(path, trial, engine, due, quoted, dict.fromkeys(quoted, snapshot_id)) if due else 0
+    )
     return {
         **result,
         "status": "collected" if quoted else "no_entry_quotes",
@@ -586,10 +743,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--collect", action="store_true", help="Allow one paid odds request if due")
     parser.add_argument("--paper-rules", type=Path, default=DEFAULT_RULES)
+    parser.add_argument(
+        "--official-window-fallback",
+        action="store_true",
+        help="Use the same entry slot for a verified official slate when provider IDs are missing",
+    )
     args = parser.parse_args()
+    if args.official_window_fallback and not args.collect:
+        parser.error("--official-window-fallback requires --collect")
     logging.basicConfig(level=logging.INFO)
     try:
-        result = poll_entry(collect=args.collect, rules=args.paper_rules)
+        result = poll_entry(
+            collect=args.collect,
+            rules=args.paper_rules,
+            official_window_fallback=args.official_window_fallback,
+        )
     except (RuntimeError, ValueError) as exc:
         parser.exit(1, f"{exc}\n")
     print(json.dumps(result))

@@ -104,31 +104,35 @@ def _reserve(path: Path, *, source: str = _SOURCE) -> tuple[str, int, datetime] 
         return run_id, source_id, now
 
 
+def _parse_event(row: object) -> _Event | None:
+    if not isinstance(row, dict) or row.get("sport_key") != _SPORT:
+        return None
+    event_id, home, away = row.get("id"), row.get("home_team"), row.get("away_team")
+    start = _utc(row.get("commence_time"))
+    if (
+        not isinstance(event_id, str)
+        or not _EVENT_ID.fullmatch(event_id)
+        or not isinstance(home, str)
+        or not isinstance(away, str)
+        or start is None
+    ):
+        return None
+    home_code = NBA_ALIASES.get(home.strip().lower())
+    away_code = NBA_ALIASES.get(away.strip().lower())
+    if home_code is None or away_code is None or home_code == away_code:
+        return None
+    return _Event(event_id, home, away, home_code, away_code, start)
+
+
 def _eligible_events(payload: list, fetched: datetime, cutoff: datetime) -> list[_Event]:
     ids = Counter(
         row["id"] for row in payload if isinstance(row, dict) and isinstance(row.get("id"), str)
     )
     pairings: dict[frozenset[str], list[_Event]] = defaultdict(list)
     for row in payload:
-        if not isinstance(row, dict) or row.get("sport_key") != _SPORT:
-            continue
-        event_id, home, away = row.get("id"), row.get("home_team"), row.get("away_team")
-        start = _utc(row.get("commence_time"))
-        if (
-            not isinstance(event_id, str)
-            or not _EVENT_ID.fullmatch(event_id)
-            or not isinstance(home, str)
-            or not isinstance(away, str)
-            or start is None
-        ):
-            continue
-        home_code = NBA_ALIASES.get(home.strip().lower())
-        away_code = NBA_ALIASES.get(away.strip().lower())
-        if home_code is None or away_code is None or home_code == away_code:
-            continue
-        pairings[frozenset((home_code, away_code))].append(
-            _Event(event_id, home, away, home_code, away_code, start)
-        )
+        event = _parse_event(row)
+        if event is not None:
+            pairings[frozenset((event.home_code, event.away_code))].append(event)
     return [
         event
         for events in pairings.values()
@@ -247,7 +251,24 @@ def _link_event(
     ).rowcount
     if not inserted:
         return "skipped"
-    if action == "linked":
+    _write_game_mapping(
+        conn, event, sport_id, game_id, (home_id, away_id), fetched, create=action == "created"
+    )
+    return action
+
+
+def _write_game_mapping(
+    conn: sqlite3.Connection,
+    event: _Event,
+    sport_id: int,
+    game_id: str,
+    team_ids: tuple[int, int],
+    fetched: datetime,
+    *,
+    create: bool,
+) -> None:
+    """Persist a verified NBA event mapping inside the caller's transaction."""
+    if not create:
         conn.execute(
             "UPDATE games SET odds_api_id = ? WHERE game_id = ?", (event.event_id, game_id)
         )
@@ -263,14 +284,12 @@ def _link_event(
                 sport_id,
                 event.start.year,
                 event.start.isoformat(),
-                home_id,
-                away_id,
+                *team_ids,
                 event.event_id,
             ),
         )
         _ensure_odds_api_schedule_clock(conn)
         _advance_odds_api_schedule_clock(conn, game_id, _SPORT, fetched)
-    return action
 
 
 def _store(

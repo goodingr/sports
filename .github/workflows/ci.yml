@@ -20,6 +20,7 @@ env:
     src/predict/paper_approval.py
     src/predict/paper_close_poll.py
     src/predict/paper_coverage.py
+    src/predict/paper_entry_fallback.py
     src/predict/paper_entry_poll.py
     src/predict/paper_ledger.py
     src/predict/paper_report.py
@@ -56,6 +57,7 @@ env:
     src/predict/paper_approval.py
     src/predict/paper_close_poll.py
     src/predict/paper_coverage.py
+    src/predict/paper_entry_fallback.py
     src/predict/paper_entry_poll.py
     src/predict/paper_ledger.py
     src/predict/paper_report.py

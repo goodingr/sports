@@ -464,6 +464,25 @@ zero-credit events response to include newly listed games in the same early
 batch. This receipt has its own source key and does not reset the hourly
 discovery clock.
 
+If all eligible early games still lack provider IDs, an operator can run an
+official-schedule fallback when an eligible tipoff is 30 to under 45 minutes
+away. The ordinary entry path takes precedence. The fallback checks
+the official NBA slate and the provider's verified zero-credit event response.
+It uses the same one-request Eastern-date allowance and can spend up to two
+credits for a DraftKings odds window. An empty or failed request uses that
+day's allowance. [Odds endpoint and quota](https://the-odds-api.com/liveapi/guides/v4/#get-odds)
+
+```powershell
+poetry run python -m src.predict.paper_entry_poll --collect --official-window-fallback
+```
+
+The fallback requires the exact ordered matchup and compatible kickoff clocks.
+When the priced response is valid, it archives the official schedule, free
+event response, and odds receipt. Entry uses the earliest verified kickoff.
+Inspect the command output and raw receipt when it returns no usable quotes.
+Offline tests cover this path. Availability of priced games missing from the
+free feed is unverified.
+
 The standalone NBA schedule discovery command previews without contacting the
 provider. With `--collect`, it requests the next 48 hours from the schedule
 endpoint at most once per hour. It requires a zero-credit response, archives
