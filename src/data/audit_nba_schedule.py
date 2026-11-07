@@ -319,6 +319,7 @@ def _audit_rows(
                 "nba_home_team_id": fixture.home_id,
                 "nba_away_team_id": fixture.away_id,
                 "official_start_utc": fixture.start.isoformat(),
+                "warehouse_start_utc": matched_start.isoformat() if matched_start else None,
                 "decision_deadline_utc": cutoff.isoformat(),
                 "early_entry": cutoff < evening,
                 "deadline_passed": now > cutoff,

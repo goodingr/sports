@@ -112,6 +112,7 @@ def _saved_card(
                             [
                                 html.Th("Matchup"),
                                 html.Th("Official tipoff"),
+                                html.Th("Warehouse tipoff"),
                                 html.Th("Entry deadline"),
                                 html.Th("Provider evidence at audit"),
                             ]
@@ -123,6 +124,10 @@ def _saved_card(
                                 [
                                     html.Td(f"{row['away']} at {row['home']}"),
                                     html.Td(_time_text(_timestamp(row["official_start_utc"]))),
+                                    html.Td(
+                                        _time_text(_timestamp(row["warehouse_start_utc"]))
+                                        if row.get("warehouse_start_utc") else "—"
+                                    ),
                                     html.Td(_deadline_text(row, now)),
                                     html.Td(
                                         row["status"].replace("_", " ").capitalize()

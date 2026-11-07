@@ -192,6 +192,7 @@ def _schedule_report(*, audited_at=NOW, observed_at=NOW, linked=False):
             {
                 "away": "DEN", "home": "IND", "early_entry": True,
                 "official_start_utc": (NOW + timedelta(hours=21)).isoformat(),
+                "warehouse_start_utc": (NOW + timedelta(hours=21, minutes=10)).isoformat() if linked else None,
                 "decision_deadline_utc": (NOW + timedelta(hours=20, minutes=45)).isoformat(),
                 "warehouse_matched": linked, "provider_linked": linked,
                 "status": "linked" if linked else "missing_warehouse_fixture",
@@ -232,7 +233,7 @@ def test_schedule_panel_marks_elapsed_deadline_without_updating_saved_evidence(t
 
 
 def test_schedule_panel_checks_archived_official_response(tmp_path):
-    report = _schedule_report()
+    report = _schedule_report(linked=True)
     raw = b"official schedule fixture"
     digest = hashlib.sha256(raw).hexdigest()
     relative = f"raw/schedules/nba/{report['eastern_date']}/{digest}.body"
@@ -246,6 +247,8 @@ def test_schedule_panel_checks_archived_official_response(tmp_path):
 
     text = _text(dashboard.schedule_coverage_cards(audit_dir, NOW, data_dir=data_dir))
     assert "Official response checksum verified." in text
+    assert "Warehouse tipoff" in text
+    assert "Nov 07, 08:00 PM EST Nov 07, 08:10 PM EST" in text
     archive.write_bytes(b"different input")
     text = _text(dashboard.schedule_coverage_cards(audit_dir, NOW, data_dir=data_dir))
     assert "Archived official response is unavailable or invalid." in text

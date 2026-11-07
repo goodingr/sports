@@ -221,6 +221,7 @@ def test_offline_cli_distinguishes_linked_late_missing_and_ambiguous(
     assert result["official_source"]["sha256"] == hashlib.sha256(official.read_bytes()).hexdigest()
     assert result["warehouse_audited_at_utc"] == NOW.isoformat()
     rows = {row["nba_game_id"]: row for row in result["fixtures"]}
+    assert rows[_game_id(1)]["warehouse_start_utc"] == (start + timedelta(minutes=10)).isoformat()
     assert rows[_game_id(1)]["first_retained_provider_observation_utc"] == verified_at.isoformat()
     assert rows[_game_id(1)]["first_retained_provider_observation_path"] == str(archived)
     assert rows[_game_id(2)]["provider_observed_by_deadline"] is False
