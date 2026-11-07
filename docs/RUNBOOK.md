@@ -206,10 +206,12 @@ poetry run python -m scripts.paper_capture_health
 ```
 
 The check reads the local archive and ledger. It treats a completed evaluation
-with all quotes below the threshold as healthy. It also checks the schedules
-retained by the trial through the receipt time. Any known in-window fixture
-missing from the eligible receipt or with unresolved fixture identity makes
-the check incomplete. The JSON reports those internal fixture IDs.
+with all quotes below the threshold as healthy when the run matches the exact
+daily odds receipt. If a later attempt used other evidence or failed, the JSON
+reports its time and status separately from the verified daily capture. The
+check also examines the schedules retained by the trial through the receipt
+time. A known in-window fixture missing from the receipt or with unresolved
+identity makes the check incomplete and appears in the JSON by internal ID.
 Exit `2` indicates an empty slate without known eligible fixtures to verify.
 Exit `1` indicates missing, invalid, or incomplete evidence.
 The entry and closing collectors can both succeed on the same day without

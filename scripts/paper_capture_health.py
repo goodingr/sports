@@ -240,29 +240,26 @@ def assess_capture_health(
             runs.append((observed, row["run_id"], row["status"]))
     if not runs:
         return {**base, "status": "capture_missing"}
-    captured, run_id, status = max(runs)
-    base.update(capture_at=captured.isoformat(), eligible_fixtures=len(receipt.eligible_events))
-    if status == "failed":
-        return {**base, "status": "capture_failed"}
-    if not receipt.eligible_events and not known_gap:
-        return {**base, "status": "empty_slate_unverified"}
+    runs.sort(reverse=True)
+    latest = runs[0]
 
-    evaluated = {}
+    evaluated_by_run: dict[str, dict[str, str]] = defaultdict(dict)
+    markers = ", ".join("?" for _ in runs)
     for row in conn.execute(
-        """
-        SELECT g.odds_api_id, o.outcome, s.source, s.fetched_at_utc, s.raw_path
+        f"""
+        SELECT o.run_id, g.odds_api_id, o.outcome, s.source, s.fetched_at_utc, s.raw_path
         FROM paper_fixture_observations o
         JOIN games g ON g.game_id = o.game_id
         JOIN sports sport ON sport.sport_id = g.sport_id AND sport.league = ?
         LEFT JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id AND s.sport_id = g.sport_id
-        WHERE o.run_id = ?
+        WHERE o.run_id IN ({markers})
           AND NOT EXISTS (
               SELECT 1 FROM games other
               WHERE other.sport_id = g.sport_id AND other.odds_api_id = g.odds_api_id
                 AND other.game_id <> g.game_id
           )
         """,
-        (trial.league, run_id),
+        (trial.league, *(run_id for _, run_id, _ in runs)),
     ):
         if (
             row["odds_api_id"] in receipt.eligible_events
@@ -272,7 +269,29 @@ def assess_capture_health(
             and isinstance(row["raw_path"], str)
             and row["raw_path"].replace("\\", "/").rsplit("/", 1)[-1] == receipt.path.name
         ):
-            evaluated[row["odds_api_id"]] = row["outcome"]
+            evaluated_by_run[row["run_id"]][row["odds_api_id"]] = row["outcome"]
+
+    selected = latest
+    if receipt.eligible_events and not known_gap:
+        # Supplemental or manual captures can run during the same grace window.
+        selected = next(
+            (
+                run
+                for run in runs
+                if run[2] == "evaluated" and evaluated_by_run[run[1]].keys() == receipt.eligible_events
+            ),
+            latest,
+        )
+    captured, run_id, status = selected
+    base.update(capture_at=captured.isoformat(), eligible_fixtures=len(receipt.eligible_events))
+    if selected != latest:
+        base.update(latest_attempt_at=latest[0].isoformat(), latest_attempt_status=latest[2])
+    if status == "failed":
+        return {**base, "status": "capture_failed"}
+    if not receipt.eligible_events and not known_gap:
+        return {**base, "status": "empty_slate_unverified"}
+
+    evaluated = evaluated_by_run[run_id]
     base.update(
         evaluated_fixtures=len(evaluated),
         below_edge_fixtures=sum(outcome == "below_edge_threshold" for outcome in evaluated.values()),

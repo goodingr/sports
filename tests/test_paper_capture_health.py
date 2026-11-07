@@ -89,22 +89,58 @@ def _run(warehouse, *, at=CAPTURED, status="evaluated"):
 
 def _observe(
     warehouse, path, run_id, *, source="the-odds-api", fetched=FETCHED,
-    outcome="below_edge_threshold", filename=None,
+    outcome="below_edge_threshold", filename=None, snapshot_id="observed", game_id="game",
 ):
     conn, _ = warehouse
     conn.execute(
-        "INSERT INTO odds_snapshots VALUES ('observed', 1, ?, ?, ?)",
-        (source, fetched.isoformat(), rf"C:\original\archive\{filename or path.name}"),
+        "INSERT INTO odds_snapshots VALUES (?, 1, ?, ?, ?)",
+        (snapshot_id, source, fetched.isoformat(), rf"C:\original\archive\{filename or path.name}"),
     )
     conn.execute(
-        "INSERT INTO paper_fixture_observations VALUES (?, 'game', ?, 'observed')",
-        (run_id, outcome),
+        "INSERT INTO paper_fixture_observations VALUES (?, ?, ?, ?)",
+        (run_id, game_id, outcome, snapshot_id),
     )
 
 
 def _assess(warehouse, raw_dir, *, now=AFTER_GRACE, **kwargs):
     conn, trial = warehouse
     return assess_capture_health(conn, trial, raw_dir, now, **kwargs)
+
+
+@pytest.mark.parametrize("status", ["failed", "evaluated", "no_predictions"])
+def test_unrelated_later_run_cannot_hide_verified_daily_capture(warehouse, tmp_path, status):
+    path = _archive(tmp_path)
+    _observe(warehouse, path, _run(warehouse))
+    later_at = CAPTURED + timedelta(minutes=4)
+    later_id = _run(warehouse, at=later_at, status=status)
+    if status == "evaluated":
+        _observe(
+            warehouse, path, later_id, fetched=later_at - timedelta(seconds=2),
+            filename="paper_entry.json", snapshot_id="later",
+        )
+
+    result = _assess(warehouse, tmp_path)
+
+    assert result["status"] == "healthy"
+    assert datetime.fromisoformat(result["capture_at"]) == CAPTURED
+    assert datetime.fromisoformat(result["latest_attempt_at"]) == later_at
+    assert result["latest_attempt_status"] == status
+
+
+def test_two_partial_captures_do_not_prove_one_complete_daily_run(warehouse, tmp_path):
+    conn, _ = warehouse
+    conn.execute("INSERT INTO games VALUES ('other-game', 1, 'other-event', 3, 4)")
+    path = _archive(tmp_path, events=[_event(), _event(event_id="other-event")])
+    _observe(warehouse, path, _run(warehouse))
+    _observe(
+        warehouse, path, _run(warehouse, at=CAPTURED + timedelta(seconds=1)),
+        snapshot_id="second", game_id="other-game",
+    )
+
+    result = _assess(warehouse, tmp_path)
+
+    assert result["status"] == "capture_incomplete"
+    assert result["evaluated_fixtures"] == 1
 
 
 def test_first_daily_tick_waits_until_grace_elapses(warehouse, tmp_path):
