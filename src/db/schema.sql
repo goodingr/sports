@@ -171,6 +171,16 @@ CREATE TABLE IF NOT EXISTS predictions (
     over_implied_prob REAL,
     under_implied_prob REAL,
     predicted_total_points REAL,
+    selected_totals_snapshot_id TEXT,
+    selected_totals_book_id INTEGER,
+    selected_totals_book TEXT,
+    selected_totals_fetched_at TEXT,
+    selected_h2h_snapshot_id TEXT,
+    selected_h2h_book_id INTEGER,
+    selected_h2h_book TEXT,
+    selected_h2h_fetched_at TEXT,
+    moneyline_model_sha256 TEXT,
+    totals_model_sha256 TEXT,
     UNIQUE (game_id, model_type)
 );
 

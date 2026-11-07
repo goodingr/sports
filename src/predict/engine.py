@@ -2,28 +2,26 @@
 
 import hashlib
 import logging
+import math
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import math
 import joblib
 import numpy as np
 import pandas as pd
-from zoneinfo import ZoneInfo
 
 from src.data.team_mappings import normalize_team_code
 from src.models.feature_loader import FeatureLoader
-from src.predict.config import MODEL_REGISTRY_PATH, LEAGUE_SPORT_KEYS, SOCCER_LEAGUES
-from src.predict.storage import load_games_from_database, save_predictions
-
 from src.models.train import (
     FEATURE_COLUMNS,
-    CalibratedModel,
-    EnsembleModel,
-    ProbabilityCalibrator,
+    CalibratedModel,  # noqa: F401 - legacy serialized model classes
+    EnsembleModel,  # noqa: F401
+    ProbabilityCalibrator,  # noqa: F401
 )
+from src.predict.config import MODEL_REGISTRY_PATH
+from src.predict.storage import load_games_from_database, save_predictions
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,8 +72,6 @@ def _moneyline_to_decimal(value: float | int | None) -> Optional[float]:
 
 def _extract_moneyline_prices(game: Dict, league_upper: str, home_team: str, away_team: str) -> List[Tuple[float, float, Optional[float]]]:
     """Extract moneyline prices. For soccer, includes draw price as third element."""
-    prices: List[Tuple[float, float, Optional[float]]] = []
-    is_soccer = league_upper in SOCCER_LEAGUES
     
     # In the new system, 'game' comes from load_games_from_database which returns a DataFrame row or dict
     # But wait, load_games_from_database returns a DataFrame with 'home_moneyline', 'away_moneyline' columns.
@@ -111,6 +107,7 @@ class PredictionEngine:
         self.model = None
         self.feature_columns = None
         self.loader = None
+        self.moneyline_model_sha256 = None
         
         # Totals support
         self.totals_model = None
@@ -120,6 +117,9 @@ class PredictionEngine:
         
     def load_model(self, league: str, *, trace_totals: bool = False) -> bool:
         """Load the trained model for the specified league."""
+        self.model = None
+        self.feature_columns = None
+        self.moneyline_model_sha256 = None
         self.totals_model = None
         self.totals_std = None
         self.totals_features = None
@@ -143,7 +143,9 @@ class PredictionEngine:
                 return False
             
         try:
-            self.model = joblib.load(model_path)
+            model_bytes = model_path.read_bytes()
+            self.model = joblib.load(BytesIO(model_bytes))
+            self.moneyline_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
             LOGGER.info(f"Loaded {self.model_type} model for {league}")
             
             # Load feature columns from registry if possible
@@ -162,12 +164,9 @@ class PredictionEngine:
             totals_path = MODEL_REGISTRY_PATH / totals_filename
             if totals_path.exists():
                 try:
-                    if trace_totals:
-                        model_bytes = totals_path.read_bytes()
-                        bundle = joblib.load(BytesIO(model_bytes))
-                        self.totals_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
-                    else:
-                        bundle = joblib.load(totals_path)
+                    model_bytes = totals_path.read_bytes()
+                    bundle = joblib.load(BytesIO(model_bytes))
+                    self.totals_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
                     if isinstance(bundle, dict):
                         self.totals_model = bundle.get("regressor")
                         self.totals_std = bundle.get("residual_std", 5.0) # Default to 5.0 if missing
@@ -317,8 +316,10 @@ class PredictionEngine:
             under_ml = _safe_float(game_dict.get("under_moneyline"))
             
             def implied_prob(ml):
-                if ml is None or ml == 0: return np.nan
-                if ml > 0: return 100 / (ml + 100)
+                if ml is None or ml == 0:
+                    return np.nan
+                if ml > 0:
+                    return 100 / (ml + 100)
                 return -ml / (-ml + 100)
                 
             home_implied = implied_prob(home_ml)
@@ -492,11 +493,19 @@ class PredictionEngine:
                 output_cols.extend(["home_implied_prob", "away_implied_prob"])
                 
             final_df = X_df[output_cols].copy()
-            if trace_totals:
-                trace_columns = ["selected_totals_snapshot_id", "selected_totals_book_id"]
-                final_df = final_df.merge(
-                    games_df[["game_id", *trace_columns]], on="game_id", validate="one_to_one"
-                )
+            trace_columns = [
+                "selected_totals_snapshot_id", "selected_totals_book_id",
+                "selected_totals_book", "selected_totals_fetched_at",
+                "selected_h2h_snapshot_id", "selected_h2h_book_id",
+                "selected_h2h_book", "selected_h2h_fetched_at",
+            ]
+            final_df = final_df.merge(
+                games_df.reindex(columns=["game_id", *trace_columns]),
+                on="game_id",
+                validate="one_to_one",
+            )
+            final_df["moneyline_model_sha256"] = self.moneyline_model_sha256
+            final_df["totals_model_sha256"] = self.totals_model_sha256
             
             # Add metadata
             final_df["league"] = league

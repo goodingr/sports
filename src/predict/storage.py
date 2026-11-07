@@ -2,10 +2,12 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
-from src.db.core import connect
+
+from src.db.core import PREDICTION_METADATA_COLUMNS, connect, ensure_prediction_metadata_columns
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +37,8 @@ def _book_rank(book_name: Any) -> int:
 def _clean_value(value: Any) -> Any:
     if pd.isna(value):
         return None
+    if isinstance(value, datetime):
+        return value.isoformat()
     if hasattr(value, "item"):
         return value.item()
     return value
@@ -53,12 +57,6 @@ def _normalize_outcome(outcome: Any, home_team: str, away_team: str) -> str:
     return value
 
 
-def _ensure_predictions_columns(conn) -> None:
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(predictions)").fetchall()}
-    if "predicted_total_points" not in existing:
-        conn.execute("ALTER TABLE predictions ADD COLUMN predicted_total_points REAL")
-
-
 def _empty_game_odds_columns(games_df: pd.DataFrame) -> pd.DataFrame:
     games_df = games_df.copy()
     for column in [
@@ -69,9 +67,13 @@ def _empty_game_odds_columns(games_df: pd.DataFrame) -> pd.DataFrame:
         "under_moneyline",
         "spread_line",
         "selected_h2h_book",
+        "selected_h2h_snapshot_id",
+        "selected_h2h_book_id",
+        "selected_h2h_fetched_at",
         "selected_totals_book",
         "selected_totals_snapshot_id",
         "selected_totals_book_id",
+        "selected_totals_fetched_at",
         "selected_odds_fetched_at",
     ]:
         games_df[column] = None
@@ -84,7 +86,11 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
         return games_df
 
     odds_df = odds_df.copy()
-    odds_df["fetched_at_utc"] = pd.to_datetime(odds_df["fetched_at_utc"], utc=True, errors="coerce")
+    odds_df["fetched_at_utc"] = pd.to_datetime(
+        odds_df["fetched_at_utc"], format="mixed", utc=True, errors="coerce"
+    )
+    numeric_prices = pd.to_numeric(odds_df["price_american"], errors="coerce")
+    odds_df["_valid_price"] = np.isfinite(numeric_prices) & numeric_prices.abs().ge(100)
     odds_df["book_rank"] = odds_df["book_name"].map(_book_rank)
     odds_df["_sort_book"] = odds_df["book_name"].astype(str).str.lower()
     odds_df = odds_df.sort_values(
@@ -100,18 +106,33 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
         if game_odds.empty:
             continue
 
-        h2h_odds = game_odds[game_odds["market"] == "h2h"]
-        for _, odd in h2h_odds.iterrows():
-            side = _normalize_outcome(odd["outcome"], home_team, away_team)
-            if side == "home" and pd.isna(games_df.at[idx, "home_moneyline"]):
-                games_df.at[idx, "home_moneyline"] = _clean_value(odd["price_american"])
-                games_df.at[idx, "selected_h2h_book"] = _clean_value(odd["book_name"])
-            elif side == "away" and pd.isna(games_df.at[idx, "away_moneyline"]):
-                games_df.at[idx, "away_moneyline"] = _clean_value(odd["price_american"])
-                games_df.at[idx, "selected_h2h_book"] = _clean_value(odd["book_name"])
-            if pd.notna(games_df.at[idx, "home_moneyline"]) and pd.notna(games_df.at[idx, "away_moneyline"]):
-                games_df.at[idx, "selected_odds_fetched_at"] = odd["fetched_at_utc"].isoformat()
+        h2h_odds = game_odds[game_odds["market"] == "h2h"].copy()
+        h2h_odds["side"] = h2h_odds["outcome"].map(
+            lambda value: _normalize_outcome(value, home_team, away_team)
+        )
+        paired_h2h = h2h_odds[
+            h2h_odds["side"].isin(["home", "away"])
+            & h2h_odds["fetched_at_utc"].notna()
+            & h2h_odds["_valid_price"]
+        ]
+        for _, group in paired_h2h.groupby(["snapshot_id", "book_id"], sort=False):
+            if {"home", "away"} <= set(group["side"]):
+                home = group[group["side"] == "home"].iloc[0]
+                away = group[group["side"] == "away"].iloc[0]
+                games_df.at[idx, "home_moneyline"] = _clean_value(home["price_american"])
+                games_df.at[idx, "away_moneyline"] = _clean_value(away["price_american"])
+                games_df.at[idx, "selected_h2h_book"] = _clean_value(home["book_name"])
+                games_df.at[idx, "selected_h2h_snapshot_id"] = home["snapshot_id"]
+                games_df.at[idx, "selected_h2h_book_id"] = int(home["book_id"])
+                fetched_at = home["fetched_at_utc"].isoformat()
+                games_df.at[idx, "selected_h2h_fetched_at"] = fetched_at
+                games_df.at[idx, "selected_odds_fetched_at"] = fetched_at
                 break
+        else:
+            for _, odd in h2h_odds.iterrows():
+                side = odd["side"]
+                if side in {"home", "away"} and pd.isna(games_df.at[idx, f"{side}_moneyline"]):
+                    games_df.at[idx, f"{side}_moneyline"] = _clean_value(odd["price_american"])
 
         spread_odds = game_odds[game_odds["market"] == "spreads"]
         for _, odd in spread_odds.iterrows():
@@ -126,7 +147,12 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
         totals = game_odds[game_odds["market"] == "totals"].copy()
         if not totals.empty:
             totals["side"] = totals["outcome"].map(lambda value: _normalize_outcome(value, home_team, away_team))
-            paired_totals = totals[totals["side"].isin(["over", "under"]) & totals["line"].notna()]
+            paired_totals = totals[
+                totals["side"].isin(["over", "under"])
+                & totals["line"].notna()
+                & totals["_valid_price"]
+                & totals["fetched_at_utc"].notna()
+            ]
             selected_pair = None
             for (_, _, line_value), group in paired_totals.groupby(["snapshot_id", "book_id", "line"], sort=False):
                 sides = set(group["side"])
@@ -144,6 +170,7 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
                 games_df.at[idx, "selected_totals_book"] = _clean_value(over["book_name"])
                 games_df.at[idx, "selected_totals_snapshot_id"] = over["snapshot_id"]
                 games_df.at[idx, "selected_totals_book_id"] = int(over["book_id"])
+                games_df.at[idx, "selected_totals_fetched_at"] = over["fetched_at_utc"].isoformat()
             else:
                 for _, odd in totals.iterrows():
                     side = odd["side"]
@@ -271,6 +298,15 @@ def save_predictions(df: pd.DataFrame, model_type: str, timestamp: Optional[date
             "under_implied_prob": row.get("under_implied_prob"),
             "predicted_total_points": row.get("predicted_total_points"),
         }
+        record.update({column: row.get(column) for column in PREDICTION_METADATA_COLUMNS})
+        for market in ("totals", "h2h"):
+            quote_fields = [
+                f"selected_{market}_{suffix}"
+                for suffix in ("snapshot_id", "book_id", "fetched_at")
+            ]
+            if any(pd.isna(record[field]) for field in quote_fields):
+                for field in [*quote_fields, f"selected_{market}_book"]:
+                    record[field] = None
         records.append({key: _clean_value(value) for key, value in record.items()})
 
     if not records:
@@ -280,7 +316,7 @@ def save_predictions(df: pd.DataFrame, model_type: str, timestamp: Optional[date
     records = records_df.to_dict("records")
         
     with connect() as conn:
-        _ensure_predictions_columns(conn)
+        ensure_prediction_metadata_columns(conn)
         game_ids = [record["game_id"] for record in records]
         placeholders = ",".join("?" * len(game_ids))
         conn.execute(
@@ -295,14 +331,24 @@ def save_predictions(df: pd.DataFrame, model_type: str, timestamp: Optional[date
                 home_edge, away_edge, home_implied_prob, away_implied_prob,
                 total_line, over_prob, under_prob, over_moneyline, under_moneyline,
                 over_edge, under_edge, over_implied_prob, under_implied_prob,
-                predicted_total_points
+                predicted_total_points,
+                selected_totals_snapshot_id, selected_totals_book_id,
+                selected_totals_book, selected_totals_fetched_at,
+                selected_h2h_snapshot_id, selected_h2h_book_id,
+                selected_h2h_book, selected_h2h_fetched_at,
+                moneyline_model_sha256, totals_model_sha256
             ) VALUES (
                 :game_id, :model_type, :predicted_at, 
                 :home_prob, :away_prob, :home_moneyline, :away_moneyline, 
                 :home_edge, :away_edge, :home_implied_prob, :away_implied_prob,
                 :total_line, :over_prob, :under_prob, :over_moneyline, :under_moneyline,
                 :over_edge, :under_edge, :over_implied_prob, :under_implied_prob,
-                :predicted_total_points
+                :predicted_total_points,
+                :selected_totals_snapshot_id, :selected_totals_book_id,
+                :selected_totals_book, :selected_totals_fetched_at,
+                :selected_h2h_snapshot_id, :selected_h2h_book_id,
+                :selected_h2h_book, :selected_h2h_fetched_at,
+                :moneyline_model_sha256, :totals_model_sha256
             )
         """, records)
         
