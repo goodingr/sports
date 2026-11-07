@@ -1,4 +1,4 @@
-"""Publish subscriber-facing bets behind the historical quality gate."""
+"""Publish subscriber-facing bets after a completed prospective trial passes."""
 
 from __future__ import annotations
 

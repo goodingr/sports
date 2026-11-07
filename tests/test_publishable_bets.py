@@ -10,7 +10,12 @@ import yaml
 
 import src.predict.publishable_bets as publisher
 from src.models.prediction_quality import QualityGate
-from src.predict.paper_approval import paper_reviews, paper_rule_result, promote_paper_trial
+from src.predict.paper_approval import (
+    paper_reviews,
+    paper_rule_result,
+    promote_paper_trial,
+    rule_for_trial,
+)
 from src.predict.publishable_bets import lock_candidate_rule, promote_candidate_rule
 from src.predict.publishable_bets import main as publish_main
 
@@ -551,3 +556,41 @@ def test_paper_promotion_respects_current_stricter_launch_thresholds(tmp_path):
             "nba_totals_fixture", db_path, rules_path, QualityGate(min_roi=0.99),
             observed_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
         )
+
+
+@pytest.mark.parametrize("extra", [
+    {"min_moneyline": -110}, {"max_moneyline": -110},
+    {"locked_at": "2026-01-06T00:00:00+00:00"},
+    {"prediction_variant": "retuned"}, {"feature_variant": "retuned"},
+    {"feature_contract": "retuned"}, {"price_mode": "best_price"},
+    {"timing_bucket": "one_hour"}, {"future_filter": None},
+])
+def test_paper_approval_rejects_additional_strategy_fields(tmp_path, extra):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    assert paper_rule_result(canonical, review, QualityGate())["passes_launch_gate"]
+
+    result = paper_rule_result({**canonical, **extra}, review, QualityGate())
+
+    assert result["passes_launch_gate"] is False
+    assert result["launch_gate_failures"] == ["paper_trial_unrecognized_rule_fields"]
+    assert result["unrecognized_rule_fields"] == list(extra)
+
+
+def test_filtered_subset_cannot_inherit_the_full_trial_approval(tmp_path):
+    db_path = tmp_path / "paper.db"
+    _seed_paper_evidence(db_path)
+    review = paper_reviews(db_path, datetime(2026, 2, 1, tzinfo=timezone.utc))["nba_totals_fixture"]
+    canonical = rule_for_trial(review)
+    rows = pd.DataFrame({
+        "game_id": ["cheaper", "dearer"], "market": ["totals"] * 2,
+        "league": ["NBA"] * 2, "model_type": ["ensemble"] * 2,
+        "model_sha256": ["a" * 64] * 2, "edge": [0.1] * 2,
+        "moneyline": [-105, -115],
+    })
+    filtered = {**canonical, "max_moneyline": -110}
+    assert len(publisher.filter_bets_for_rule(rows, canonical)) == 2
+    assert publisher.filter_bets_for_rule(rows, filtered)["game_id"].tolist() == ["dearer"]
+    assert not paper_rule_result(filtered, review, QualityGate())["passes_launch_gate"]

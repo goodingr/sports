@@ -15,6 +15,8 @@ from src.models.prediction_quality import QualityGate, load_rules
 from src.predict.paper_ledger import PaperTrial
 from src.predict.paper_report import build_paper_report
 
+APPROVAL_METADATA_FIELDS = frozenset({"status", "approved_at", "evidence_cutoff"})
+
 
 def paper_reviews(db_path: Path, observed_at: datetime) -> dict[str, dict[str, Any]]:
     with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
@@ -54,6 +56,11 @@ def paper_rule_result(
         result["launch_gate_failures"] = ["paper_trial_evidence_missing"]
         return result
     expected = rule_for_trial(review)
+    unknown_fields = sorted(rule.keys() - expected.keys() - APPROVAL_METADATA_FIELDS)
+    if unknown_fields:
+        result["launch_gate_failures"] = ["paper_trial_unrecognized_rule_fields"]
+        result["unrecognized_rule_fields"] = unknown_fields
+        return result
     if any(rule.get(field) != value for field, value in expected.items()):
         result["launch_gate_failures"] = ["paper_trial_contract_mismatch"]
         return result
