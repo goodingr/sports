@@ -214,9 +214,21 @@ Keep Stripe's single-subscription setting enabled as a separate control.
 New Checkout sessions return to `/account` with the Stripe session ID. The
 signed-in account can confirm a paid session and recover access while webhook
 delivery is pending. The same reconciliation handles webhook updates, including
-later cancellations. During the test-mode drill, complete Checkout with webhook
-delivery paused, confirm access on the return page, then resume delivery and
-verify a cancellation removes access. [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment?ui=full-page)
+later cancellations. Stored access ends at the verified billing period
+boundary or an earlier applicable cancellation or trial end. A signed-in
+subscriber can use **Refresh billing status** on the account page if a
+renewal webhook is delayed. The refresh reads the existing Stripe account,
+customer, and subscription. It works while new enrollment is closed.
+The paid feed can take up to the configured Clerk cache lifetime to reflect
+the update.
+
+During the test-mode drill, complete Checkout with webhook delivery paused and
+confirm access on the return page. Simulate a missed cancellation across the
+stored period boundary and verify access expires. Simulate a renewal across
+the same boundary and verify the account refresh restores access. Resume
+webhook delivery and verify cancellation handling.
+[Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment?ui=full-page) ·
+[Stripe subscription webhook guidance](https://docs.stripe.com/billing/subscriptions/webhooks#track-active-subscriptions)
 
 ## Networking
 

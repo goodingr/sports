@@ -255,7 +255,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict[str, A
 
 
 def is_user_premium(user: Optional[dict[str, Any]]) -> bool:
-    """Require a Clerk entitlement bound to the current Stripe billing scope."""
+    """Require a current Clerk entitlement in the configured Stripe billing scope."""
 
     if not user:
         return False
@@ -264,6 +264,9 @@ def is_user_premium(user: Optional[dict[str, Any]]) -> bool:
     if metadata is None:
         metadata = user.get("publicMetadata")
     if not isinstance(metadata, dict) or metadata.get("is_premium") is not True:
+        return False
+    period_end = metadata.get("subscription_current_period_end")
+    if type(period_end) is not int or not time.time() < period_end <= (1 << 53) - 1:
         return False
 
     settings = get_settings()

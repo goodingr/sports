@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from src.api import auth
@@ -16,6 +18,7 @@ def scoped_premium_user(monkeypatch):
     return {
         "public_metadata": {
             "is_premium": True,
+            "subscription_current_period_end": int(time.time()) + 3600,
             "stripe_customer_id": "cus_current",
             "stripe_customer_account_id": scope.stripe_account_id,
             "stripe_customer_livemode": scope.stripe_livemode,

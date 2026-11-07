@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -326,6 +327,11 @@ def test_premium_history_excludes_unsettled_games(api_client, monkeypatch, scope
         ({"stripe_customer_account_id": "acct_old"}, {}),
         ({"stripe_customer_id": "malformed"}, {"customer_id": "malformed"}),
         ({"is_premium": 1}, {}),
+        ({"subscription_current_period_end": None}, {}),
+        ({"subscription_current_period_end": True}, {}),
+        ({"subscription_current_period_end": "4102444800"}, {}),
+        ({"subscription_current_period_end": 4102444800.5}, {}),
+        ({"subscription_current_period_end": 1 << 53}, {}),
         ({"stripe_customer_livemode": 1}, {}),
         ({}, {"livemode": 1}),
         ({"stripe_customer_livemode": "true"}, {"livemode": "true"}),
@@ -351,6 +357,33 @@ def test_stale_stripe_entitlements_never_unlock_paid_routes(
     assert body["data"][0]["is_locked"] is True
     _assert_no_locked_fields(body["data"][0])
     assert api_client.get("/api/bets/game/future-game/odds").status_code == 403
+
+
+def test_scoped_access_expires_at_period_end_and_accepts_verified_renewal(
+    api_client, monkeypatch, scoped_premium_user
+):
+    metadata = scoped_premium_user["public_metadata"]
+    period_end = metadata["subscription_current_period_end"]
+    now = period_end - 0.001
+    monkeypatch.setattr(auth, "time", SimpleNamespace(time=lambda: now))
+    app.dependency_overrides[get_current_user] = lambda: scoped_premium_user
+    monkeypatch.setattr(
+        bets,
+        "_load_gated_publishable_bets",
+        lambda: {("future-game", "totals", "over"): _publishable_future_bet()},
+    )
+    monkeypatch.setattr(bets, "_build_batch_odds_map", lambda game_ids: {})
+
+    assert api_client.get("/api/bets/upcoming").json()["is_premium"] is True
+    now = period_end
+    expired = api_client.get("/api/bets/upcoming").json()
+    assert expired["is_premium"] is False
+    assert expired["data"][0]["is_locked"] is True
+    _assert_no_locked_fields(expired["data"][0])
+    assert api_client.get("/api/bets/game/future-game/odds").status_code == 403
+
+    metadata["subscription_current_period_end"] = period_end + 3600
+    assert api_client.get("/api/bets/upcoming").json()["is_premium"] is True
 
 
 @pytest.mark.parametrize("configured", [False, True])
