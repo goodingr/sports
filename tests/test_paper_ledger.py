@@ -6,7 +6,13 @@ import pandas as pd
 import pytest
 
 from src.db.core import connect, initialize
-from src.predict.paper_ledger import capture_predictions, load_trial, register_trial, update
+from src.predict.paper_ledger import (
+    capture_predictions,
+    load_trial,
+    record_capture_failure,
+    register_trial,
+    update,
+)
 from src.predict.runner import run_predictions
 
 
@@ -96,6 +102,34 @@ def test_capture_freezes_first_eligible_decision(warehouse):
     assert update(trial, db)["trials"][0]["metrics"]["pending"] == 1
     with pytest.raises(ValueError, match="use a new trial ID"):
         register_trial(replace(trial, min_edge=0.21), db)
+
+
+def test_scoped_capture_excludes_other_eligible_fixtures(warehouse):
+    db, trial, predictions, now = warehouse
+    second_start = (now + timedelta(hours=5)).isoformat()
+    with connect(db) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'duplicate'", (second_start,)
+        )
+    second = predictions.assign(game_id="duplicate", commence_time=second_start)
+    assert capture_predictions(
+        trial,
+        pd.concat([predictions, second]),
+        trial.model_sha256,
+        db,
+        fixture_ids={"game"},
+    ) == {"recorded": 1}
+    record_capture_failure(trial, db, fixture_ids={"duplicate"})
+    with connect(db) as conn:
+        decisions = conn.execute("SELECT game_id FROM paper_decisions").fetchall()
+        observations = conn.execute(
+            "SELECT game_id, outcome FROM paper_fixture_observations ORDER BY run_id, game_id"
+        ).fetchall()
+    assert [row["game_id"] for row in decisions] == ["game"]
+    assert [tuple(row) for row in observations] == [
+        ("game", "recorded"),
+        ("duplicate", "prediction_missing"),
+    ]
 
 
 def test_capture_rejects_missing_provenance_wrong_model_and_invalid_market(warehouse):

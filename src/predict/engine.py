@@ -6,7 +6,7 @@ import math
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -401,12 +401,19 @@ class PredictionEngine:
         return pd.DataFrame(features_list)
 
     def predict(
-        self, league: str, days_ahead: int = 7, *, trace_totals: bool = False
+        self,
+        league: str,
+        days_ahead: int = 7,
+        *,
+        trace_totals: bool = False,
+        fixture_ids: AbstractSet[str] | None = None,
     ) -> Optional[pd.DataFrame]:
         """Generate predictions for upcoming games."""
         
         # 1. Load games
         games_df = load_games_from_database(league, days_ahead)
+        if fixture_ids is not None and not games_df.empty:
+            games_df = games_df[games_df["game_id"].isin(fixture_ids)]
         if games_df.empty:
             LOGGER.info(f"No upcoming games found for {league}")
             return None

@@ -5,6 +5,7 @@ import hashlib
 import joblib
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.predict import engine as engine_module
 
@@ -21,7 +22,8 @@ class TotalsModel:
         return np.full(len(features), 224.0)
 
 
-def test_normal_inference_saves_both_quote_sources_and_loaded_model_digests(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fixture_ids", [None, {"GAME"}])
+def test_inference_saves_both_quote_sources_and_loaded_model_digests(tmp_path, monkeypatch, fixture_ids):
     moneyline_path = tmp_path / "nba_ensemble_calibrated_moneyline.pkl"
     totals_path = tmp_path / "nba_totals_gradient_boosting.pkl"
     joblib.dump(MoneylineModel(), moneyline_path)
@@ -70,9 +72,16 @@ def test_normal_inference_saves_both_quote_sources_and_loaded_model_digests(tmp_
             }
         ]
     )
-    monkeypatch.setattr(engine_module, "load_games_from_database", lambda *args: games)
+    scheduled = pd.concat([games, games.assign(game_id="EXCLUDED")], ignore_index=True)
+    monkeypatch.setattr(engine_module, "load_games_from_database", lambda *args: scheduled)
     prediction_engine = engine_module.PredictionEngine()
-    monkeypatch.setattr(prediction_engine, "prepare_features", lambda *args: features)
+
+    def prepare_features(selected, league):
+        expected = ["GAME", "EXCLUDED"] if fixture_ids is None else ["GAME"]
+        assert selected["game_id"].tolist() == expected
+        return features
+
+    monkeypatch.setattr(prediction_engine, "prepare_features", prepare_features)
     saved = []
     monkeypatch.setattr(
         engine_module,
@@ -80,7 +89,7 @@ def test_normal_inference_saves_both_quote_sources_and_loaded_model_digests(tmp_
         lambda frame, model_type, timestamp: saved.append((frame.copy(), model_type, timestamp)),
     )
 
-    predictions = prediction_engine.predict("NBA")
+    predictions = prediction_engine.predict("NBA", fixture_ids=fixture_ids)
 
     assert predictions is not None
     assert len(saved) == 1

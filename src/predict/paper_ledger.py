@@ -12,7 +12,7 @@ from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import AbstractSet, Any
 
 import pandas as pd
 import yaml
@@ -341,6 +341,8 @@ def _record_observations(
     now: datetime,
     status: str,
     outcomes: dict[str, tuple[str, str | None]],
+    *,
+    fixture_ids: AbstractSet[str] | None = None,
 ) -> int:
     cursor = conn.execute(
         "INSERT INTO paper_capture_runs (trial_id, observed_at, status) VALUES (?, ?, ?)",
@@ -360,6 +362,8 @@ def _record_observations(
             (now + timedelta(hours=trial.max_hours_before_start)).isoformat(),
         ),
     ).fetchall()
+    if fixture_ids is not None:
+        fixtures = [fixture for fixture in fixtures if fixture["game_id"] in fixture_ids]
     conn.executemany(
         """
         INSERT INTO paper_fixture_observations
@@ -379,7 +383,9 @@ def _record_observations(
     return sum(fixture["game_id"] not in outcomes for fixture in fixtures)
 
 
-def record_capture_failure(trial: PaperTrial, db_path: Path | None = None) -> None:
+def record_capture_failure(
+    trial: PaperTrial, db_path: Path | None = None, *, fixture_ids: AbstractSet[str] | None = None
+) -> None:
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
@@ -393,7 +399,7 @@ def record_capture_failure(trial: PaperTrial, db_path: Path | None = None) -> No
                 _utc(trial.review_at),
                 max_lead_hours=trial.max_hours_before_start,
             )
-            _record_observations(conn, trial, now, "failed", {})
+            _record_observations(conn, trial, now, "failed", {}, fixture_ids=fixture_ids)
 
 
 def capture_predictions(
@@ -401,6 +407,8 @@ def capture_predictions(
     predictions: pd.DataFrame | None,
     model_sha256: str | None,
     db_path: Path | None = None,
+    *,
+    fixture_ids: AbstractSet[str] | None = None,
 ) -> dict[str, int]:
     if predictions is not None and not predictions.empty and model_sha256 != trial.model_sha256:
         raise ValueError(
@@ -424,12 +432,14 @@ def capture_predictions(
         outcomes: dict[str, tuple[str, str | None]] = {}
         if predictions is not None:
             for row in predictions.itertuples(index=False):
+                if fixture_ids is not None and row.game_id not in fixture_ids:
+                    continue
                 outcome = _capture_one(conn, trial, row, registered, now)
                 counts[outcome] += 1
                 snapshot = row.selected_totals_snapshot_id
                 outcomes[row.game_id] = (outcome, None if pd.isna(snapshot) else str(snapshot))
         status = "no_predictions" if predictions is None or predictions.empty else "evaluated"
-        missing = _record_observations(conn, trial, now, status, outcomes)
+        missing = _record_observations(conn, trial, now, status, outcomes, fixture_ids=fixture_ids)
         if missing:
             counts["prediction_missing"] += missing
     return dict(counts)
