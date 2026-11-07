@@ -278,6 +278,19 @@ def _entry_slot_taken(conn: sqlite3.Connection, now: datetime) -> bool:
     )
 
 
+def _reuse_within_observed_clocks(
+    due: dict[str, _ClosingFixture], fresh: _FreshQuotes
+) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, None]:
+    # Reuse only quotes whose stored clocks already cover newly observed limits.
+    due = {
+        provider_id: fixture
+        for provider_id, fixture in due.items()
+        if fresh[fixture.game_id][1] <= fixture.start
+    }
+    fresh = {fixture.game_id: fresh[fixture.game_id] for fixture in due.values()}
+    return ("reusable" if due else "fixture_clock_conflict"), due, fresh, None
+
+
 def _plan_entry_path(
     conn: sqlite3.Connection,
     trial: PaperTrial,
@@ -285,20 +298,22 @@ def _plan_entry_path(
     official: tuple[bytes, datetime] | None,
 ) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, FallbackPlan | None]:
     status, due, fresh = _plan(conn, trial, now)
-    if official is not None and status in {"due", "no_entry_due"}:
+    if official is not None and status in {"due", "no_entry_due", "reusable"}:
         from src.predict.paper_entry_fallback import (
             anchor_ordinary_clocks,
             plan_missing_ids,
             read_official_fixtures,
         )
 
-        if _entry_slot_taken(conn, now):
+        if status != "reusable" and _entry_slot_taken(conn, now):
             return "daily_cap", due, fresh, None
         raw, observed_at = official
         window_status, fixtures = read_official_fixtures(raw, observed_at, now)
         window = None
         if window_status == "verified":
             anchored = anchor_ordinary_clocks(conn, due, fixtures)
+            if status == "reusable":
+                return _reuse_within_observed_clocks(anchored, fresh)
             if anchored.keys() != due.keys():
                 return ("due" if anchored else "fixture_clock_conflict"), anchored, fresh, None
             due = anchored
@@ -343,10 +358,12 @@ def _reserve(
             else:
                 window = replace(window, probe_starts=tuple(starts.items()))
                 due = {}
-        if status == "due" and free_events is not None:
+        if status in {"due", "reusable"} and free_events is not None:
             from src.predict.paper_entry_fallback import anchor_ordinary_clocks
 
             due = anchor_ordinary_clocks(conn, due, free_events=free_events)
+            if status == "reusable":
+                return _reuse_within_observed_clocks(due, fresh)
             if not due:
                 return "fixture_clock_conflict", {}, {}, None
         if status in {"due", "window_due"}:

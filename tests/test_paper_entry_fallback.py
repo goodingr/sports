@@ -1048,3 +1048,79 @@ def test_free_clock_still_applies_if_the_official_page_is_unavailable(
             [raw_path] = conn.execute("SELECT raw_path FROM odds_snapshots").fetchone()
             receipt = json.loads(Path(raw_path).read_text(encoding="utf-8"))
             assert receipt["provider_events_probe"]["results"] == free
+
+
+@pytest.mark.parametrize("source", ["official", "free"])
+@pytest.mark.parametrize(("gap", "cached_offset"), [(10, None), (11, None), (8, 0), (8, -1)])
+def test_racing_cache_does_not_bypass_observed_earlier_clock(
+    warehouse, entry_runtime, tmp_path, monkeypatch, source, gap, cached_offset
+):
+    path, trial = warehouse
+    _, _, clock, _ = entry_runtime
+    clock.current = PHI_START - timedelta(minutes=25 if cached_offset is not None else 10)
+    first = PHI_START + timedelta(minutes=gap)
+    second = PHI_START + timedelta(minutes=30)
+    official_start = PHI_START if source == "official" else PHI_START + timedelta(minutes=5)
+    official = _official().replace(
+        PHI_START.isoformat().encode(), official_start.isoformat().encode(), 1
+    )
+    official = official.replace(DET_START.isoformat().encode(), second.isoformat().encode(), 1)
+    with connect(path) as conn:
+        _game(conn, "too-late", first, "CHI", "PHI", "a" * 32)
+        _game(conn, "on-time", second, "DET", "LAL", "b" * 32)
+        _, ordinary_due, _ = entry._plan(conn, trial, clock.current)
+    if cached_offset is not None:
+        provider_id = "a" * 32
+        ordinary_due[provider_id] = replace(
+            ordinary_due[provider_id], start=PHI_START + timedelta(minutes=cached_offset)
+        )
+    paid = [_quote("a" * 32, first, "CHI", "PHI"), _quote("b" * 32, second, "DET", "LAL")]
+    free_start = PHI_START if source == "free" else first
+    free = [_quote("a" * 32, free_start, "CHI", "PHI"), paid[1]]
+    calls = _mock_sources(monkeypatch, paid, events=free, official=official)
+    fake_request = requests.get
+    cache_receipt = tmp_path / "cache-receipt.json"
+    raw = json.dumps(
+        {
+            "results": paid,
+            "provider_events_probe": {
+                "results": [
+                    _quote("a" * 32, PHI_START + timedelta(minutes=cached_offset), "CHI", "PHI")
+                ]
+                if cached_offset is not None
+                else []
+            },
+        }
+    ).encode()
+    cache_receipt.write_bytes(raw)
+
+    def publish_cache_before_probe_returns(url, **kwargs):
+        if url.endswith("/events"):
+            entry._append_entry_quotes(
+                path,
+                trial,
+                paid,
+                ordinary_due,
+                clock.current - timedelta(seconds=1),
+                "racing-cache",
+                cache_receipt,
+            )
+        return fake_request(url, **kwargs)
+
+    monkeypatch.setattr(requests, "get", publish_cache_before_probe_returns)
+    expected = 1 if cached_offset is None else 2
+    assert _collect_window() == {
+        "status": "reused",
+        "due_events": expected,
+        "decisions_recorded": expected,
+    }
+    assert len(calls) == 2
+    assert cache_receipt.read_bytes() == raw
+    with connect(path) as conn:
+        assert not entry._has_table(conn, "paper_entry_requests")
+        decisions = dict(conn.execute("SELECT game_id, start_time_utc FROM paper_decisions"))
+        assert set(decisions) == ({"on-time"} if cached_offset is None else {"on-time", "too-late"})
+        if cached_offset is not None:
+            assert (
+                decisions["too-late"] == (PHI_START + timedelta(minutes=cached_offset)).isoformat()
+            )
