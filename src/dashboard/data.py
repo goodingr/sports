@@ -2406,6 +2406,8 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
     
     placeholders = ",".join("?" for _ in game_ids)
     
+    # Compare totals by instant so offset-equivalent captures stay visible as ties.
+    fetched_key = "CASE WHEN o.market = 'totals' THEN julianday(s.fetched_at_utc) ELSE s.fetched_at_utc END"
     query = f"""
         WITH latest_snapshot AS (
             SELECT
@@ -2413,7 +2415,7 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
                 o.book_id,
                 o.market,
                 o.outcome,
-                MAX(s.fetched_at_utc) AS max_fetched
+                MAX({fetched_key}) AS max_fetched
             FROM odds o
             JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
             WHERE o.game_id IN ({placeholders})
@@ -2426,7 +2428,9 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
             o.line,
             o.price_american AS moneyline,
             b.name AS book,
-            s.fetched_at_utc
+            s.fetched_at_utc,
+            s.snapshot_id,
+            {{observed_start}} AS observed_start_utc
         FROM odds o
         JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
         JOIN books b ON o.book_id = b.book_id
@@ -2435,7 +2439,7 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
          AND ls.book_id = o.book_id
          AND ls.market = o.market
          AND ls.outcome = o.outcome
-         AND ls.max_fetched = s.fetched_at_utc
+         AND ls.max_fetched = {fetched_key}
         WHERE o.game_id IN ({placeholders})
           AND o.price_american IS NOT NULL
     """
@@ -2443,12 +2447,23 @@ def get_batch_game_odds(game_ids: list[str]) -> pd.DataFrame:
     params = game_ids + game_ids # twice because of WITH clause and main query
     
     with connect() as conn:
-        rows = conn.execute(query, params).fetchall()
+        # Warehouses created before provider kickoff capture can still serve raw odds.
+        has_provider_starts = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'odds_snapshot_game_starts'"
+        ).fetchone()
+        observed_start = """
+            (SELECT observed_start_utc FROM odds_snapshot_game_starts proof
+             WHERE proof.snapshot_id = o.snapshot_id AND proof.game_id = o.game_id)
+        """ if has_provider_starts else "NULL"
+        rows = conn.execute(query.format(observed_start=observed_start), params).fetchall()
         
     if not rows:
         return pd.DataFrame()
         
-    df = pd.DataFrame(rows, columns=["game_id", "market", "outcome", "line", "moneyline", "book", "fetched_at_utc"])
+    df = pd.DataFrame(rows, columns=[
+        "game_id", "market", "outcome", "line", "moneyline", "book", "fetched_at_utc",
+        "snapshot_id", "observed_start_utc",
+    ])
     
     # Add book_url
     if "book" in df.columns:

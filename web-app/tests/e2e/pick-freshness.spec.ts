@@ -19,6 +19,68 @@ test('expires a paid quote and closes its open details at the server deadline', 
     await expect(page.getByText('No upcoming picks right now')).toBeVisible();
 });
 
+test('compares only fresh pregame prices from a matched totals snapshot', async ({ page }) => {
+    const now = Date.now();
+    await page.clock.install({ time: now });
+    const at = (minutes: number) => new Date(now + minutes * 60_000).toISOString();
+    const pair = (book: string, fetchedAt = at(-14.5), providerStart = at(5)) => {
+        const quote = {
+            book,
+            book_url: 'https://sportsbook.example.invalid',
+            market: 'totals',
+            line: 220.5,
+            snapshot_id: `${book}-snapshot`,
+            fetched_at_utc: fetchedAt,
+            observed_start_utc: providerStart,
+        };
+        return [
+            { ...quote, outcome: 'Over', moneyline: -110 },
+            { ...quote, outcome: 'Under', moneyline: 100 },
+        ];
+    };
+    const [mixedOver, mixedUnder] = pair('Different Lines');
+    const [splitOver, splitUnder] = pair('Different Snapshots');
+    const [naiveCapture, naiveKickoff] = await page.evaluate((instants) => instants.map((instant) => {
+        const date = new Date(instant);
+        return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, -1);
+    }), [at(-1), at(5)]);
+    await mockBetsRoutes(page, {
+        premium: true,
+        upcoming: [{
+            ...MOCK_UPCOMING[0], market: 'totals', commence_time: at(5), quote_expires_at: at(2),
+            odds_data: [
+                ...pair('Matched Book'),
+                mixedOver, { ...mixedUnder, line: 224.5 },
+                splitOver, { ...splitUnder, snapshot_id: 'other-snapshot' },
+                ...pair('Tied Snapshots'),
+                ...pair('Tied Snapshots', at(-14.5).replace('Z', '+00:00'))
+                    .map((quote) => ({ ...quote, snapshot_id: 'other-tied-snapshot', line: 224.5 })),
+                ...pair('Stale Book', at(-16)),
+                ...pair('In Play Book', at(-0.25), at(-0.5)),
+                ...pair('Future Capture', at(1)),
+                ...pair('Unknown Kickoff').map((quote) => ({ ...quote, observed_start_utc: undefined })),
+                ...pair('Naive Capture', naiveCapture),
+                ...pair('Naive Kickoff', at(-1), naiveKickoff),
+            ],
+        }],
+    });
+    await page.goto('/');
+    await page.getByText('Mock Home FC').click();
+    const dialog = page.getByRole('dialog');
+    const comparison = dialog.getByRole('link', { name: /Matched Book/ });
+    await expect(dialog.getByText('OVER 215.5', { exact: true })).toBeVisible();
+    await expect(comparison).toContainText('220.5');
+    await expect(comparison).toContainText('+100');
+    await expect(dialog.getByRole('link', {
+        name: /Different Lines|Different Snapshots|Tied Snapshots|Stale Book|In Play Book|Future Capture|Unknown Kickoff|Naive Capture|Naive Kickoff/,
+    })).toHaveCount(0);
+
+    await page.clock.fastForward(30_001);
+
+    await expect(comparison).toHaveCount(0);
+    await expect(dialog.getByText('OVER 215.5', { exact: true })).toBeVisible();
+});
+
 test('revalidates a paid feed in the background without replacing it with loading UI', async ({ page }) => {
     const now = new Date();
     await page.clock.install({ time: now });

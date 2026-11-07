@@ -190,7 +190,7 @@ export function BetCard({ bet, isPremium = false }: BetCardProps) {
                     book: bet.book,
                     book_url: bet.book_url,
                 }}
-                oddsData={bet.odds_data}
+                totalsComparisons={bet.totalsComparisons}
             />
         </>
     );

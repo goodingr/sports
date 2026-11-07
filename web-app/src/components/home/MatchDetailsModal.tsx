@@ -3,14 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ExternalLink, Lock } from 'lucide-react';
-import type { OddsRecord } from '@/lib/api';
-
-interface BookOdds {
-    name: string;
-    url?: string;
-    over: OddsRecord | null;
-    under: OddsRecord | null;
-}
+import type { TotalsComparison } from '@/lib/api';
 
 interface MatchDetailsModalProps {
     isOpen: boolean;
@@ -36,30 +29,11 @@ interface MatchDetailsModalProps {
         book?: string;
         book_url?: string;
     };
-    oddsData?: OddsRecord[];
+    totalsComparisons?: TotalsComparison[];
 }
 
 const FOCUSABLE_SELECTOR =
     'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input:not([disabled])';
-
-function groupOddsByBook(odds: OddsRecord[]): BookOdds[] {
-    const acc: BookOdds[] = [];
-    for (const curr of odds) {
-        const existingBook = acc.find((b) => b.name === curr.book);
-        if (existingBook) {
-            if (curr.outcome === 'Over') existingBook.over = curr;
-            if (curr.outcome === 'Under') existingBook.under = curr;
-        } else {
-            acc.push({
-                name: curr.book,
-                url: curr.book_url,
-                over: curr.outcome === 'Over' ? curr : null,
-                under: curr.outcome === 'Under' ? curr : null,
-            });
-        }
-    }
-    return acc.filter((book) => book.over || book.under);
-}
 
 export function MatchDetailsModal({
     isOpen,
@@ -70,7 +44,7 @@ export function MatchDetailsModal({
     market,
     isLocked = false,
     predictionInfo,
-    oddsData,
+    totalsComparisons = [],
 }: MatchDetailsModalProps) {
     const dialogRef = useRef<HTMLDivElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -172,8 +146,6 @@ export function MatchDetailsModal({
               minute: 'numeric',
           })
         : '';
-
-    const totalsByBook = groupOddsByBook(oddsData ?? []);
 
     // Treat a server-masked recommendation as locked too.
     const lockedFromServer = predictionInfo?.recommended_bet === 'Premium Only';
@@ -355,8 +327,9 @@ export function MatchDetailsModal({
                     )}
 
                     {/* Odds Section */}
-                    {!showLock && hasTotals && !isCompleted && totalsByBook.length > 0 && (
+                    {!showLock && hasTotals && !isCompleted && totalsComparisons.length > 0 && (
                         <div>
+                            <h3 className="text-sm font-medium mb-2">Pregame price comparison</h3>
                             <div className="grid gap-2">
                                 <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground px-3 mb-1">
                                     <div>Sportsbook</div>
@@ -364,44 +337,31 @@ export function MatchDetailsModal({
                                     <div className="text-center">Over</div>
                                     <div className="text-center">Under</div>
                                 </div>
-                                {totalsByBook.map((book) => {
-                                    const line = book.over?.line ?? book.under?.line ?? '-';
-                                    return (
-                                        <a
-                                            key={book.name}
-                                            href={book.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-all cursor-pointer group"
-                                        >
-                                            <div className="font-medium text-foreground flex items-center gap-2 group-hover:text-primary transition-colors">
-                                                {book.name}
-                                                <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" aria-hidden="true" />
-                                            </div>
-                                            <div className="text-center font-bold text-foreground">{line}</div>
-                                            <div className="text-center">
-                                                {book.over ? (
-                                                    <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
-                                                        {book.over.moneyline > 0 ? '+' : ''}
-                                                        {book.over.moneyline}
-                                                    </span>
-                                                ) : (
-                                                    '-'
-                                                )}
-                                            </div>
-                                            <div className="text-center">
-                                                {book.under ? (
-                                                    <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
-                                                        {book.under.moneyline > 0 ? '+' : ''}
-                                                        {book.under.moneyline}
-                                                    </span>
-                                                ) : (
-                                                    '-'
-                                                )}
-                                            </div>
-                                        </a>
-                                    );
-                                })}
+                                {totalsComparisons.map((comparison) => (
+                                    <a
+                                        key={comparison.book}
+                                        href={comparison.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="grid grid-cols-4 items-center bg-white/5 rounded-lg p-3 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-all cursor-pointer group"
+                                    >
+                                        <div className="font-medium text-foreground flex items-center gap-2 group-hover:text-primary transition-colors">
+                                            {comparison.book}
+                                            <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" aria-hidden="true" />
+                                        </div>
+                                        <div className="text-center font-bold text-foreground">{comparison.line}</div>
+                                        <div className="text-center">
+                                            <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                                                {comparison.over > 0 ? '+' : ''}{comparison.over}
+                                            </span>
+                                        </div>
+                                        <div className="text-center">
+                                            <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                                                {comparison.under > 0 ? '+' : ''}{comparison.under}
+                                            </span>
+                                        </div>
+                                    </a>
+                                ))}
                             </div>
                         </div>
                     )}

@@ -112,6 +112,8 @@ class OddsRecord(BaseModel):
     book: str | None = None
     book_url: str | None = None
     fetched_at_utc: datetime | str | None = None
+    snapshot_id: str | None = None
+    observed_start_utc: datetime | str | None = None
 
 
 class PublicBet(BaseModel):
@@ -256,17 +258,20 @@ def _ensure_utc_column(df: pd.DataFrame, column: str = "commence_time") -> pd.Da
 def _odds_record_from_mapping(record: dict[str, Any]) -> OddsRecord:
     book = _clean_value(record.get("book"))
     book_url = _clean_value(record.get("book_url"))
+    market = _clean_value(record.get("market"))
     if book and not book_url:
         book_url = get_sportsbook_url(str(book))
     return OddsRecord(
         game_id=_clean_value(record.get("game_id")),
-        market=_clean_value(record.get("market")),
+        market=market,
         outcome=_clean_value(record.get("outcome")),
         line=_clean_value(record.get("line")),
         moneyline=_clean_value(record.get("moneyline")),
         book=book,
         book_url=book_url,
         fetched_at_utc=_clean_value(record.get("fetched_at_utc")),
+        snapshot_id=_clean_value(record.get("snapshot_id")) if market == "totals" else None,
+        observed_start_utc=_clean_value(record.get("observed_start_utc")) if market == "totals" else None,
     )
 
 

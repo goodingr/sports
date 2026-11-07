@@ -186,9 +186,18 @@ export function BetFeed() {
 
     useEffect(() => {
         if (upcoming.length === 0) return;
-        const nextExpiry = Math.min(...upcoming.map((bet) => Date.parse(bet.quote_expires_at ?? '')));
+        const nextExpiry = Math.min(...upcoming.flatMap((bet) => [
+            Date.parse(bet.quote_expires_at ?? ''),
+            ...(bet.totalsComparisons ?? []).map((comparison) => comparison.expiresAt),
+        ]));
         const expiryTimer = window.setTimeout(() => {
-            setUpcoming((current) => current.filter((bet) => Date.parse(bet.quote_expires_at ?? '') > Date.now()));
+            const now = Date.now();
+            setUpcoming((current) => current
+                .filter((bet) => Date.parse(bet.quote_expires_at ?? '') > now)
+                .map((bet) => ({
+                    ...bet,
+                    totalsComparisons: bet.totalsComparisons?.filter((comparison) => comparison.expiresAt > now),
+                })));
         }, Math.max(0, nextExpiry - Date.now()));
         return () => window.clearTimeout(expiryTimer);
     }, [upcoming]);

@@ -103,6 +103,63 @@ export interface OddsRecord {
     book: string;
     book_url?: string;
     fetched_at_utc: string;
+    snapshot_id?: string;
+    observed_start_utc?: string;
+}
+
+export interface TotalsComparison {
+    book: string;
+    url?: string;
+    line: number;
+    over: number;
+    under: number;
+    expiresAt: number;
+}
+
+const MAX_COMPARISON_AGE_MS = 15 * 60_000;
+const MAX_START_DISAGREEMENT_MS = 10 * 60_000;
+const UTC_OFFSET = /(?:Z|[+-]\d{2}:\d{2})$/i;
+
+function normalizeTotalsComparisons(
+    odds: OddsRecord[], start: number, receivedAt: number,
+): TotalsComparison[] {
+    const books = new Map<string, OddsRecord[]>();
+    for (const quote of odds) {
+        if (quote.market !== 'totals' || !quote.book) continue;
+        const group = books.get(quote.book) ?? [];
+        group.push(quote);
+        books.set(quote.book, group);
+    }
+
+    const comparisons: TotalsComparison[] = [];
+    for (const [book, group] of books) {
+        // The warehouse returns the latest rows per side, including timestamp ties.
+        if (group.length !== 2) continue;
+        const over = group.find((quote) => quote.outcome?.toLowerCase() === 'over');
+        const under = group.find((quote) => quote.outcome?.toLowerCase() === 'under');
+        if (
+            !over || !under || !over.snapshot_id || over.snapshot_id !== under.snapshot_id
+            || !Number.isFinite(over.line) || over.line <= 0 || over.line !== under.line
+            || over.fetched_at_utc !== under.fetched_at_utc || over.observed_start_utc !== under.observed_start_utc
+        ) continue;
+        if ([over.moneyline, under.moneyline].some((price) => !Number.isInteger(price) || Math.abs(price) < 100)) continue;
+
+        const observedStart = over.observed_start_utc ?? '';
+        if (!UTC_OFFSET.test(over.fetched_at_utc) || !UTC_OFFSET.test(observedStart)) continue;
+        const fetchedAt = Date.parse(over.fetched_at_utc);
+        const providerStart = Date.parse(observedStart);
+        const expiresAt = Math.min(start, providerStart, fetchedAt + MAX_COMPARISON_AGE_MS);
+        if (
+            !Number.isFinite(expiresAt) || expiresAt <= receivedAt || fetchedAt > receivedAt
+            || Math.abs(start - providerStart) > MAX_START_DISAGREEMENT_MS
+        ) continue;
+
+        comparisons.push({
+            book, url: over.book_url, line: over.line,
+            over: over.moneyline, under: under.moneyline, expiresAt,
+        });
+    }
+    return comparisons;
 }
 
 /**
@@ -163,7 +220,7 @@ export interface Bet {
     book_url?: string;
     predicted_total_points?: number;
     recommended_bet?: string;
-    odds_data?: OddsRecord[];
+    totalsComparisons?: TotalsComparison[];
 }
 
 export interface PaginatedBetsResponse {
@@ -203,7 +260,6 @@ export function normalizeBet(bet: RawBet): Bet {
         book_url: bet.book_url,
         predicted_total_points: bet.predicted_total_points,
         recommended_bet: recommendation,
-        odds_data: bet.odds_data,
     };
 }
 
@@ -217,7 +273,10 @@ export function normalizeUpcomingBets(bets: RawBet[], receivedAt = Date.now()): 
             : Date.parse(bet.quote_expires_at);
         const expiresAt = Math.min(start, quoteExpiry);
         if (Number.isFinite(expiresAt) && expiresAt > receivedAt) {
-            upcoming.push({ ...bet, quote_expires_at: new Date(expiresAt).toISOString() });
+            const totalsComparisons = bet.market === 'moneyline'
+                ? undefined
+                : normalizeTotalsComparisons(raw.odds_data ?? [], start, receivedAt);
+            upcoming.push({ ...bet, quote_expires_at: new Date(expiresAt).toISOString(), totalsComparisons });
         }
     }
     return upcoming;
