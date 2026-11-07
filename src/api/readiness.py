@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -39,41 +40,36 @@ REQUIRED_PREDICTION_COLUMNS = {
 }
 
 
-def _parse_timestamp(value: Any) -> datetime | None:
-    if value is None:
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
         return None
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        raw = str(value).strip()
-        if not raw:
-            return None
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _age_minutes(timestamp: datetime | None) -> float | None:
-    if timestamp is None:
+    raw = value.strip()
+    if len(raw) <= 10:  # A date alone supplies no observation time.
         return None
-    return (datetime.now(timezone.utc) - timestamp).total_seconds() / 60.0
+    try:
+        parsed = datetime.fromisoformat(raw)
+        if parsed.utcoffset() is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
-def _freshness_status(rows: list[sqlite3.Row], threshold_minutes: int) -> dict[str, Any]:
+def _is_priced_odds(value: object) -> bool:
+    return isinstance(value, (int, float)) and math.isfinite(value) and abs(value) >= 100
+
+
+def _freshness_status(
+    rows: list[sqlite3.Row], threshold_minutes: int, now: datetime
+) -> dict[str, Any]:
     leagues: dict[str, Any] = {}
     ok = True
     for row in rows:
         league = str(row["league"])
         latest = _parse_timestamp(row["latest"])
-        age = _age_minutes(latest)
-        league_ok = latest is not None and (
-            threshold_minutes == 0 or (age is not None and age <= threshold_minutes)
+        age = (now - latest).total_seconds() / 60.0 if latest is not None else None
+        league_ok = (
+            age is not None and age >= 0 and (threshold_minutes == 0 or age <= threshold_minutes)
         )
         ok = ok and league_ok
         leagues[league] = {
@@ -137,19 +133,36 @@ def run_readiness_checks(settings: APISettings | None = None) -> dict[str, Any]:
 
         release_leagues = tuple(settings.release_leagues)
         league_placeholders = ",".join("?" for _ in release_leagues)
+        now = datetime.now(timezone.utc)
+
+        def nonfuture_timestamp(value: object) -> str | None:
+            parsed = _parse_timestamp(value)
+            if parsed is None or parsed > now:
+                return None
+            # Normalize offsets and retain microseconds so SQL MAX orders exact UTC times.
+            return parsed.isoformat(timespec="microseconds")
+
+        conn.create_function("readiness_timestamp", 1, nonfuture_timestamp, deterministic=True)
+        conn.create_function("readiness_priced_odds", 1, _is_priced_odds, deterministic=True)
 
         try:
             odds_query = f"""
-                SELECT s.league, MAX(os.fetched_at_utc) AS latest
+                SELECT s.league, MAX(readiness_timestamp(os.fetched_at_utc)) AS latest
                 FROM sports s
                 LEFT JOIN odds_snapshots os ON os.sport_id = s.sport_id
+                    AND EXISTS (
+                        SELECT 1 FROM odds o
+                        JOIN games g ON g.game_id = o.game_id AND g.sport_id = os.sport_id
+                        WHERE o.snapshot_id = os.snapshot_id
+                          AND readiness_priced_odds(o.price_american)
+                    )
                 WHERE s.league IN ({league_placeholders})
                 GROUP BY s.league
             """
             odds_rows = conn.execute(odds_query, release_leagues).fetchall()
             found = {str(row["league"]) for row in odds_rows}
             missing = sorted(set(release_leagues) - found)
-            status = _freshness_status(list(odds_rows), settings.odds_freshness_minutes)
+            status = _freshness_status(odds_rows, settings.odds_freshness_minutes, now)
             status["missing_leagues"] = missing
             status["ok"] = bool(status["ok"] and not missing)
             checks["odds_freshness"] = status
@@ -158,7 +171,7 @@ def run_readiness_checks(settings: APISettings | None = None) -> dict[str, Any]:
 
         try:
             predictions_query = f"""
-                SELECT s.league, MAX(p.predicted_at) AS latest
+                SELECT s.league, MAX(readiness_timestamp(p.predicted_at)) AS latest
                 FROM sports s
                 LEFT JOIN games g ON g.sport_id = s.sport_id
                 LEFT JOIN predictions p ON p.game_id = g.game_id
@@ -168,9 +181,7 @@ def run_readiness_checks(settings: APISettings | None = None) -> dict[str, Any]:
             prediction_rows = conn.execute(predictions_query, release_leagues).fetchall()
             found = {str(row["league"]) for row in prediction_rows}
             missing = sorted(set(release_leagues) - found)
-            status = _freshness_status(
-                list(prediction_rows), settings.predictions_freshness_minutes
-            )
+            status = _freshness_status(prediction_rows, settings.predictions_freshness_minutes, now)
             status["missing_leagues"] = missing
             status["ok"] = bool(status["ok"] and not missing)
             checks["predictions_freshness"] = status
