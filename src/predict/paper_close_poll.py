@@ -111,16 +111,49 @@ def _plan(conn: sqlite3.Connection, now: datetime) -> tuple[str, dict[str, datet
     return ("cooldown" if recent else "due"), events
 
 
-def _provider_get(endpoint: str, params: dict[str, str]) -> requests.Response:
+def _provider_get(
+    endpoint: str, params: dict[str, str], *, allow_key_rejection: bool = False
+) -> requests.Response:
     try:
         response = requests.get(
             f"{_BASE_URL}/{endpoint}", params=params, timeout=10, allow_redirects=False
         )
     except requests.RequestException:
         raise RuntimeError(f"Odds API {endpoint} request failed") from None
+    if response.status_code == 401 and allow_key_rejection:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict) and body.get("error_code") in {
+            "INVALID_KEY",
+            "OUT_OF_USAGE_CREDITS",
+        }:
+            return response
     if response.status_code != 200:
         raise RuntimeError(f"Odds API {endpoint} returned HTTP {response.status_code}")
     return response
+
+
+def _budgeted_key() -> str | None:
+    keys = OddsAPIKeyManager.get_available_keys()
+    index = OddsAPIKeyManager.get_current_index()
+    if not 0 <= index < len(keys):
+        raise RuntimeError("No active Odds API key is configured")
+    for key in dict.fromkeys([keys[index], *keys]):
+        response = _provider_get("events", {"apiKey": key}, allow_key_rejection=True)
+        if response.status_code == 401:
+            continue
+        quota = response.headers.get("x-requests-remaining")
+        try:
+            remaining = int(quota) if quota is not None else -1
+        except ValueError:
+            return None
+        if remaining < 0:
+            return None
+        if remaining >= _CREDIT_RESERVE + 1:
+            return key
+    return None
 
 
 def _reserve_attempt() -> tuple[str, dict[str, datetime]]:
@@ -149,17 +182,8 @@ def poll_closes(*, collect: bool = False) -> dict[str, str | int]:
         return result
 
     load_env()
-    keys = OddsAPIKeyManager.get_available_keys()
-    index = OddsAPIKeyManager.get_current_index()
-    if not 0 <= index < len(keys):
-        raise RuntimeError("No active Odds API key is configured")
-    params = {"apiKey": keys[index]}
-    quota = _provider_get("events", params).headers.get("x-requests-remaining")
-    try:
-        remaining = int(quota) if quota is not None else 0
-    except ValueError:
-        remaining = 0
-    if remaining <= _CREDIT_RESERVE:
+    key = _budgeted_key()
+    if key is None:
         return {**result, "status": "quota_reserve"}
 
     status, events = _reserve_attempt()
@@ -170,7 +194,7 @@ def poll_closes(*, collect: bool = False) -> dict[str, str | int]:
     response = _provider_get(
         "odds",
         {
-            **params,
+            "apiKey": key,
             "regions": "us",
             "markets": "totals",
             "bookmakers": _BOOK,

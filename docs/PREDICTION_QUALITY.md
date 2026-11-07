@@ -314,6 +314,25 @@ while preserving previously issued picks, run
 
 ## Prospective NBA Paper Trial
 
+Totals regressors trained by `src.models.train_totals` now use separate
+chronological fitting, uncertainty-calibration, and final test dates. A six-hour
+result-availability assumption determines the purge before each later forecast
+boundary.
+The probability scale is the RMS error on the calibration dates. Training
+residual spread is retained as a diagnostic.
+
+Use a separate output directory for research artifacts.
+
+```powershell
+poetry run python -m src.models.train_totals --league NBA --model-type random_forest --input reports/research/totals_calibration/nba_draftkings_point_in_time_20261107T042053Z.parquet --models-dir reports/research/totals_calibration/shadow_models --metrics-dir reports/research/totals_calibration/shadow_metrics
+```
+
+The audited first experiment contains 104 quoted fixtures across 40 UTC dates.
+On its 41 later test fixtures, held-out scaling produced Brier 0.2856 versus
+0.3239 with training residual spread and 0.2503 for the same quoted no-vig
+market. These are exploratory research measurements. The registered live pilot
+continues to use the SHA-pinned artifact below.
+
 The private trial in `config/paper_trial.yml` tests full-game NBA totals at
 DraftKings. It pins the random forest artifact by SHA-256 and records the first
 qualifying decision per fixture. A decision requires a model edge of at least
@@ -364,7 +383,9 @@ Preview the closing collector with
 one batched request when pending decisions need a close and have 10 to 60
 minutes until tipoff. The collector checks a 200-credit reserve, spaces requests
 at least 15 minutes apart, and allows up to three attempts per UTC day. A preview
-only reads the warehouse. The collector uses the currently active provider key.
+only reads the warehouse. For collection, free quota probes check the active key
+and then distinct configured keys. A qualifying key is used locally for that
+request, under the shared attempt cap and cooldown.
 
 Capture ends February 1, 2027 at midnight Eastern time. The final report freezes
 grades one week later and requires at least 150 graded decisions, 5% flat-unit

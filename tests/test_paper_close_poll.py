@@ -23,9 +23,10 @@ class FrozenDateTime(datetime):
 class FakeResponse:
     status_code = 200
 
-    def __init__(self, quota=None, payload=None):
+    def __init__(self, quota=None, payload=None, status=200):
         self.headers = {} if quota is None else {"x-requests-remaining": quota}
         self.payload = payload
+        self.status_code = status
 
     def json(self):
         return self.payload
@@ -121,6 +122,117 @@ def test_quota_reserve_fails_closed(warehouse, monkeypatch, quota):
         assert not paper_close_poll._has_table(conn, "paper_close_requests")
 
 
+def test_low_active_key_uses_another_budget_without_changing_active_index(warehouse, monkeypatch):
+    keys = ["healthy-first", "low-active", "later-healthy"]
+    monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: keys)
+    monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "get_current_index", lambda: 1)
+    monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "set_current_index", _unexpected_request)
+    monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "rotate_key", _unexpected_request)
+    calls = []
+
+    def get(url, **kwargs):
+        key = kwargs["params"]["apiKey"]
+        calls.append((url.rsplit("/", 1)[1], key))
+        return FakeResponse("200" if key == "low-active" else "201", [])
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True)["status"] == "no_closing_quotes"
+    assert calls == [("events", "low-active"), ("events", "healthy-first"), ("odds", "healthy-first")]
+
+
+def test_all_low_distinct_keys_are_probed_once(warehouse, monkeypatch):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager,
+        "get_available_keys",
+        lambda: ["duplicate", "other-low", "duplicate"],
+    )
+    monkeypatch.setattr(paper_close_poll.OddsAPIKeyManager, "get_current_index", lambda: 2)
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url.rsplit("/", 1)[1], kwargs["params"]["apiKey"]))
+        return FakeResponse("200")
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True)["status"] == "quota_reserve"
+    assert calls == [("events", "duplicate"), ("events", "other-low")]
+    with connect(warehouse) as conn:
+        assert not paper_close_poll._has_table(conn, "paper_close_requests")
+
+
+@pytest.mark.parametrize("quota", [None, "invalid", "-1"])
+def test_unknown_quota_stops_before_trying_another_key(warehouse, monkeypatch, quota):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["unknown", "healthy"]
+    )
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(kwargs["params"]["apiKey"])
+        return FakeResponse(quota if calls[-1] == "unknown" else "500")
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True)["status"] == "quota_reserve"
+    assert calls == ["unknown"]
+
+
+@pytest.mark.parametrize("code", ["INVALID_KEY", "OUT_OF_USAGE_CREDITS"])
+def test_confirmed_key_rejection_allows_a_free_probe_of_next_key(warehouse, monkeypatch, code):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["rejected", "healthy"]
+    )
+    calls = []
+
+    def get(url, **kwargs):
+        key = kwargs["params"]["apiKey"]
+        calls.append((url.rsplit("/", 1)[1], key))
+        if key == "rejected":
+            return FakeResponse(payload={"error_code": code}, status=401)
+        return FakeResponse("201", [])
+
+    monkeypatch.setattr(requests, "get", get)
+    assert paper_close_poll.poll_closes(collect=True)["status"] == "no_closing_quotes"
+    assert calls == [("events", "rejected"), ("events", "healthy"), ("odds", "healthy")]
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [(429, {}), (500, {}), (422, {}), (401, {}), (401, {"error_code": "UNKNOWN"}), (403, {"error_code": "INVALID_KEY"})],
+)
+def test_other_provider_errors_stop_without_key_fallback(warehouse, monkeypatch, status, body):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["first", "healthy"]
+    )
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(kwargs["params"]["apiKey"])
+        return FakeResponse("500", payload=body, status=status)
+
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(RuntimeError, match=f"Odds API events returned HTTP {status}"):
+        paper_close_poll.poll_closes(collect=True)
+    assert calls == ["first"]
+    with connect(warehouse) as conn:
+        assert not paper_close_poll._has_table(conn, "paper_close_requests")
+
+
+def test_transport_error_stops_before_probing_another_key(warehouse, monkeypatch):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["first", "healthy"]
+    )
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(kwargs["params"]["apiKey"])
+        raise requests.Timeout("raw request details")
+
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(RuntimeError, match="^Odds API events request failed$"):
+        paper_close_poll.poll_closes(collect=True)
+    assert calls == ["first"]
+
+
 def test_collects_and_loads_only_a_due_draftkings_totals_batch(warehouse, monkeypatch):
     calls = []
     event = {
@@ -194,7 +306,13 @@ def test_daily_cap_and_recent_failed_attempt_are_network_free(warehouse, monkeyp
 
 
 def test_paid_request_failure_is_sanitized_and_counts_toward_limit(warehouse, monkeypatch):
+    monkeypatch.setattr(
+        paper_close_poll.OddsAPIKeyManager, "get_available_keys", lambda: ["test-key", "spare"]
+    )
+    calls = []
+
     def get(url, **kwargs):
+        calls.append((url.rsplit("/", 1)[1], kwargs["params"]["apiKey"]))
         if url.endswith("/odds"):
             raise requests.Timeout("raw request with key test-key")
         return FakeResponse("201")
@@ -203,6 +321,7 @@ def test_paid_request_failure_is_sanitized_and_counts_toward_limit(warehouse, mo
     with pytest.raises(RuntimeError, match="^Odds API odds request failed$") as error:
         paper_close_poll.poll_closes(collect=True)
     assert error.value.__suppress_context__
+    assert calls == [("events", "test-key"), ("odds", "test-key")]
     with connect(warehouse) as conn:
         assert conn.execute("SELECT COUNT(*) FROM paper_close_requests").fetchone()[0] == 1
 
