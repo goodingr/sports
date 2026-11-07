@@ -60,28 +60,30 @@ git clone <repo-url> sports && cd sports
 cp .env.example .env
 $EDITOR .env                 # fill in REQUIRED values
 docker compose pull caddy    # warm the proxy image
-docker compose build         # ~10 min on a 4 vCPU host first time
-docker compose up -d proxy api web
-docker compose logs -f api   # watch /health flip to 200
+docker compose build
 ```
 
-The first `docker compose up -d` will:
-- create the `sports_data`, `sports_models`, `sports_logs`, `sports_backups`
-  volumes
-- bind 80/443 on the host
-- request Let's Encrypt certs once DNS resolves
-
-Once the API is healthy:
+Restore the warehouse and model artifacts before starting the service stack.
+The one-shot restore creates the named volumes and writes as the same `app`
+user that runs cron jobs. [Backup and restore](BACKUP_RESTORE.md)
 
 ```bash
-# Restore DB + models from S3 BEFORE starting the worker so we don't
-# overwrite a fresh empty DB.
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
-docker compose up -d worker
+docker compose run --rm --no-deps --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
+docker compose up -d api worker
 ```
 
-Verify:
+Check the data plan and worker cadence before supplying a live odds key.
+The default hourly refresh and daily pipeline can run 25 broad odds and
+score passes per day. The paper entry and closing caps apply to the
+supplemental collectors. [Commercial cost assumptions](COMMERCIAL_VALIDATION.md)
+
+Wait for an ordinary scheduled refresh if the restored odds or predictions
+are stale. Once the API passes `/ready`, start the web app and proxy. The
+proxy binds ports 80 and 443 and requests certificates once DNS resolves.
+
 ```bash
+docker compose exec api curl -fsS http://localhost:8000/ready
+docker compose up -d web proxy
 curl -fsS https://${API_DOMAIN}/health
 curl -fsS https://${APP_DOMAIN}/ | head
 docker compose exec worker cat /etc/cron.d/sports

@@ -126,19 +126,19 @@ See also [docs/BACKUP_RESTORE.md](BACKUP_RESTORE.md) for the full backup model.
 ```bash
 docker compose stop worker            # freeze writers
 docker compose stop api               # freeze readers
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --force
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --force
 docker compose up -d api worker
 ```
 
 **Specific date:**
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh \
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker \
   --date 2026-04-23 --force
 ```
 
 **Dry run** (lists what would be restored, no writes):
 ```bash
-docker compose run --rm worker /app/scripts/restore_from_s3.sh --dry-run
+docker compose run --rm --user app --entrypoint /app/scripts/restore_from_s3.sh worker --dry-run
 ```
 
 **Drill** (restore to a temp dir, sanity-check, throw away):
