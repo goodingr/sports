@@ -57,6 +57,10 @@ The fixed soccer 1X2 power de-vig replay missed its log-loss gate on 514 later
 fixtures. Its nine Bet365 selections returned −63.33%. The one-hour pre-tip
 snapshots serve as historical closing-price proxies. See
 `reports/research/soccer_power_devig/result.json`.
+The frozen lower-division soccer replay found a zero short-away-turnaround
+coefficient. It missed the accuracy gate on 620 later fixtures and returned
+−6.11% on its 465 selections. See
+`reports/research/soccer_away_turnaround/result.json`.
 The NBA prospective trial is collecting evidence and its
 scheduled final review is April 19, 2027 at midnight Eastern time.
 
