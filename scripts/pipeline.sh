@@ -154,8 +154,24 @@ else
 	PROVIDER_LEAGUES=("${LEAGUES[@]}")
 fi
 
-if [[ -n "${PAID_RELEASE_LEAGUES:-}" ]]; then
-	csv_to_array "$PAID_RELEASE_LEAGUES" PAID_LEAGUES
+configured_paid_leagues=${PAID_RELEASE_LEAGUES:-}
+paid_scope_file=config/paid_release_leagues.local
+if [[ -z "$configured_paid_leagues" && -f "$paid_scope_file" ]] && (( ! SOCCER_ONLY )); then
+	known_leagues=$(IFS='|'; printf '%s' "${CORE_LEAGUES[*]}|${SOCCER_LEAGUES[*]}")
+	if selection=$(< "$paid_scope_file"); then
+		selection=${selection%$'\r'}
+		if [[ "$selection" =~ ^($known_leagues)(,($known_leagues))*$ ]]; then
+			configured_paid_leagues=$selection
+		else
+			log "WARN: Invalid workspace paid-release scope. Using the standard scope."
+		fi
+	else
+		log "WARN: Workspace paid-release scope could not be read. Using the standard scope."
+	fi
+fi
+
+if [[ -n "$configured_paid_leagues" ]]; then
+	csv_to_array "$configured_paid_leagues" PAID_LEAGUES
 else
 	PAID_LEAGUES=("${DEFAULT_PAID_RELEASE_LEAGUES[@]}")
 fi

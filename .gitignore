@@ -12,6 +12,7 @@ env*/
 .env.*
 !.env.example
 /config/research_provider_leagues.local
+/config/paid_release_leagues.local
 
 ## Packaging / build
 build/

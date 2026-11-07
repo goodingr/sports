@@ -241,13 +241,26 @@ bash scripts/pipeline.sh --research-provider-leagues
 
 The switch limits live Odds API odds and score requests to NBA and NCAAB.
 It preserves the immediate NBA capture, ordinary history and predictions,
-and paid-release quality checks. Leagues without a fresh quote can still
-fail those checks and trigger revocation.
+and paid-release quality checks. A stale league in the paid-release scope
+can still fail those checks and trigger revocation.
 
 For a scheduled host that already runs these scripts, create the local file
 `config/research_provider_leagues.local` to select the same scope. Its presence
 enables the setting for regular runs in that workspace. Remove the file to
 restore broad collection. Explicit soccer-only runs use their own scope.
+
+The paid-release scope is independent. Set `PAID_RELEASE_LEAGUES` in the
+pipeline environment, or create `config/paid_release_leagues.local` with one
+comma-separated line of uppercase league codes. For an NBA-only release scope,
+write `NBA` on that line. The environment takes precedence. The workspace file
+applies to regular runs and stays out of the worker image. An invalid file
+falls back to the standard scope and logs a warning.
+
+This scope applies to release hygiene, the data-quality gate and publication.
+The registered trial, approval rules, and quote eligibility checks still
+apply. A full-stack deployment sets `RELEASE_LEAGUES` independently for API
+readiness. Use the same intended public leagues when configuring the two
+services.
 
 The daily Windows and Linux pipelines log `NBA quote timing` after the paid
 gate or its skip. The report measures paper attempts and recorded decisions

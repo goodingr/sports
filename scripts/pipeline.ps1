@@ -68,13 +68,29 @@ New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 # Start Transcript to capture all output
 Start-Transcript -Path $logFile -Append
 
-$paidReleaseLeagues = if ($env:PAID_RELEASE_LEAGUES) {
-    $env:PAID_RELEASE_LEAGUES
+$configuredPaidLeagues = $env:PAID_RELEASE_LEAGUES
+$paidScopeFile = "config/paid_release_leagues.local"
+if (-not $configuredPaidLeagues -and -not $SoccerOnly -and (Test-Path -LiteralPath $paidScopeFile -PathType Leaf)) {
+    $knownLeagues = "NFL|NBA|CFB|NCAAB|NHL|EPL|LALIGA|BUNDESLIGA|SERIEA|LIGUE1"
+    try {
+        $selection = ([string](Get-Content -LiteralPath $paidScopeFile -Raw -ErrorAction Stop)).Trim()
+        if ($selection -cmatch "^($knownLeagues)(,($knownLeagues))*$") {
+            $configuredPaidLeagues = $selection
+        } else {
+            Write-Warning "Invalid workspace paid-release scope. Using the standard scope."
+        }
+    } catch {
+        Write-Warning "Workspace paid-release scope could not be read. Using the standard scope."
+    }
+}
+$paidReleaseLeagues = if ($configuredPaidLeagues) {
+    $configuredPaidLeagues
 } elseif ($SoccerOnly) {
     "EPL,LALIGA,BUNDESLIGA,SERIEA,LIGUE1"
 } else {
     "NBA,NHL,EPL,LALIGA,BUNDESLIGA,SERIEA,LIGUE1"
 }
+Write-Host "Paid release leagues: $paidReleaseLeagues"
 
 
 
