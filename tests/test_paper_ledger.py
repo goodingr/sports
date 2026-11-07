@@ -194,6 +194,31 @@ def test_capture_records_empty_and_failed_runs(warehouse, monkeypatch):
     assert len(observations) == 2
 
 
+def test_runner_signals_empty_predictions_when_a_fixture_is_in_window(warehouse, monkeypatch):
+    db, trial, _, now = warehouse
+
+    class EmptyEngine:
+        totals_model_sha256 = None
+
+        def __init__(self, model_type):
+            pass
+
+        def predict(self, league, *, trace_totals):
+            return None
+
+    monkeypatch.setenv("SPORTS_DB_PATH", str(db))
+    monkeypatch.setattr("src.predict.runner.PredictionEngine", EmptyEngine)
+    monkeypatch.setattr("src.predict.runner.load_trial", lambda _: trial)
+    with pytest.raises(RuntimeError, match="produced no predictions during an active capture window"):
+        run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
+
+    with connect(db) as conn:
+        statuses = conn.execute("SELECT status FROM paper_capture_runs").fetchall()
+        conn.execute("UPDATE games SET start_time_utc = ?", ((now + timedelta(days=1)).isoformat(),))
+    assert [row["status"] for row in statuses] == ["no_predictions"]
+    run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
+
+
 def test_capture_rejects_stale_superseded_and_future_predictions(warehouse):
     db, trial, predictions, now = warehouse
     assert capture_predictions(

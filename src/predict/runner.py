@@ -43,6 +43,10 @@ def run_predictions(
             except Exception:
                 LOGGER.exception("Could not record the failed paper capture")
             raise
+        if (predictions is None or predictions.empty) and counts.get("prediction_missing"):
+            raise RuntimeError(
+                f"Paper trial {trial.trial_id} produced no predictions during an active capture window"
+            )
 
 
 def main():
