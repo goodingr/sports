@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -13,8 +13,7 @@ import requests
 
 from src.db.loaders import load_odds_snapshot
 
-from .config import RAW_DATA_DIR, OddsAPISettings, OddsAPIKeyManager, ensure_directories
-
+from .config import RAW_DATA_DIR, OddsAPIKeyManager, OddsAPISettings, ensure_directories
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,6 +205,7 @@ def run(
     market: str | None = None,
     region: str | None = None,
     force_refresh: bool = False,
+    require_fresh: bool = False,
 ) -> Path:
     """Fetch odds data and store the snapshot."""
 
@@ -221,7 +221,7 @@ def run(
     raw_odds_dir = RAW_DATA_DIR / "odds"
     sport_dir = raw_odds_dir / settings.sport
 
-    if not force_refresh:
+    if not (force_refresh or require_fresh):
         cached_path, cached_data, age_minutes = _load_recent_snapshot(sport_dir, settings)
         if cached_path and cached_data is not None and age_minutes is not None:
             LOGGER.info(
@@ -235,6 +235,8 @@ def run(
 
     data = fetch_odds(settings)
     output_path = write_snapshot(data, sport_dir)
+    if require_fresh and data.get("error"):
+        raise RuntimeError(f"Odds API did not refresh {settings.sport} ({data['error']})")
 
     load_odds_snapshot(data, raw_path=str(output_path), region=settings.region, sport_key=settings.sport)
     LOGGER.info("Saved odds snapshot to %s", output_path)
@@ -297,6 +299,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Bypass cached snapshots and always hit The Odds API",
     )
+    parser.add_argument(
+        "--require-fresh",
+        action="store_true",
+        help="Bypass the cache and fail if The Odds API returns an error",
+    )
     return parser.parse_args()
 
 
@@ -310,6 +317,7 @@ def main() -> None:
         market=args.market,
         region=args.region,
         force_refresh=args.force_refresh,
+        require_fresh=args.require_fresh,
     )
 
 

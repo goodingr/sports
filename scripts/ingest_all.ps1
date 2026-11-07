@@ -28,7 +28,7 @@ Write-Host "=== Starting Data Ingestion ==="
 if ($capturePaperFirst) {
     try {
         Write-Host "Fetching NBA odds for paper capture before history ingestion..."
-        & poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --force-refresh 2>&1 | ForEach-Object { "$_" }
+        & poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh 2>&1 | ForEach-Object { "$_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "NBA odds refresh failed. Paper capture could not run."
             $paperFailed = $true

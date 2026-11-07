@@ -46,6 +46,36 @@ def test_odds_request_metadata_excludes_credentials(monkeypatch) -> None:
         ingest_odds.fetch_odds(settings)
 
 
+def test_required_fresh_odds_distinguishes_provider_error_from_empty_success(tmp_path, monkeypatch) -> None:
+    key = "fake-test-key"
+    settings = ingest_odds.OddsAPISettings(api_key=key, sport="basketball_nba")
+    monkeypatch.setattr(ingest_odds.OddsAPISettings, "from_env", lambda _: settings)
+    monkeypatch.setattr(ingest_odds.OddsAPIKeyManager, "get_available_keys", lambda: [key])
+    monkeypatch.setattr(ingest_odds.OddsAPIKeyManager, "get_current_key", lambda: key)
+    monkeypatch.setattr(ingest_odds, "ensure_directories", lambda: None)
+    monkeypatch.setattr(ingest_odds, "RAW_DATA_DIR", tmp_path)
+    loaded = []
+    monkeypatch.setattr(ingest_odds, "load_odds_snapshot", lambda payload, **_: loaded.append(payload))
+
+    response = requests.Response()
+    response.status_code = 404
+    monkeypatch.setattr(ingest_odds.requests, "get", lambda *args, **kwargs: response)
+    with pytest.raises(RuntimeError, match="did not refresh basketball_nba"):
+        ingest_odds.run(require_fresh=True)
+    assert loaded == []
+    assert list(tmp_path.rglob("odds_*.json"))
+
+    # Standard ingestion continues to tolerate an unavailable off-season sport.
+    ingest_odds.run(force_refresh=True)
+    assert loaded[-1]["error"] == "404 Not Found"
+
+    response.status_code = 200
+    response._content = b"[]"
+    ingest_odds.run(require_fresh=True)
+    assert "error" not in loaded[-1]
+    assert loaded[-1]["results"] == []
+
+
 def test_entry_run_mode_defaults() -> None:
     assert ingest_sources._entry_run_mode({"category": "historical_stats"}) == "bootstrap"
     assert ingest_sources._entry_run_mode({"category": "odds"}) == "continuous"

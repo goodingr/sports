@@ -178,7 +178,7 @@ if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${L
 	CAPTURE_PAPER_FIRST=1
 	log "step: fetch NBA odds for paper capture before history ingestion"
 	if bucket_run ingest "odds[NBA]" -- \
-		python -m src.data.ingest_odds --league NBA --market h2h,totals --force-refresh; then
+		python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh; then
 		bucket_run paper "NBA/random_forest capture" -- \
 			python -m src.predict.runner --leagues NBA --model-type random_forest --paper
 	else
