@@ -6,7 +6,7 @@ import hashlib
 import sqlite3
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,6 +14,7 @@ import requests
 
 from src.data.audit_nba_schedule import _NBA_GAMES, _NBA_HEADERS, _Fixture, _official_fixtures
 from src.data.ingest_nba_events import (
+    _EVENT_ID,
     _eligible_events,
     _Event,
     _existing_pairing,
@@ -42,6 +43,7 @@ class _Target:
     away_team_id: int
     game_id: str | None
     canonical_start: datetime | None
+    provider_id: str | None
 
     @property
     def earliest_start(self) -> datetime:
@@ -59,6 +61,8 @@ class FallbackPlan:
     request_from: datetime
     request_to: datetime
     targets: tuple[_Target, ...]
+    ordinary_due_ids: frozenset[str]
+    probe_starts: tuple[tuple[str, datetime], ...] = ()
 
     def odds_window(self) -> dict[str, str]:
         return {
@@ -72,7 +76,18 @@ class FallbackPlan:
             return "entry_clock_reversed"
         if not timedelta(0) <= now - self.official_observed_at <= _MAX_OFFICIAL_AGE:
             return "stale_official_observation"
-        return _last_window_status(self.targets, now, minimum_lead)
+        if self.ordinary_due_ids:
+            starts = dict(self.probe_starts)
+            actionable = any(
+                min(target.earliest_start, starts[provider_id]) - now >= minimum_lead
+                for target in self.targets
+                if (provider_id := target.provider_id) is not None
+                and provider_id in self.ordinary_due_ids
+            )
+            return "window_due" if actionable else "entry_lead_elapsed"
+        return _last_window_status(
+            (target for target in self.targets if target.provider_id is None), now, minimum_lead
+        )
 
 
 @dataclass(frozen=True)
@@ -93,19 +108,26 @@ def fetch_official_slate(day: date) -> tuple[bytes, datetime]:
     return response.content, datetime.now(timezone.utc)
 
 
-def archive_official_slate(directory: Path, raw: bytes, plan: FallbackPlan) -> dict[str, object]:
-    if hashlib.sha256(raw).hexdigest() != plan.official_sha256:
+def archive_official_slate(
+    directory: Path,
+    raw: bytes,
+    day: date,
+    observed_at: datetime,
+    plan: FallbackPlan | None = None,
+) -> dict[str, object]:
+    digest = hashlib.sha256(raw).hexdigest()
+    if plan is not None and digest != plan.official_sha256:
         raise RuntimeError("Official NBA slate changed before archiving")
     directory.mkdir(parents=True, exist_ok=True)
     name = "official_schedule.html"
     with (directory / name).open("xb") as archive:
         archive.write(raw)
     return {
-        "url": f"{_NBA_GAMES}?date={plan.eastern_date.isoformat()}",
-        "observed_at": plan.official_observed_at.isoformat(),
-        "sha256": plan.official_sha256,
+        "url": f"{_NBA_GAMES}?date={day.isoformat()}",
+        "observed_at": observed_at.isoformat(),
+        "sha256": digest,
         "filename": name,
-        "nba_game_ids": [target.official.game_id for target in plan.targets],
+        "nba_game_ids": [target.official.game_id for target in plan.targets] if plan else [],
     }
 
 
@@ -143,9 +165,7 @@ def _safe_canonical(
     return row, start
 
 
-def _last_window_status(
-    targets: Iterable[_Target], now: datetime, minimum_lead: timedelta
-) -> str:
+def _last_window_status(targets: Iterable[_Target], now: datetime, minimum_lead: timedelta) -> str:
     trigger_min = max(minimum_lead, _MIN_TRIGGER_LEAD)
     leads = (target.earliest_start - now for target in targets)
     trigger = min((lead for lead in leads if lead >= trigger_min), default=None)
@@ -156,28 +176,77 @@ def _last_window_status(
     return "window_due"
 
 
+def read_official_fixtures(
+    raw: bytes, observed_at: datetime, now: datetime
+) -> tuple[str, list[_Fixture]]:
+    if now.utcoffset() is None or observed_at.utcoffset() is None:
+        raise ValueError("Use timezone-aware observation times")
+    if not timedelta(0) <= now - observed_at <= _MAX_OFFICIAL_AGE:
+        return "stale_official_observation", []
+    _, fixtures = _official_fixtures(raw, now.astimezone(_EASTERN).date())
+    codes = {code for fixture in fixtures for code in (fixture.home, fixture.away)}
+    ids = {team_id for fixture in fixtures for team_id in (fixture.home_id, fixture.away_id)}
+    if len(codes) != 2 * len(fixtures) or len(ids) != 2 * len(fixtures):
+        return "fixture_conflict", []
+    return "verified", fixtures
+
+
+def anchor_ordinary_clocks(
+    conn: sqlite3.Connection,
+    due: dict[str, _ClosingFixture],
+    official: Iterable[_Fixture] = (),
+    *,
+    free_events: list | None = None,
+) -> dict[str, _ClosingFixture]:
+    """Retain earlier clocks for unambiguous ordinary fixtures."""
+    if not due:
+        return due
+    sport_id = next(iter(due.values())).sport_id
+    codes = dict(conn.execute("SELECT team_id, code FROM teams WHERE sport_id = ?", (sport_id,)))
+    official_starts = {(fixture.home, fixture.away): fixture.start for fixture in official}
+    events = [_parse_event(row) for row in free_events] if free_events is not None else []
+    by_id = {event.event_id: event for event in events if event is not None}
+    counts = Counter(
+        row["id"]
+        for row in free_events or []
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    )
+    projected = {}
+    for provider_id, fixture in due.items():
+        home = codes.get(fixture.home_team_id)
+        away = codes.get(fixture.away_team_id)
+        if home is None or away is None:
+            projected[provider_id] = fixture
+            continue
+        pair = (home, away)
+        starts = [fixture.start]
+        official_start = official_starts.get(pair)
+        if official_start is not None:
+            starts.append(official_start)
+        event = by_id.get(provider_id)
+        if (
+            event is not None
+            and counts[provider_id] == 1
+            and (event.home_code, event.away_code) == pair
+        ):
+            starts.append(event.start)
+        if fixture.latest_start - min(starts) <= _START_TOLERANCE:
+            fixture = replace(fixture, start=min(starts))
+        projected[provider_id] = fixture
+    return projected
+
+
 def plan_missing_ids(
     conn: sqlite3.Connection,
     trial: PaperTrial,
     official_raw: bytes,
     official_observed_at: datetime,
     now: datetime,
+    ordinary_due: dict[str, _ClosingFixture],
+    fixtures: list[_Fixture],
 ) -> tuple[str, FallbackPlan | None]:
-    """Plan a window after the ordinary collector finds no batch and no reservation."""
-    if now.utcoffset() is None or official_observed_at.utcoffset() is None:
-        raise ValueError("Use timezone-aware observation times")
-    if not timedelta(0) <= now - official_observed_at <= _MAX_OFFICIAL_AGE:
-        return "stale_official_observation", None
+    """Plan a window for unresolved official fixtures and cover every ordinary due row."""
     day = now.astimezone(_EASTERN).date()
-    _, fixtures = _official_fixtures(official_raw, day)
-    official_teams = [code for fixture in fixtures for code in (fixture.home, fixture.away)]
-    official_ids = [
-        team_id for fixture in fixtures for team_id in (fixture.home_id, fixture.away_id)
-    ]
-    if len(set(official_teams)) != len(official_teams) or len(set(official_ids)) != len(
-        official_ids
-    ):
-        return "fixture_conflict", None
     sport = conn.execute("SELECT sport_id FROM sports WHERE league = 'NBA'").fetchone()
     if sport is None:
         return "nba_unavailable", None
@@ -199,8 +268,6 @@ def plan_missing_ids(
             return "fixture_conflict", None
         if canonical is not None:
             game, start = canonical
-            if game["odds_api_id"]:
-                return "provider_ids_present", None
             if _already_handled(conn, trial.trial_id, game):
                 continue
             if (
@@ -209,15 +276,32 @@ def plan_missing_ids(
             ):
                 return "fixture_conflict", None
             game_id = game["game_id"]
+            provider_id = game["odds_api_id"] or None
+            if provider_id is not None:
+                if not _EVENT_ID.fullmatch(provider_id) or [
+                    row["game_id"]
+                    for row in conn.execute(
+                        "SELECT game_id FROM games WHERE odds_api_id = ?", (provider_id,)
+                    )
+                ] != [game_id]:
+                    return "fixture_conflict", None
         else:
-            game_id, start = None, None
-        targets.append(_Target(fixture, home, away, game_id, start))
-
+            game_id, start, provider_id = None, None, None
+        targets.append(_Target(fixture, home, away, game_id, start, provider_id))
+    unresolved = [target for target in targets if target.provider_id is None]
     if not targets:
         return "no_official_early_fixture", None
-    status = _last_window_status(targets, now, lead)
-    if status != "window_due":
-        return status, None
+    if not unresolved:
+        return "no_official_missing_fixture", None
+    covered = {target.provider_id: target.game_id for target in targets if target.provider_id}
+    if any(
+        covered.get(provider_id) != fixture.game_id for provider_id, fixture in ordinary_due.items()
+    ):
+        return "ordinary_not_covered", None
+    if not ordinary_due:
+        status = _last_window_status(unresolved, now, lead)
+        if status != "window_due":
+            return status, None
     starts = [target.official.start for target in targets]
     return "window_due", FallbackPlan(
         day,
@@ -229,10 +313,11 @@ def plan_missing_ids(
         min(starts) - _START_TOLERANCE,
         max(starts) + _START_TOLERANCE,
         tuple(targets),
+        frozenset(ordinary_due),
     )
 
 
-def classify_probe(payload: list, plan: FallbackPlan) -> str:
+def classify_probe(payload: list, plan: FallbackPlan) -> tuple[str, dict[str, datetime]]:
     """Separate genuinely absent target IDs from usable or conflicting free evidence."""
     targets = {
         frozenset((target.official.home, target.official.away)): target for target in plan.targets
@@ -240,9 +325,11 @@ def classify_probe(payload: list, plan: FallbackPlan) -> str:
     events = [_parse_event(row) for row in payload]
     counts = Counter(event.event_id for event in events if event is not None)
     matched: set[frozenset[str]] = set()
+    starts_by_id: dict[str, datetime] = {}
+    missing_observed = False
     for event in events:
         if event is None:
-            return "conflict"
+            return "conflict", {}
         pair = frozenset((event.home_code, event.away_code))
         target = targets.get(pair)
         if target is None or event.start.astimezone(_EASTERN).date() != plan.eastern_date:
@@ -255,11 +342,15 @@ def classify_probe(payload: list, plan: FallbackPlan) -> str:
             pair in matched
             or counts[event.event_id] != 1
             or (event.home_code, event.away_code) != (official.home, official.away)
+            or (target.provider_id is not None and target.provider_id != event.event_id)
             or max(starts) - min(starts) > _START_TOLERANCE
         ):
-            return "conflict"
+            return "conflict", {}
         matched.add(pair)
-    return "available" if matched else "absent"
+        starts_by_id[event.event_id] = event.start
+        if target.provider_id is None:
+            missing_observed = True
+    return ("available" if missing_observed else "absent"), starts_by_id
 
 
 def match_window_fixtures(
@@ -284,6 +375,7 @@ def match_window_fixtures(
         conn.execute("SELECT code, team_id FROM teams WHERE sport_id = ?", (plan.sport_id,))
     )
     fixtures = {}
+    probe_starts = dict(plan.probe_starts)
     for target in plan.targets:
         fixture = target.official
         matches = [
@@ -296,6 +388,8 @@ def match_window_fixtures(
         if len(matches) != 1:
             continue
         event = matches[0]
+        if target.provider_id is not None and event.event_id != target.provider_id:
+            continue
         home, away = target.home_team_id, target.away_team_id
         if (teams.get(fixture.home), teams.get(fixture.away)) != (home, away):
             continue
@@ -317,6 +411,7 @@ def match_window_fixtures(
             if (
                 (target.game_id is not None and target.game_id != game_id)
                 or (game["odds_api_id"] and game["odds_api_id"] != event.event_id)
+                or (target.provider_id is not None and game["odds_api_id"] != target.provider_id)
                 or _already_handled(conn, trial.trial_id, game)
                 or _eligible_game(conn, game_id, trial.league) is None
             ):
@@ -330,6 +425,8 @@ def match_window_fixtures(
         starts: tuple[datetime, ...] = (fixture.start, canonical_start, event.start)
         if target.canonical_start is not None:
             starts += (target.canonical_start,)
+        if event.event_id in probe_starts:
+            starts += (probe_starts[event.event_id],)
         earliest, latest = min(starts), max(starts)
         if latest - earliest > _START_TOLERANCE:
             continue

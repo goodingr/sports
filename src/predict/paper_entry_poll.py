@@ -8,6 +8,7 @@ import logging
 import sqlite3
 from collections import Counter
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -284,14 +285,25 @@ def _plan_entry_path(
     official: tuple[bytes, datetime] | None,
 ) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes, FallbackPlan | None]:
     status, due, fresh = _plan(conn, trial, now)
-    if official is not None and status == "no_entry_due":
-        from src.predict.paper_entry_fallback import plan_missing_ids
+    if official is not None and status in {"due", "no_entry_due"}:
+        from src.predict.paper_entry_fallback import (
+            anchor_ordinary_clocks,
+            plan_missing_ids,
+            read_official_fixtures,
+        )
 
         if _entry_slot_taken(conn, now):
             return "daily_cap", due, fresh, None
         raw, observed_at = official
-        status, window = plan_missing_ids(conn, trial, raw, observed_at, now)
-        return status, due, fresh, window
+        window_status, fixtures = read_official_fixtures(raw, observed_at, now)
+        window = None
+        if window_status == "verified":
+            due = anchor_ordinary_clocks(conn, due, fixtures)
+            window_status, window = plan_missing_ids(
+                conn, trial, raw, observed_at, now, due, fixtures
+            )
+        if window is not None or status == "no_entry_due":
+            return window_status, due, fresh, window
     return status, due, fresh, None
 
 
@@ -308,8 +320,27 @@ def _reserve(
         if window is not None:
             from src.predict.paper_entry_fallback import classify_probe
 
-            if free_events is None or classify_probe(free_events, window) != "absent":
-                return "provider_probe_conflict", {}, {}, None
+            probe_status, starts = (
+                classify_probe(free_events, window) if free_events is not None else ("conflict", {})
+            )
+            known_ids = {target.provider_id for target in window.targets if target.provider_id}
+            lead = timedelta(minutes=trial.min_minutes_before_start)
+            evening = datetime.combine(window.eastern_date, _DAILY_CAPTURE_ET, _EASTERN)
+            if (
+                probe_status != "absent"
+                or not known_ids <= starts.keys()
+                or any(not now + lead <= start < evening + lead for start in starts.values())
+            ):
+                if not due:
+                    return "provider_probe_conflict", {}, {}, None
+                status, window = "due", None
+            else:
+                window = replace(window, probe_starts=tuple(starts.items()))
+                due = {}
+        if status == "due" and free_events is not None:
+            from src.predict.paper_entry_fallback import anchor_ordinary_clocks
+
+            due = anchor_ordinary_clocks(conn, due, free_events=free_events)
         if status in {"due", "window_due"}:
             conn.execute(
                 """
@@ -598,16 +629,21 @@ def poll_entry(
             status = "daily_cap"
     official = None
     window = None
-    if collect and official_window_fallback and status == "no_entry_due":
+    if collect and official_window_fallback and status in {"due", "no_entry_due"}:
         from src.predict.paper_entry_fallback import fetch_official_slate
 
-        official = fetch_official_slate(now.astimezone(_EASTERN).date())
-        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn:
-            conn.row_factory = sqlite3.Row
-            conn.execute("BEGIN")
-            status, due, fresh, window = _plan_entry_path(
-                conn, trial, datetime.now(timezone.utc), official
-            )
+        try:
+            official = fetch_official_slate(now.astimezone(_EASTERN).date())
+            with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("BEGIN")
+                status, due, fresh, window = _plan_entry_path(
+                    conn, trial, datetime.now(timezone.utc), official
+                )
+        except (RuntimeError, ValueError):
+            if status != "due":
+                raise
+            official = None
     result: dict[str, str | int] = {
         "status": status,
         "due_events": len(window.targets) if window else len(due),
@@ -626,26 +662,36 @@ def poll_entry(
         if key is None:
             return {**result, "status": "quota_reserve"}
         if window is not None and not probe:
-            return {**result, "status": "unverified_zero_credit_probe"}
+            if not due:
+                return {**result, "status": "unverified_zero_credit_probe"}
         if probe:
             fetched = datetime.now(timezone.utc)
-            if window is not None:
+            probe_safe = True
+            if official is not None and (window is not None or due):
+                from src.predict.paper_entry_fallback import classify_probe
+
                 try:
                     probe_payload = probe[0].json()
                 except ValueError:
                     probe_payload = None
                 if not isinstance(probe_payload, list):
-                    return {**result, "status": "invalid_zero_credit_probe"}
-                from src.predict.paper_entry_fallback import classify_probe
-
-                if classify_probe(probe_payload, window) == "conflict":
-                    return {**result, "status": "provider_probe_conflict"}
-                probe_evidence = {
-                    "url": f"{_BASE_URL}/events",
-                    "observed_at": fetched.isoformat(),
-                    "request_credits": 0,
-                    "results": probe_payload,
-                }
+                    probe_status = "invalid_zero_credit_probe"
+                elif window is not None and classify_probe(probe_payload, window)[0] == "conflict":
+                    probe_status = "provider_probe_conflict"
+                else:
+                    probe_status = None
+                if probe_status is not None:
+                    if not due:
+                        return {**result, "status": probe_status}
+                    probe_payload = None
+                    probe_safe = False
+                else:
+                    probe_evidence = {
+                        "url": f"{_BASE_URL}/events",
+                        "observed_at": fetched.isoformat(),
+                        "request_credits": 0,
+                        "results": probe_payload,
+                    }
             local_day = fetched.astimezone(_EASTERN).date()
             evening = datetime.combine(local_day, _DAILY_CAPTURE_ET, tzinfo=_EASTERN)
             minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
@@ -656,7 +702,7 @@ def poll_entry(
                     evening + minimum_lead - timedelta(microseconds=1),
                 ),
             )
-            if fetched < evening:
+            if probe_safe and fetched < evening:
                 try:
                     counts = retain_entry_probe(path, probe[0], fetched, probe_window)
                     if counts and (counts["linked"] or counts["created"]):
@@ -664,7 +710,9 @@ def poll_entry(
                 except (RuntimeError, OSError, sqlite3.Error):
                     LOGGER.warning("Could not retain the optional NBA entry event response")
                     if window is not None:
-                        return {**result, "status": "zero_credit_probe_retention_failed"}
+                        if not due:
+                            return {**result, "status": "zero_credit_probe_retention_failed"}
+                        probe_payload = None
         status, due, fresh, window = _reserve(path, trial, official, probe_payload)
         result.update(status=status, due_events=len(window.targets) if window else len(due))
     if status == "reusable":
@@ -729,12 +777,18 @@ def poll_entry(
         "rate_limit_reset": response.headers.get("x-requests-reset"),
     }
     try:
-        if window is not None:
+        if window is not None or (
+            official is not None
+            and any(fixture.start < fixture.latest_start for fixture in due.values())
+        ):
             from src.predict.paper_entry_fallback import archive_official_slate
 
-            assert official is not None and probe_evidence is not None
-            archive["official_schedule"] = archive_official_slate(directory, official[0], window)
-            archive["provider_events_probe"] = probe_evidence
+            assert official is not None
+            archive["official_schedule"] = archive_official_slate(
+                directory, official[0], entry_day, official[1], window
+            )
+            if probe_evidence is not None:
+                archive["provider_events_probe"] = probe_evidence
         raw_path = write_snapshot(archive, directory)
     except OSError as exc:
         raise RuntimeError("Could not archive the entry odds response") from exc

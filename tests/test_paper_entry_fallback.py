@@ -207,8 +207,6 @@ def test_exact_november_8_request_and_pairing_preserve_earliest_verified_start(w
     [
         ("too_early", "waiting_for_last_window"),
         ("stale", "stale_official_observation"),
-        ("existing_due", "due"),
-        ("existing_later", "provider_ids_present"),
         ("previous_reservation", "daily_cap"),
         ("reversed", "fixture_conflict"),
         ("duplicate", "fixture_conflict"),
@@ -224,10 +222,6 @@ def test_fallback_gate_preserves_normal_route_and_one_eastern_date_slot(warehous
             observed = now
         elif stage == "stale":
             observed -= timedelta(minutes=31)
-        elif stage == "existing_due":
-            _game(conn, "already-mapped", PHI_START, "CHI", "PHI", "a" * 32)
-        elif stage == "existing_later":
-            _game(conn, "later-mapped", DET_START, "DET", "LAL", "b" * 32)
         elif stage == "previous_reservation":
             conn.execute(
                 "CREATE TABLE paper_entry_requests (entry_date_et TEXT PRIMARY KEY, requested_at_utc TEXT NOT NULL)"
@@ -619,24 +613,25 @@ def test_no_match_archives_response_without_binding_and_consumes_only_one_slot(
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
 
 
-def test_winning_free_probe_routes_newly_linked_fixtures_to_normal_entry(
-    entry_runtime, monkeypatch
-):
+def test_winning_free_probe_routes_fully_linked_slate_to_normal_entry(entry_runtime, monkeypatch):
     path, raw, _, _ = entry_runtime
-    paid = [_quote("a" * 32, PHI_START, "CHI", "PHI")]
+    paid = [
+        _quote("a" * 32, PHI_START, "CHI", "PHI"),
+        _quote("b" * 32, DET_START, "DET", "LAL"),
+    ]
     calls = _mock_sources(monkeypatch, paid, events=paid)
     assert _collect_window() == {
         "status": "collected",
-        "due_events": 1,
-        "events_loaded": 1,
-        "decisions_recorded": 1,
+        "due_events": 2,
+        "events_loaded": 2,
+        "decisions_recorded": 2,
     }
     assert len(calls) == 3
-    assert calls[-1][1]["eventIds"] == "a" * 32
+    assert calls[-1][1]["eventIds"] == f'{"a" * 32},{"b" * 32}'
     assert "commenceTimeFrom" not in calls[-1][1]
     assert not list(raw.rglob("official_schedule.html"))
     with connect(path) as conn:
-        assert conn.execute("SELECT count(*) FROM nba_event_discovery_links").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM nba_event_discovery_links").fetchone()[0] == 2
         assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
 
 
@@ -808,3 +803,188 @@ def test_ordinary_entry_keeps_existing_market_clock_policy(entry_runtime, monkey
     assert entry.poll_entry(collect=True)["status"] == "collected"
     assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["events", "odds"]
     assert calls[-1][1]["eventIds"] == "a" * 32
+
+
+@pytest.mark.parametrize("state", ["early_known", "late_known", "partially_linked"])
+def test_mixed_window_keeps_verified_known_fixtures_and_the_single_slot(
+    entry_runtime, monkeypatch, state
+):
+    path, raw, clock, predictions = entry_runtime
+    known_phi = state != "late_known"
+    known_id = "a" * 32 if known_phi else "b" * 32
+    start = PHI_START if known_phi else DET_START
+    home, away = ("CHI", "PHI") if known_phi else ("DET", "LAL")
+    earlier_probe = start - timedelta(minutes=4)
+    if state == "early_known":
+        clock.current = NOW - timedelta(minutes=30)
+    if state != "partially_linked":
+        with connect(path) as conn:
+            _game(conn, "known", start, home, away, known_id)
+    paid = [
+        _quote("a" * 32, PHI_START + timedelta(minutes=2), "CHI", "PHI"),
+        _quote("b" * 32, DET_START + timedelta(minutes=2), "DET", "LAL"),
+    ]
+    calls = _mock_sources(monkeypatch, paid, events=[_quote(known_id, earlier_probe, home, away)])
+    assert _collect_window() == {
+        "status": "collected",
+        "due_events": 2,
+        "events_loaded": 2,
+        "decisions_recorded": 2,
+        "mode": "official_window",
+    }
+    assert len(calls) == 3 and "eventIds" not in calls[-1][1]
+    assert calls[-1][1]["commenceTimeFrom"] == "2026-11-08T20:20:00Z"
+    assert calls[-1][1]["commenceTimeTo"] == "2026-11-08T23:10:00Z"
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+        assert (
+            dict(
+                conn.execute(
+                    """
+            SELECT g.odds_api_id, d.start_time_utc
+            FROM paper_decisions d JOIN games g USING(game_id)
+            """
+                )
+            )[known_id]
+            == earlier_probe.isoformat()
+        )
+        if state != "partially_linked":
+            assert (
+                conn.execute("SELECT start_time_utc FROM games WHERE game_id='known'").fetchone()[0]
+                == start.isoformat()
+            )
+    assert len(predictions[0]) == 2
+    assert len(list(raw.rglob("official_schedule.html"))) == 1
+    clock.current = DET_START - timedelta(hours=1)
+    assert _collect_window()["status"] == "daily_cap"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "official_unavailable",
+        "official_invalid",
+        "known_absent",
+        "free_unverified",
+        "free_conflict",
+        "ordinary_uncovered",
+    ],
+)
+def test_inconclusive_mixed_evidence_preserves_every_due_targeted_fixture(
+    entry_runtime, monkeypatch, defect
+):
+    path, _, clock, _ = entry_runtime
+    clock.current = NOW - timedelta(minutes=30)
+    early = _quote("a" * 32, PHI_START, "CHI", "PHI")
+    free = [early]
+    paid = [early]
+    with connect(path) as conn:
+        _game(conn, "known", PHI_START, "CHI", "PHI", "a" * 32)
+        if defect == "ordinary_uncovered":
+            extra_start = PHI_START + timedelta(minutes=10)
+            _game(conn, "other", extra_start, "MIN", "UTA", "c" * 32)
+            extra = _quote("c" * 32, extra_start, "MIN", "UTA")
+            free.append(extra)
+            paid.append(extra)
+    if defect == "official_unavailable":
+
+        def unavailable(day):
+            raise RuntimeError("offline official schedule")
+
+        monkeypatch.setattr(fallback, "fetch_official_slate", unavailable)
+    elif defect == "official_invalid":
+        monkeypatch.setattr(
+            fallback, "fetch_official_slate", lambda day: (b"broken", clock.current)
+        )
+    elif defect == "known_absent":
+        free.clear()
+    elif defect == "free_conflict":
+        free.append(_quote("b" * 32, PHI_START, "PHI", "CHI"))
+    calls = _mock_sources(
+        monkeypatch, paid, events=free, free_cost="1" if defect == "free_unverified" else "0"
+    )
+    result = _collect_window()
+    assert result["status"] == "collected" and "mode" not in result
+    assert result["events_loaded"] == len(paid)
+    assert calls[-1][1]["eventIds"] == ",".join(sorted(e["id"] for e in paid))
+    assert sum(url.endswith("/odds") for url, _ in calls) == 1
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM games").fetchone()[0] == len(paid)
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+
+
+def test_mixed_paid_response_cannot_replace_known_provider_identity(entry_runtime, monkeypatch):
+    path, _, _, _ = entry_runtime
+    with connect(path) as conn:
+        _game(conn, "known", PHI_START, "CHI", "PHI", "a" * 32)
+    calls = _mock_sources(
+        monkeypatch,
+        [_quote("f" * 32, PHI_START, "CHI", "PHI"), _quote("b" * 32, DET_START, "DET", "LAL")],
+        events=[_quote("a" * 32, PHI_START, "CHI", "PHI")],
+    )
+    assert _collect_window()["events_loaded"] == 1
+    assert len(calls) == 3
+    with connect(path) as conn:
+        assert (
+            conn.execute("SELECT odds_api_id FROM games WHERE game_id='known'").fetchone()[0]
+            == "a" * 32
+        )
+        assert conn.execute("SELECT count(*) FROM odds WHERE game_id='known'").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("earlier_source", ["official", "free"])
+def test_targeted_downgrade_still_uses_an_earlier_verified_clock(
+    entry_runtime, monkeypatch, earlier_source
+):
+    path, raw, clock, _ = entry_runtime
+    clock.current = PHI_START - timedelta(minutes=10)
+    first = PHI_START + timedelta(minutes=10)
+    second = PHI_START + timedelta(minutes=30)
+    third = DET_START + timedelta(hours=1)
+    cutoff_source = PHI_START if earlier_source == "official" else PHI_START + timedelta(minutes=5)
+    official = _official().replace(
+        PHI_START.isoformat().encode(), cutoff_source.isoformat().encode(), 1
+    )
+    official = official.replace(DET_START.isoformat().encode(), second.isoformat().encode(), 1)
+    official = official.replace(third.isoformat().encode(), DET_START.isoformat().encode(), 1)
+    with connect(path) as conn:
+        _game(conn, "too-late", first, "CHI", "PHI", "a" * 32)
+        _game(conn, "on-time", second, "DET", "LAL", "b" * 32)
+    paid = [_quote("a" * 32, first, "CHI", "PHI"), _quote("b" * 32, second, "DET", "LAL")]
+    free_first = PHI_START if earlier_source == "free" else first
+    free = [_quote("a" * 32, free_first, "CHI", "PHI"), paid[1]]
+    calls = _mock_sources(monkeypatch, paid, events=free, official=official)
+    assert _collect_window() == {
+        "status": "collected",
+        "due_events": 2,
+        "events_loaded": 1,
+        "decisions_recorded": 1,
+    }
+    assert calls[-1][1]["eventIds"] == f'{"a" * 32},{"b" * 32}'
+    with connect(path) as conn:
+        assert [row[0] for row in conn.execute("SELECT game_id FROM paper_decisions")] == [
+            "on-time"
+        ]
+    [archive] = raw.rglob("official_schedule.html")
+    assert archive.read_bytes() == official
+
+
+def test_mixed_dispatch_rechecks_the_earlier_verified_free_clock(entry_runtime, monkeypatch):
+    path, _, clock, _ = entry_runtime
+    nominal = PHI_START - timedelta(minutes=15)
+    canonical = nominal + timedelta(minutes=5)
+    free = nominal - timedelta(minutes=5)
+    official = _official().replace(PHI_START.isoformat().encode(), nominal.isoformat().encode(), 1)
+    with connect(path) as conn:
+        _game(conn, "known", canonical, "CHI", "PHI", "a" * 32)
+    calls = _mock_sources(
+        monkeypatch, [], events=[_quote("a" * 32, free, "CHI", "PHI")], official=official
+    )
+    _resume_after_reservation(
+        monkeypatch, clock, free - timedelta(minutes=15) + timedelta(microseconds=1)
+    )
+    assert _collect_window()["status"] == "entry_lead_elapsed"
+    assert len(calls) == 2
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
