@@ -34,9 +34,10 @@ claim unless it is listed here with a current evidence artifact.
 | "No paid picks are currently approved." | Allowed until changed | `approved_rules: []` in `config/published_rules.yml` |
 | "Historical candidates are being evaluated against closing-line value." | Allowed | `src.models.prediction_quality.build_clv_summary`, `src.models.betting_benchmark.rank_predeclared_rules` |
 
-The November 7 research snapshot found zero passing rules among 3,024 evaluated
-configurations (670 met the sample threshold). Evidence:
-`reports/betting_benchmarks/strict_quote_recheck/betting_benchmark_20261107T033744Z.json`.
+The November 7 research snapshot after raw-archive recovery found zero passing
+rules among 3,024 evaluated configurations (669 met the sample threshold).
+Evidence:
+`reports/betting_benchmarks/after_raw_recovery/betting_benchmark_20261107T044956Z.json`.
 Subsequent frozen NHL moneyline and soccer totals market-offset experiments also
 failed to establish a profitable edge; their evidence is in
 `reports/research/nhl_market_offset/result.json` and
