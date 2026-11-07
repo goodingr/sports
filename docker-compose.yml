@@ -130,6 +130,7 @@ services:
       HOSTNAME: 0.0.0.0
       SPORTS_API_INTERNAL_URL: http://api:8000
       SPORTS_CHECKOUT_DB_PATH: /app/checkout-state/intents.db
+      COMMERCIAL_CONTACT_EMAIL: ${COMMERCIAL_CONTACT_EMAIL:-}
     volumes:
       - sports_checkout:/app/checkout-state
     expose:

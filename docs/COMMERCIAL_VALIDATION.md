@@ -298,6 +298,7 @@ without user, customer, or invoice IDs.
 
 ## Paid launch evidence
 
+- A monitored privacy and support inbox configured as `COMMERCIAL_CONTACT_EMAIL` in the full app. Verify that `/privacy` and `/terms` link to it. The interest pilot uses its own `PILOT_CONTACT_EMAIL` setting.
 - A current approved and passing pick rule and release audit under the existing claim policy. [Claim evidence](CLAIM_EVIDENCE.md)
 - Merchant eligibility for this exact subscription and target markets, confirmed with the processor, plus a verified live $29 USD monthly price and working checkout. Stripe's prohibited list covers sports forecasting with a monetary or material prize. Eligibility for this analytics subscription still needs account-specific confirmation. [Stripe prohibited and restricted businesses](https://stripe.com/us/legal/restricted-businesses)
 - The intended odds display falls within the provider terms. The Odds API permits commercial analytics and display and prohibits reselling raw data as a standalone feed. Review the customer odds endpoint in that context. [The Odds API terms](https://the-odds-api.com/terms-and-conditions.html)

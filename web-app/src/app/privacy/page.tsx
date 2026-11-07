@@ -2,6 +2,9 @@ import { Container } from "@/components/ui/Container";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { isPilotOnly } from "@/lib/pilot";
+import { publicContactEmail } from "@/lib/public-contact";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Sports Analytics",
@@ -12,8 +15,7 @@ const LAST_UPDATED = "April 26, 2026";
 
 export default function PrivacyPage() {
     const pilotOnly = isPilotOnly();
-    const pilotContact = pilotOnly ? process.env.COMMERCIAL_PILOT_CONTACT_EMAIL : undefined;
-    const contactEmail = pilotContact || "privacy@sportsanalytics.example";
+    const contactEmail = publicContactEmail();
     return (
         <Container className="py-16 max-w-3xl">
             <div className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
@@ -131,11 +133,14 @@ export default function PrivacyPage() {
                     <p>
                         Depending on your jurisdiction (e.g., GDPR, CCPA), you may have rights to
                         access, correct, delete, or port your personal information, and to object to
-                        or restrict certain processing. To exercise these rights, contact{" "}
-                        <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
-                            {contactEmail}
-                        </a>
-                        .
+                        or restrict certain processing.
+                        {contactEmail && (
+                            <> To exercise these rights, contact{" "}
+                                <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                                    {contactEmail}
+                                </a>.
+                            </>
+                        )}
                     </p>
                 </section>
 
@@ -175,13 +180,14 @@ export default function PrivacyPage() {
 
                 <section>
                     <h2 className="text-2xl font-bold text-foreground mb-3">12. Contact</h2>
-                    <p>
-                        Questions about this Privacy Policy can be sent to{" "}
-                        <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
-                            {contactEmail}
-                        </a>
-                        .
-                    </p>
+                    {contactEmail ? (
+                        <p>
+                            Questions about this Privacy Policy can be sent to{" "}
+                            <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                                {contactEmail}
+                            </a>.
+                        </p>
+                    ) : <p>Privacy email is currently unavailable.</p>}
                 </section>
             </div>
         </Container>
