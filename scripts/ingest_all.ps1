@@ -33,7 +33,7 @@ if ($capturePaperFirst) {
             Write-Warning "NBA odds refresh failed. Paper capture could not run."
             $paperFailed = $true
         } else {
-            & poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper 2>&1 | ForEach-Object { "$_" }
+            & poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only 2>&1 | ForEach-Object { "$_" }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "NBA paper capture failed (exit=$LASTEXITCODE)."
                 $paperFailed = $true

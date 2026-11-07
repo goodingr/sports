@@ -333,7 +333,7 @@ def test_capture_records_empty_and_failed_runs(warehouse, monkeypatch):
         def __init__(self, model_type):
             pass
 
-        def predict(self, league, *, trace_totals):
+        def predict_pinned_totals(self, league, model_sha256):
             raise ValueError("synthetic inference failure")
 
     monkeypatch.setenv("SPORTS_DB_PATH", str(db))
@@ -357,6 +357,9 @@ def test_runner_signals_empty_predictions_when_a_fixture_is_in_window(warehouse,
         def __init__(self, model_type):
             pass
 
+        def predict_pinned_totals(self, league, model_sha256):
+            return None
+
         def predict(self, league, *, trace_totals):
             return None
 
@@ -375,6 +378,37 @@ def test_runner_signals_empty_predictions_when_a_fixture_is_in_window(warehouse,
         )
     assert [row["status"] for row in statuses] == ["no_predictions"]
     run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
+
+
+@pytest.mark.parametrize("paper_only", [True, False])
+def test_runner_captures_pinned_totals_before_optional_ordinary_refresh(
+    warehouse, monkeypatch, paper_only
+):
+    db, trial, predictions, _ = warehouse
+    calls = []
+
+    class Engine:
+        def __init__(self, model_type):
+            self.totals_model_sha256 = trial.model_sha256
+
+        def predict_pinned_totals(self, league, model_sha256):
+            assert (league, model_sha256) == ("NBA", trial.model_sha256)
+            calls.append("paper")
+            return predictions
+
+        def predict(self, league, *, trace_totals):
+            assert league == "NBA" and trace_totals
+            with connect(db) as conn:
+                assert conn.execute("SELECT COUNT(*) FROM paper_decisions").fetchone()[0] == 1
+            calls.append("ordinary")
+
+    monkeypatch.setenv("SPORTS_DB_PATH", str(db))
+    monkeypatch.setattr("src.predict.runner.PredictionEngine", Engine)
+    monkeypatch.setattr("src.predict.runner.load_trial", lambda _: trial)
+    run_predictions(
+        ["NBA"], "random_forest", paper_rules=Path("unused"), paper_only=paper_only
+    )
+    assert calls == (["paper"] if paper_only else ["paper", "ordinary"])
 
 
 def test_capture_rejects_stale_superseded_and_future_predictions(warehouse):

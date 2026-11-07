@@ -446,8 +446,8 @@ def _capture(
         now = datetime.now(timezone.utc)
         eligible = {game_id for game_id, start in quoted.items() if start - now >= minimum_lead}
         if eligible:
-            predictions = engine.predict(
-                trial.league, days_ahead=1, trace_totals=True, fixture_ids=eligible
+            predictions = engine.predict_pinned_totals(
+                trial.league, trial.model_sha256, days_ahead=1, fixture_ids=eligible
             )
         if predictions is not None and not predictions.empty:
             engine_returned_predictions = True
@@ -494,13 +494,7 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
         return result
 
     engine = PredictionEngine(model_type=trial.model_type)
-    if (
-        not engine.load_model(trial.league, trace_totals=True)
-        or engine.totals_model is None
-        or not engine.totals_std
-        or engine.totals_model_sha256 != trial.model_sha256
-    ):
-        raise RuntimeError("The pinned paper totals model is unavailable")
+    engine.load_pinned_totals(trial.league, trial.model_sha256)
     key = None
     if status == "due":
         probe: list[requests.Response] = []

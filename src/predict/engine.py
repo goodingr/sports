@@ -11,6 +11,7 @@ from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
 
 from src.data.team_mappings import normalize_team_code
 from src.models.feature_loader import FeatureLoader
@@ -28,6 +29,12 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_REST_DAYS = 7.0
 SHORT_WEEK_THRESHOLD = 5.0
 BYE_THRESHOLD = 10.0
+_TOTALS_FEATURE_SOURCES = {
+    "total_close": "total_line",
+    "spread_close": "spread_line",
+    "home_moneyline_close": "home_moneyline",
+    "away_moneyline_close": "away_moneyline",
+}
 
 
 class FeatureContractError(RuntimeError):
@@ -114,6 +121,7 @@ class PredictionEngine:
         self.totals_std = None
         self.totals_features = None
         self.totals_model_sha256 = None
+        self._pinned_totals_league = None
         
     def load_model(self, league: str, *, trace_totals: bool = False) -> bool:
         """Load the trained model for the specified league."""
@@ -124,6 +132,7 @@ class PredictionEngine:
         self.totals_std = None
         self.totals_features = None
         self.totals_model_sha256 = None
+        self._pinned_totals_league = None
         # Try specific model type first
         model_filename = f"{league.lower()}_{self.model_type}_calibrated_moneyline.pkl"
         model_path = MODEL_REGISTRY_PATH / model_filename
@@ -154,28 +163,12 @@ class PredictionEngine:
             # We should probably implement that too.
             self.feature_columns = self._get_model_features(model_path)
             
-            # Try to load totals model (optional)
-            # For ensemble, fallback to gradient_boosting totals if ensemble totals doesn't exist
-            totals_model_type = self.model_type
-            if self.model_type == "ensemble":
-                totals_model_type = "gradient_boosting"
-                
-            totals_filename = f"{league.lower()}_totals_{totals_model_type}.pkl"
-            totals_path = MODEL_REGISTRY_PATH / totals_filename
-            if totals_path.exists():
-                try:
-                    model_bytes = totals_path.read_bytes()
-                    bundle = joblib.load(BytesIO(model_bytes))
-                    self.totals_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
-                    if isinstance(bundle, dict):
-                        self.totals_model = bundle.get("regressor")
-                        self.totals_std = bundle.get("residual_std", 5.0) # Default to 5.0 if missing
-                        self.totals_features = bundle.get("feature_names", ["total_close", "spread_close", "home_moneyline_close", "away_moneyline_close"])
-                        LOGGER.info(f"Loaded {totals_model_type} totals model for {league} ({self.model_type})")
-                except Exception as e:
-                    LOGGER.warning(f"Failed to load totals model for {league}: {e}")
-            else:
-                LOGGER.info(f"No totals model found at {totals_path}")
+            try:
+                self._load_totals_bundle(league)
+            except FileNotFoundError as exc:
+                LOGGER.info("No totals model found at %s", exc.filename)
+            except Exception as exc:
+                LOGGER.warning("Failed to load totals model for %s: %s", league, exc)
             
             
             return True
@@ -184,6 +177,62 @@ class PredictionEngine:
             LOGGER.error(f"Failed to load model for {league}: {e}\n{traceback.format_exc()}")
             return False
 
+
+    def _load_totals_bundle(self, league: str, *, pinned_sha256: str | None = None) -> None:
+        model_type = "gradient_boosting" if self.model_type == "ensemble" else self.model_type
+        path = MODEL_REGISTRY_PATH / f"{league.lower()}_totals_{model_type}.pkl"
+        model_bytes = path.read_bytes()
+        digest = hashlib.sha256(model_bytes).hexdigest()
+        if pinned_sha256 is not None and digest != pinned_sha256:
+            raise FeatureContractError(f"The {league} totals artifact differs from the pinned digest")
+        bundle = joblib.load(BytesIO(model_bytes))
+        self.totals_model_sha256 = digest
+        if not isinstance(bundle, dict):
+            return
+        self.totals_model = bundle.get("regressor")
+        if pinned_sha256 is None:
+            self.totals_std = bundle.get("residual_std", 5.0)
+            self.totals_features = bundle.get("feature_names", list(_TOTALS_FEATURE_SOURCES))
+        else:
+            self.totals_std = bundle.get("residual_std")
+            self.totals_features = bundle.get("feature_names")
+        LOGGER.info("Loaded %s totals model for %s (%s)", model_type, league, self.model_type)
+
+    def load_pinned_totals(self, league: str, model_sha256: str) -> None:
+        """Load and verify the paper artifact before a quote request is allowed."""
+        self._pinned_totals_league = None
+        self.totals_model = self.totals_std = self.totals_features = self.totals_model_sha256 = None
+        try:
+            self._load_totals_bundle(league, pinned_sha256=model_sha256)
+        except FeatureContractError:
+            raise
+        except Exception as exc:
+            raise FeatureContractError(f"Cannot load the pinned totals artifact for {league}") from exc
+        features = self.totals_features
+        if (
+            not callable(getattr(self.totals_model, "predict", None))
+            or not isinstance(self.totals_std, (int, float))
+            or isinstance(self.totals_std, bool)
+            or not math.isfinite(self.totals_std)
+            or self.totals_std <= 0
+            or not isinstance(features, (list, tuple))
+            or not features
+            or any(not isinstance(feature, str) or feature not in _TOTALS_FEATURE_SOURCES for feature in features)
+            or len(set(features)) != len(features)
+        ):
+            raise FeatureContractError(f"The pinned {league} totals model has an unsupported quote feature contract")
+        if "spread_close" in features:
+            # The paper quote does not contain a verified spread. The current forest
+            # includes its matrix column but never splits on it.
+            forest = self.totals_model
+            spread_index = features.index("spread_close")
+            if (
+                not isinstance(forest, RandomForestRegressor)
+                or not getattr(forest, "estimators_", None)
+                or any(np.any(tree.tree_.feature == spread_index) for tree in forest.estimators_)
+            ):
+                raise FeatureContractError(f"The pinned {league} totals model depends on an unverified spread")
+        self._pinned_totals_league = league.upper()
 
     def _get_model_features(self, model_path: Path) -> List[str]:
         """Get the list of features expected by the model."""
@@ -243,22 +292,11 @@ class PredictionEngine:
         return matrix
 
     def _build_totals_matrix(self, features_df: pd.DataFrame) -> pd.DataFrame:
-        contract = self.totals_features or [
-            "total_close",
-            "spread_close",
-            "home_moneyline_close",
-            "away_moneyline_close",
-        ]
-        source_map = {
-            "total_close": "total_line",
-            "spread_close": "spread_line",
-            "home_moneyline_close": "home_moneyline",
-            "away_moneyline_close": "away_moneyline",
-        }
+        contract = self.totals_features or list(_TOTALS_FEATURE_SOURCES)
         matrix = pd.DataFrame(index=features_df.index)
         missing = []
         for column in contract:
-            source_column = source_map.get(column, column)
+            source_column = _TOTALS_FEATURE_SOURCES.get(column, column)
             if source_column in features_df.columns:
                 matrix[column] = features_df[source_column]
             else:
@@ -267,6 +305,40 @@ class PredictionEngine:
         if missing:
             LOGGER.warning("Totals feature contract missing generated columns; filling with NaN: %s", missing)
         return matrix.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
+    def _score_totals(self, features: pd.DataFrame) -> None:
+        projected = self.totals_model.predict(self._build_totals_matrix(features))
+        features["predicted_total_points"] = projected
+        lines = features["total_line"].fillna(0.0).values
+        z_scores = (lines - projected) / self.totals_std
+        under = [0.5 * (1 + math.erf(z / 1.41421356)) for z in z_scores]
+        features["over_predicted_prob"] = [1.0 - probability for probability in under]
+        features["under_predicted_prob"] = under
+
+    def predict_pinned_totals(
+        self,
+        league: str,
+        model_sha256: str,
+        *,
+        days_ahead: int = 7,
+        fixture_ids: AbstractSet[str] | None = None,
+    ) -> Optional[pd.DataFrame]:
+        """Forecast on retained quote inputs without saving ordinary predictions."""
+        games = load_games_from_database(league, days_ahead)
+        if fixture_ids is not None and not games.empty:
+            games = games[games["game_id"].isin(fixture_ids)]
+        if games.empty:
+            return None
+        if self._pinned_totals_league != league.upper() or self.totals_model_sha256 != model_sha256:
+            self.load_pinned_totals(league, model_sha256)
+        features = games.copy()
+        for column in ("total_line", "home_moneyline", "away_moneyline"):
+            features[column] = pd.to_numeric(features[column], errors="coerce").astype(float)
+        features["spread_line"] = 0.0
+        self._score_totals(features)
+        features["predicted_at"] = datetime.now(timezone.utc)
+        features["totals_model_sha256"] = self.totals_model_sha256
+        return features
 
     def prepare_features(self, games_df: pd.DataFrame, league: str) -> pd.DataFrame:
         """
@@ -448,21 +520,7 @@ class PredictionEngine:
             X_df["predicted_total_points"] = np.nan
             if self.totals_model and self.totals_std:
                 try:
-                    totals_X = self._build_totals_matrix(X_df)
-                    predicted_totals = self.totals_model.predict(totals_X)
-                    X_df["predicted_total_points"] = predicted_totals
-                    
-                    std = self.totals_std
-                    lines = X_df["total_line"].fillna(0.0).values
-                    z_scores = (lines - predicted_totals) / std
-                    
-                    # Calculate probs using erf
-                    under_probs = [0.5 * (1 + math.erf(z / 1.41421356)) for z in z_scores]
-                    over_probs = [1.0 - p for p in under_probs]
-                    
-                    X_df["over_predicted_prob"] = over_probs
-                    X_df["under_predicted_prob"] = under_probs
-                    
+                    self._score_totals(X_df)
                     X_df["over_edge"] = X_df["over_predicted_prob"] - X_df["over_implied_prob"]
                     X_df["under_edge"] = X_df["under_predicted_prob"] - X_df["under_implied_prob"]
                     

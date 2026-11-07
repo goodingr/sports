@@ -129,15 +129,12 @@ def warehouse(tmp_path, monkeypatch):
         def __init__(self, *, model_type):
             assert model_type == trial.model_type
 
-        def load_model(self, league, *, trace_totals):
-            assert league == "NBA" and trace_totals
-            self.totals_model = object()
-            self.totals_std = 10
-            self.totals_model_sha256 = trial.model_sha256
-            return True
+        def load_pinned_totals(self, league, model_sha256):
+            assert (league, model_sha256) == ("NBA", trial.model_sha256)
+            self.totals_model_sha256 = model_sha256
 
-        def predict(self, league, *, days_ahead, trace_totals, fixture_ids):
-            assert (league, days_ahead, trace_totals) == ("NBA", 1, True)
+        def predict_pinned_totals(self, league, model_sha256, *, days_ahead, fixture_ids):
+            assert (league, days_ahead, model_sha256) == ("NBA", 1, self.totals_model_sha256)
             predictions_requested.append(fixture_ids)
             with connect(path) as conn:
                 selected = conn.execute(
@@ -409,9 +406,9 @@ def test_ordinary_capture_uses_quote_tipoff_after_no_quote_schedule_update(
     _seed_quotes([schedule_event], fetched=NOW - timedelta(minutes=1))
 
     engine = paper_entry_poll.PredictionEngine(model_type=trial.model_type)
-    assert engine.load_model(trial.league, trace_totals=True)
-    predictions = engine.predict(
-        trial.league, days_ahead=1, trace_totals=True, fixture_ids={"early-one"}
+    engine.load_pinned_totals(trial.league, trial.model_sha256)
+    predictions = engine.predict_pinned_totals(
+        trial.league, trial.model_sha256, days_ahead=1, fixture_ids={"early-one"}
     )
     [(snapshot_id, start)] = list(
         predictions[["selected_totals_snapshot_id", "commence_time"]].itertuples(

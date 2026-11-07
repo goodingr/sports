@@ -364,13 +364,16 @@ same steps locally, use these commands from the repository root.
 poetry run python -m src.predict.paper_ledger report
 poetry run python -m src.predict.paper_ledger update
 poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --region us --require-fresh
-poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper
+poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only
 ```
 
 The update command registers the trial on its first run and appends available
 settlements. The report command reads the existing ledger. The refresh command
 consumes live odds quota. The warehouse backup includes trial registrations,
-decisions, and grades.
+decisions, and grades. Scheduled and supplemental paper runs score retained
+quotes with the pinned totals artifact and save their evaluations to the
+paper ledger. Use `--paper` in place of `--paper-only` to run the ordinary
+forecast refresh after paper capture.
 
 The report also shows retained capture runs and observations for scheduled
 fixtures inside the decision window. It separates fully evaluated fixtures,

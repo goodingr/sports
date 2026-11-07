@@ -180,7 +180,7 @@ if (( PAPER_ENABLED && ! SKIP_PREDICTION && ! SKIP_ODDS )) && printf '%s\n' "${L
 	if bucket_run ingest "odds[NBA]" -- \
 		python -m src.data.ingest_odds --league NBA --market h2h,totals --require-fresh; then
 		bucket_run paper "NBA/random_forest capture" -- \
-			python -m src.predict.runner --leagues NBA --model-type random_forest --paper
+			python -m src.predict.runner --leagues NBA --model-type random_forest --paper-only
 	else
 		PAPER_FAIL=$((PAPER_FAIL + 1))
 		note_failure "paper" "NBA odds refresh failed; paper capture could not run"
