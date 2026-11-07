@@ -169,3 +169,18 @@ jobs:
 
       - name: E2E tests
         run: npm run test:e2e
+
+      - name: Interest pilot browser tests
+        env:
+          PLAYWRIGHT_PILOT: '1'
+        run: npm run test:e2e
+
+      - name: Validate interest pilot Compose configuration
+        working-directory: .
+        env:
+          PILOT_DOMAIN: pilot.example.invalid
+          PILOT_CONTACT_EMAIL: pilot-contact@example.invalid
+          ACME_EMAIL: operator@example.invalid
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
+          CLERK_SECRET_KEY: ci-config-placeholder
+        run: docker compose -f docker-compose.pilot.yml config --quiet

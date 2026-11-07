@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
+import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
 import {
     applySnapshot,
     getStripe,
@@ -24,6 +25,8 @@ const HANDLED: ReadonlySet<Stripe.Event["type"]> = new Set([
 ]);
 
 export async function POST(req: Request) {
+    if (isPilotOnly()) return pilotBillingUnavailable();
+
     let stripe;
     let webhookSecret: string;
     try {

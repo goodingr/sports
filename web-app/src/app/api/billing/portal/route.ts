@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
 import {
     createBillingPortalSession,
     getAppUrl,
@@ -8,6 +9,8 @@ import {
 } from "@/lib/billing";
 
 export async function POST() {
+    if (isPilotOnly()) return pilotBillingUnavailable();
+
     try {
         // Force-load the Stripe client so misconfigured envs fail fast and
         // we return a clear 500 instead of a confusing portal error.

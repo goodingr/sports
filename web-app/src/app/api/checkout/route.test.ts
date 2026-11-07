@@ -29,9 +29,23 @@ beforeEach(() => {
     createSession.mockResolvedValue({ url: 'https://checkout.stripe.com/test' });
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+});
 
 describe('POST /api/checkout', () => {
+    it('closes pilot billing before auth, pick availability, or Stripe', async () => {
+        vi.stubEnv('COMMERCIAL_PILOT_ONLY', 'true');
+        fetchAccess.mockResolvedValue(Response.json({ checkout_available: true }));
+
+        expect((await POST()).status).toBe(503);
+        expect(auth).not.toHaveBeenCalled();
+        expect(fetchAccess).not.toHaveBeenCalled();
+        expect(getStripe).not.toHaveBeenCalled();
+        expect(createSession).not.toHaveBeenCalled();
+    });
+
     it.each([false, 'true', undefined])('blocks Stripe when availability is %s', async (checkout_available) => {
         fetchAccess.mockResolvedValue(Response.json({ checkout_available }));
 

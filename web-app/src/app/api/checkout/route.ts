@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { isCheckoutAvailable } from "@/lib/api";
+import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
 import {
     getAppUrl,
     getOrCreateCustomer,
@@ -9,6 +10,8 @@ import {
 } from "@/lib/billing";
 
 export async function POST() {
+    if (isPilotOnly()) return pilotBillingUnavailable();
+
     try {
         const { userId } = await auth();
         if (!userId) {

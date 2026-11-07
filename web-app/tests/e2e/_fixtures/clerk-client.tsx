@@ -28,6 +28,14 @@ export function useAuth() {
     return { isLoaded: true, isSignedIn: false, getToken };
 }
 
+export function useClerk() {
+    return {
+        openUserProfile() {
+            throw new Error('Signed-out browser fixtures cannot open a user profile');
+        },
+    };
+}
+
 export function useUser() {
     return { isLoaded: true, isSignedIn: false, user: null };
 }

@@ -1,5 +1,6 @@
 import { Container } from "@/components/ui/Container";
 import type { Metadata } from "next";
+import { isPilotOnly } from "@/lib/pilot";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Sports Analytics",
@@ -9,6 +10,8 @@ export const metadata: Metadata = {
 const LAST_UPDATED = "April 26, 2026";
 
 export default function PrivacyPage() {
+    const pilotContact = isPilotOnly() ? process.env.COMMERCIAL_PILOT_CONTACT_EMAIL : undefined;
+    const contactEmail = pilotContact || "privacy@sportsanalytics.example";
     return (
         <Container className="py-16 max-w-3xl">
             <div className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
@@ -111,8 +114,8 @@ export default function PrivacyPage() {
                         Depending on your jurisdiction (e.g., GDPR, CCPA), you may have rights to
                         access, correct, delete, or port your personal information, and to object to
                         or restrict certain processing. To exercise these rights, contact{" "}
-                        <a href="mailto:privacy@sportsanalytics.example" className="text-primary hover:underline">
-                            privacy@sportsanalytics.example
+                        <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                            {contactEmail}
                         </a>
                         .
                     </p>
@@ -156,8 +159,8 @@ export default function PrivacyPage() {
                     <h2 className="text-2xl font-bold text-foreground mb-3">12. Contact</h2>
                     <p>
                         Questions about this Privacy Policy can be sent to{" "}
-                        <a href="mailto:privacy@sportsanalytics.example" className="text-primary hover:underline">
-                            privacy@sportsanalytics.example
+                        <a href={`mailto:${contactEmail}`} className="text-primary hover:underline">
+                            {contactEmail}
                         </a>
                         .
                     </p>

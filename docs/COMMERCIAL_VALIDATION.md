@@ -57,7 +57,27 @@ For five consenting participants, discuss their most recent research workflow, w
 
 ### Host the pilot
 
-The interest page can run on a web-only Next.js service. Build from `web-app` with `npm ci && npm run build`, then start with `npm run start`. Give it an HTTPS origin on an owned domain, matching production Clerk keys and `NEXT_PUBLIC_APP_URL`. A development Clerk instance is capped at 100 users and its users cannot transfer to production, so it serves local and small test previews. Confirm working contact addresses in the privacy and terms pages before collecting real leads. For an invitation-only pilot, restrict host access as well as account registration. The page's noindex setting only limits search indexing. [Clerk production setup](https://clerk.com/docs/guides/development/deployment/production) · [Clerk environments](https://clerk.com/docs/guides/development/managing-environments) · [Clerk access settings](https://clerk.com/docs/guides/secure/restricting-access)
+The [web-only Compose profile](../docker-compose.pilot.yml) runs Next.js and Caddy on an owned HTTPS domain. It uses Clerk for signed-in interest records and keeps checkout, the billing portal, and Stripe webhooks closed. Point the pilot domain at the host and make ports 80 and 443 available. The full stack and pilot each bind these ports, so use separate hosts to run both at once.
+
+Create a local `.env.pilot` on the host with the intended domain, a working contact address for privacy and support requests, and the matching Clerk credentials. The values below are placeholders.
+
+```dotenv
+PILOT_DOMAIN=pilot.example.com
+PILOT_CONTACT_EMAIL=contact@example.com
+ACME_EMAIL=operator@example.com
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_replace_me
+CLERK_SECRET_KEY=sk_live_replace_me
+COMMERCIAL_INTEREST_ENROLLMENT_CLOSED=false
+```
+
+```bash
+docker compose --env-file .env.pilot -f docker-compose.pilot.yml config --quiet
+docker compose --env-file .env.pilot -f docker-compose.pilot.yml up -d --build
+```
+
+The pilot root forwards source tags to `/interest`. Check that `/?source=referral` reaches the $29 offer, sign-in returns to that offer, the privacy and terms pages show the configured contact address, and `POST /api/checkout` returns 503. At the end of enrollment, set `COMMERCIAL_INTEREST_ENROLLMENT_CLOSED=true` and rerun `up -d web` with the same Compose file and environment file. Existing participants can still withdraw.
+
+For a hosted Next.js service, build from `web-app` with `npm ci && npm run build`, then start with `npm run start`. Set `COMMERCIAL_PILOT_ONLY=true`, `COMMERCIAL_PILOT_CONTACT_EMAIL`, `NEXT_PUBLIC_APP_URL`, and the public Clerk key at build time. Provide the same settings at runtime, plus `COMMERCIAL_INTEREST_ENABLED=true`, `CLERK_SECRET_KEY`, and the `/login` and `/signup` Clerk routes. A development Clerk instance serves local and small test previews. Use a production instance for live recruitment. For an invitation-only pilot, restrict host access and account registration. The noindex setting limits search indexing. [Clerk production setup](https://clerk.com/docs/guides/development/deployment/production) · [Clerk environments](https://clerk.com/docs/guides/development/managing-environments) · [Clerk access settings](https://clerk.com/docs/guides/secure/restricting-access)
 
 The isolated production build and `next start` browser check passed on November 6, 2026 using the development Clerk instance. The open, closed-enrollment, and disabled page states were verified at mobile width, along with unauthenticated mutation rejection. A separate development browser check verified attributed view, opt-in, reload, and withdrawal. The disposable account was deleted. A subsequent aggregate query returned zero development offer viewers and opt-ins.
 
