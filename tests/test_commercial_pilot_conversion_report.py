@@ -154,13 +154,37 @@ def test_ambiguous_or_one_sided_bindings_withhold_rates(private_exports, problem
     assert report["renewals"]["renewal_1"]["rate_within_grace"] is None
 
 
-def test_unidentified_live_payer_blocks_claim_of_no_conversion(private_exports):
+@pytest.mark.parametrize("problem", [None, "missing_clerk", "clerk_null", "shared_clerk_customer", "missing_stripe"])
+def test_verifies_live_payer_outside_the_pilot_cohort(private_exports, problem):
     evidence, *_ = private_exports
-    evidence["cohort"] = [row for row in evidence["cohort"] if row["user_id"] != "user_prior"]
-    evidence["stripe_customers"] = [row for row in evidence["stripe_customers"] if row["id"] != "cus_prior"]
+    evidence["cohort"] = [row for row in evidence["cohort"] if row["user_id"] != "user_referral"]
+    clerk, stripe = evidence["clerk_bindings"], evidence["stripe_customers"]
+    if problem == "missing_clerk":
+        clerk[:] = [row for row in clerk if row["user_id"] != "user_referral"]
+    elif problem == "clerk_null":
+        next(row for row in clerk if row["user_id"] == "user_referral")["stripe_customer_id"] = None
+    elif problem == "shared_clerk_customer":
+        clerk.append({"user_id": "user_other", "stripe_customer_id": "cus_referral"})
+    elif problem == "missing_stripe":
+        stripe[:] = [row for row in stripe if row["id"] != "cus_referral"]
+
     report = build_conversion_report(*private_exports)
-    assert report["audit"] == {"unresolved_pilot_bindings": 0, "unverified_paid_customer_identities": 1}
-    assert report["totals"]["viewer_to_first_payment_rate"] is None
+    assert report["audit"]["unresolved_pilot_bindings"] == 0
+    assert report["totals"]["qualified_viewers"] == 5
+    assert report["totals"]["first_payers"] == 1
+    if problem is None:
+        assert report["status"] == "complete"
+        assert report["audit"]["unverified_paid_customer_identities"] == 0
+        assert report["totals"]["viewer_to_first_payment_rate"] == pytest.approx(1 / 5)
+    else:
+        assert report["status"] == "incomplete"
+        assert report["audit"]["unverified_paid_customer_identities"] == 1
+        assert report["totals"]["viewer_to_first_payment_rate"] is None
+        assert report["totals"]["intent_to_first_payment_rate"] is None
+        assert report["renewals"]["renewal_1"]["rate_within_grace"] is None
+    output = json.dumps(report)
+    private_ids = ("user_referral", "user_other", "cus_referral", "in_referral_origin", "ch_referral_origin")
+    assert all(identifier not in output for identifier in private_ids)
 
 
 def test_missing_cycle_withholds_only_renewal_rates(private_exports):

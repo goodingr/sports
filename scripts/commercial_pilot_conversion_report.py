@@ -251,7 +251,11 @@ def build_conversion_report(evidence: dict, invoices: Path, balance: Path, cycle
                 counts.first_payers_with_price_intent += member.first_intent
                 converted_sources[customer] = member.source
 
-    unverified_payers = sum(bindings.live_owner(customer) is None for customer in payments)
+    unverified_payers = 0
+    for customer in payments:
+        owner = bindings.live_owner(customer)
+        if owner is None or bindings.resolve(owner) != ("bound", customer):
+            unverified_payers += 1
     unresolved = sum(counts.unresolved_binding for counts in conversions.values())
     conversion_complete = not (unresolved or unverified_payers or any(cash_audit[key] for key in CASH_EXCEPTIONS))
     renewal_cohorts, renewal_audit = _measure_renewals(
