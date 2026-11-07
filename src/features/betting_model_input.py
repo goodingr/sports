@@ -1441,6 +1441,7 @@ def build_totals_model_input(
         JOIN books b ON o.book_id = b.book_id
         JOIN game_results gr ON g.game_id = gr.game_id
         WHERE o.market = 'totals'
+          AND os.source IS NOT 'cfbd_lines'
           AND o.price_american IS NOT NULL
           AND o.line IS NOT NULL
           AND gr.home_score IS NOT NULL
@@ -1576,6 +1577,7 @@ def build_moneyline_model_input(
         JOIN teams at ON g.away_team_id = at.team_id
         JOIN game_results gr ON g.game_id = gr.game_id
         WHERE o.market = 'h2h'
+          AND os.source IS NOT 'cfbd_lines'
           AND o.price_american IS NOT NULL
           AND gr.home_score IS NOT NULL
           AND gr.away_score IS NOT NULL
@@ -1866,6 +1868,7 @@ def _market_drop_reasons(
         JOIN games g ON o.game_id = g.game_id
         JOIN sports s ON g.sport_id = s.sport_id
         WHERE o.market = ?
+          AND os.source IS NOT 'cfbd_lines'
           AND o.price_american IS NOT NULL
           {league_sql}
     """

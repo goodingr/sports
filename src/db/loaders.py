@@ -1166,6 +1166,7 @@ def load_odds_snapshot(
 
     source = payload.get("source", "the-odds-api")
     historical = source == "the-odds-api-history"
+    cfbd_archive = source == "cfbd_lines"
     ordinary_odds_api = source == "the-odds-api"
     fetched_at = payload.get("fetched_at")
     provider_fetched_at = (
@@ -1193,21 +1194,24 @@ def load_odds_snapshot(
     snapshot_id = uuid.uuid4().hex
 
     sport_key = (sport_key or "americanfootball_nfl").lower()
+    if cfbd_archive and sport_key != "americanfootball_ncaaf":
+        raise ValueError("CollegeFootballData lines require the college football sport")
     config = SPORT_CONFIG.get(sport_key, SPORT_CONFIG["americanfootball_nfl"])
 
     with connect() as conn:
+        if (ordinary_odds_api or cfbd_archive) and not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
         if ordinary_odds_api:
-            if not conn.in_transaction:
-                conn.execute("BEGIN IMMEDIATE")
             _ensure_odds_api_schedule_clock(conn)
-        _ensure_game_results_total_close_lineage_columns(conn)
+        if not cfbd_archive:
+            _ensure_game_results_total_close_lineage_columns(conn)
         sport_id = _ensure_sport(
             conn,
             name=config["sport_name"],
             league=config["league"],
             default_market=config["default_market"],
         )
-        if historical and conn.execute(
+        if (historical or cfbd_archive) and conn.execute(
             """
             SELECT 1 FROM odds_snapshots
             WHERE sport_id = ? AND source = ? AND fetched_at_utc = ? AND raw_path IS ?
@@ -1241,8 +1245,29 @@ def load_odds_snapshot(
             home_code = normalize_team_code(config["league"], home_name)
             away_code = normalize_team_code(config["league"], away_name)
 
-            home_team_id = _ensure_team(conn, sport_id, home_code, event.get("home_team"))
-            away_team_id = _ensure_team(conn, sport_id, away_code, event.get("away_team"))
+            if cfbd_archive:
+                # CFBD event IDs do not belong to the Odds API namespace.
+                if observed_start is None or event.get("sport_key") != sport_key:
+                    continue
+                matched = conn.execute(
+                    """
+                    SELECT g.game_id, g.home_team_id, g.away_team_id
+                    FROM games g
+                    JOIN teams ht ON ht.team_id = g.home_team_id AND ht.sport_id = g.sport_id
+                    JOIN teams at ON at.team_id = g.away_team_id AND at.sport_id = g.sport_id
+                    WHERE g.sport_id = ? AND ht.code = ? AND at.code = ?
+                      AND length(g.start_time_utc) > 10
+                      AND ABS(unixepoch(g.start_time_utc) - unixepoch(?)) <= 600
+                    LIMIT 2
+                    """,
+                    (sport_id, home_code, away_code, observed_start),
+                ).fetchall()
+                if len(matched) != 1:
+                    continue
+                game_id, home_team_id, away_team_id = matched[0]
+            else:
+                home_team_id = _ensure_team(conn, sport_id, home_code, event.get("home_team"))
+                away_team_id = _ensure_team(conn, sport_id, away_code, event.get("away_team"))
 
             if historical:
                 matched = conn.execute(
@@ -1260,7 +1285,7 @@ def load_odds_snapshot(
                 if len(matched) != 1:
                     continue
                 game_id = matched[0][0]
-            else:
+            elif not cfbd_archive:
                 game_id = _find_game_by_details(
                     conn,
                     sport_id=sport_id,
@@ -1316,7 +1341,7 @@ def load_odds_snapshot(
                     )
                     if ordinary_odds_api:
                         _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
-            elif not historical and (
+            elif not (historical or cfbd_archive) and (
                 not ordinary_odds_api
                 or _advance_odds_api_schedule_clock(conn, game_id, sport_key, event_observed_at)
             ):
@@ -1442,8 +1467,8 @@ def load_odds_snapshot(
                             ),
                         )
             
-            # Update game_results with moneylines from outcomes (after processing all bookmakers)
-            if not historical and (outcomes_by_key or total_close_value is not None):
+            # Keep archived lines separate from the result's closing fields.
+            if not (historical or cfbd_archive) and (outcomes_by_key or total_close_value is not None):
                 home_ml = outcomes_by_key.get("home")
                 away_ml = outcomes_by_key.get("away")
                 total_close_norm = _safe_float(total_close_value)

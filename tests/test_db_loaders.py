@@ -201,6 +201,69 @@ def test_load_odds_snapshot_persists_total_close_lineage(
     assert row["total_close_source"] == "the-odds-api"
 
 
+def test_cfbd_archive_matches_original_fixture_without_changing_schedule_or_closes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "odds.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+        conn.executescript(
+            """
+            INSERT INTO sports (sport_id, name, league, default_market) VALUES (1, 'Football', 'CFB', 'moneyline');
+            INSERT INTO teams (team_id, sport_id, code, name) VALUES
+                (1, 1, 'OSU', 'Ohio State Buckeyes'), (2, 1, 'MICHIGAN', 'Michigan Wolverines');
+            INSERT INTO games (game_id, sport_id, start_time_utc, home_team_id, away_team_id, status, odds_api_id)
+            VALUES ('historical', 1, '2024-11-30T17:00:00+00:00', 1, 2, 'final', 'odds_historical'),
+                   ('later', 1, '2025-11-29T17:00:00+00:00', 1, 2, 'final', '123'),
+                   ('ambiguous1', 1, '2023-11-25T17:00:00+00:00', 1, 2, 'final', 'odds_a'),
+                   ('ambiguous2', 1, '2023-11-25T17:04:00+00:00', 1, 2, 'final', 'odds_b');
+            INSERT INTO game_results (game_id, home_moneyline_close, away_moneyline_close, total_close)
+            VALUES ('historical', -170, 150, 44.5), ('later', -215, 185, 47.5);
+            """
+        )
+        schedule = conn.execute("SELECT * FROM games ORDER BY game_id").fetchall()
+        teams = conn.execute("SELECT * FROM teams ORDER BY team_id").fetchall()
+        grades = conn.execute("SELECT * FROM game_results ORDER BY game_id").fetchall()
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+    event = {
+        "id": "123",
+        "sport_key": "americanfootball_ncaaf",
+        "commence_time": "2024-11-30T12:05:00-05:00",
+        "home_team": "Ohio State",
+        "away_team": "Michigan",
+        "bookmakers": [{
+            "title": "DraftKings",
+            "markets": [{
+                "key": "h2h",
+                "outcomes": [{"name": "Ohio State", "price": -500}, {"name": "Michigan", "price": 410}],
+            }],
+        }],
+    }
+
+    payload = {
+        "source": "cfbd_lines",
+        "fetched_at": "2025-11-04T07:53:56+00:00",
+        "results": [
+            event,
+            {**event, "id": "456", "commence_time": "2023-11-25T17:00:00Z"},
+            {**event, "id": "789", "commence_time": "2022-11-26T17:00:00Z"},
+            {**event, "id": "000", "commence_time": "2024-11-30"},
+        ],
+    }
+    for _ in range(2):
+        loaders.load_odds_snapshot(payload, raw_path="cfbd_archive", sport_key="americanfootball_ncaaf")
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT count(*) FROM odds_snapshots").fetchone() == (1,)
+        assert conn.execute(
+            "SELECT game_id, outcome, price_american FROM odds ORDER BY outcome"
+        ).fetchall() == [("historical", "away", 410), ("historical", "home", -500)]
+        assert conn.execute("SELECT * FROM games ORDER BY game_id").fetchall() == schedule
+        assert conn.execute("SELECT * FROM teams ORDER BY team_id").fetchall() == teams
+        assert conn.execute("SELECT * FROM game_results ORDER BY game_id").fetchall() == grades
+
+
 def test_load_odds_snapshot_keeps_latest_pregame_total_close(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

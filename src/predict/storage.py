@@ -288,6 +288,7 @@ def load_games_from_database(
                 JOIN books b ON o.book_id = b.book_id
                 WHERE o.game_id IN ({placeholders})
                   AND o.market IN ('h2h', 'totals', 'spreads')
+                  AND s.source IS NOT 'cfbd_lines'
                   AND o.price_american IS NOT NULL
             """
             odds_df = pd.read_sql_query(odds_query, conn, params=game_ids)

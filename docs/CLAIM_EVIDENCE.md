@@ -53,6 +53,13 @@ See `reports/research/soccer_draw_cross_market/result.json`.
 The college football peer-movement replay missed its frozen log-loss gate on
 305 later fixtures. It selected four bets, with one verified closing quote.
 See `reports/research/cfb_peer_continuation/result.json`.
+The college football archive audit found 540 later nightly DraftKings moneyline
+entries and 121 possible same-book closes. It also identified 2,564 odds rows
+attached to 2025 fixtures from a CollegeFootballData archive covering 2014–2024.
+These rows were isolated from the local odds table with a verified recovery
+copy. CollegeFootballData imports now require a unique matching kickoff and
+ordered teams, preserve schedule and result fields, and stay out of betting
+inputs. See `reports/research/non_nba_nightly_quote_diagnostic_20261107/result.json`.
 The fixed soccer 1X2 power de-vig replay missed its log-loss gate on 514 later
 fixtures. Its nine Bet365 selections returned −63.33%. The one-hour pre-tip
 snapshots serve as historical closing-price proxies. See
