@@ -181,6 +181,10 @@ class PredictionEngine:
     def _load_totals_bundle(self, league: str, *, pinned_sha256: str | None = None) -> None:
         model_type = "gradient_boosting" if self.model_type == "ensemble" else self.model_type
         path = MODEL_REGISTRY_PATH / f"{league.lower()}_totals_{model_type}.pkl"
+        if pinned_sha256 is not None:
+            archived = path.with_name(f"{path.stem}.{pinned_sha256}{path.suffix}")
+            if archived.is_file():
+                path = archived
         model_bytes = path.read_bytes()
         digest = hashlib.sha256(model_bytes).hexdigest()
         if pinned_sha256 is not None and digest != pinned_sha256:

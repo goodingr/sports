@@ -156,8 +156,28 @@ def test_pinned_totals_needs_only_quote_inputs_and_retains_verified_bundle(
     assert row["predicted_at"].utcoffset() is not None
 
 
-def test_pinned_digest_is_checked_before_unpickling(tmp_path, monkeypatch):
-    path = tmp_path / "nba_totals_random_forest.pkl"
+def test_pinned_totals_loads_the_verified_archive_after_registry_rotation(tmp_path, monkeypatch):
+    registry = tmp_path / "nba_totals_random_forest.pkl"
+    joblib.dump(
+        {"regressor": TotalsModel(), "residual_std": 10.0, "feature_names": ["total_close"]},
+        registry,
+    )
+    digest = hashlib.sha256(registry.read_bytes()).hexdigest()
+    registry.rename(registry.with_name(f"{registry.stem}.{digest}{registry.suffix}"))
+    registry.write_bytes(b"replacement registry bundle")
+    monkeypatch.setattr(engine_module, "MODEL_REGISTRY_PATH", tmp_path)
+
+    engine = engine_module.PredictionEngine(model_type="random_forest")
+    engine.load_pinned_totals("NBA", digest)
+    assert engine.totals_model_sha256 == digest
+    assert isinstance(engine.totals_model, TotalsModel)
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_pinned_digest_is_checked_before_unpickling(tmp_path, monkeypatch, archived):
+    digest = "0" * 64
+    suffix = f".{digest}.pkl" if archived else ".pkl"
+    path = tmp_path / f"nba_totals_random_forest{suffix}"
     path.write_bytes(b"wrong artifact")
     monkeypatch.setattr(engine_module, "MODEL_REGISTRY_PATH", tmp_path)
 
@@ -166,7 +186,7 @@ def test_pinned_digest_is_checked_before_unpickling(tmp_path, monkeypatch):
 
     monkeypatch.setattr(engine_module.joblib, "load", unexpected)
     with pytest.raises(engine_module.FeatureContractError, match="differs from the pinned digest"):
-        engine_module.PredictionEngine(model_type="random_forest").load_pinned_totals("NBA", "0" * 64)
+        engine_module.PredictionEngine(model_type="random_forest").load_pinned_totals("NBA", digest)
 
 
 @pytest.mark.parametrize("feature", ["rolling_win_pct_3", "spread_close"])

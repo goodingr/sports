@@ -352,6 +352,12 @@ value at the quoted price. The model's two moneyline inputs must come from the
 same book and snapshot as the totals pair. Both markets must contain exactly two
 valid outcomes. The pinned model has zero dependence on its spread input.
 
+Keep a verified copy of the frozen bundle at
+`models/nba_totals_random_forest.<sha256>.pkl` in the model registry. Paper
+inference verifies that copy before loading it, so a later training run can
+replace the ordinary registry bundle while the trial keeps its registered model.
+The standard backup includes the versioned bundle.
+
 The capture window runs from 12 hours to 15 minutes before scheduled tipoff.
 The latest totals snapshot for the fixture must have been fetched within 10 minutes of
 capture. This measures the quote the feed returned, without assuming sportsbook
