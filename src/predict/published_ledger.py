@@ -18,6 +18,7 @@ from src.models.prediction_quality import (
     settle_moneyline_side,
     settle_total_side,
 )
+from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start
 
 SCHEMA_PATH = Path(__file__).with_name("published_schema.sql")
 VOID_STATUSES = {"cancelled", "canceled", "voided", "no_contest", "postponed"}
@@ -47,6 +48,23 @@ def _withdraw_settlement(conn: sqlite3.Connection, row: sqlite3.Row, now: dateti
     )
 
 
+def _publication_schedule(
+    pick: dict[str, Any], published_at: datetime, current_start: datetime | None
+) -> tuple[datetime, str | None]:
+    start = _utc(pick["start_time_utc"])
+    contract = pick.get("execution_contract") or {}
+    provider_start = pick.get("quote_provider_start_utc")
+    starts = (start, current_start or start, _utc(provider_start) if contract and provider_start else start)
+    earliest, latest = min(starts), max(starts)
+    if current_start is None or latest - earliest > _START_TOLERANCE:
+        return latest, "fixture_rescheduled"
+    if published_at >= earliest:
+        return latest, "publication_after_corrected_start"
+    if contract and earliest - published_at < timedelta(minutes=contract["min_minutes_before_start"]):
+        return latest, "publication_inside_corrected_lead"
+    return latest, None
+
+
 def _settle(conn: sqlite3.Connection, now: datetime) -> None:
     pending = conn.execute(
         """
@@ -64,21 +82,17 @@ def _settle(conn: sqlite3.Connection, now: datetime) -> None:
     ).fetchall()
     for row in pending:
         pick = json.loads(row["payload"])
-        start = _utc(pick["start_time_utc"])
+        current_start = _utc(row["start_time_utc"]) if row["start_time_utc"] else None
+        latest_start, reason = _publication_schedule(pick, _utc(row["published_at"]), current_start)
         status = str(row["status"] or "").lower()
-        reason = None
         if row["current_home"] != row["home_team_id"] or row["current_away"] != row["away_team_id"]:
             reason = "fixture_identity_changed"
-        elif not row["start_time_utc"] or abs(_utc(row["start_time_utc"]) - start) > timedelta(minutes=10):
-            reason = "fixture_rescheduled"
-        elif _utc(row["published_at"]) >= min(start, _utc(row["start_time_utc"])):
-            reason = "publication_after_corrected_start"
-        elif status in VOID_STATUSES:
+        elif reason is None and status in VOID_STATUSES:
             reason = "fixture_voided"
         home, away = row["home_score"], row["away_score"]
         if reason:
             outcome, profit = "void", 0.0
-        elif status != "final" or now < max(start, _utc(row["start_time_utc"])):
+        elif status != "final" or now < latest_start:
             _withdraw_settlement(conn, row, now)
             continue
         elif (
@@ -154,7 +168,7 @@ def _verified_quote(
     rows = conn.execute(
         """
         SELECT lower(o.outcome) AS outcome, o.line, o.price_american, sn.fetched_at_utc,
-               sn.source, b.name AS book
+               sn.sport_id, sn.source, b.name AS book
         FROM odds o JOIN odds_snapshots sn USING (snapshot_id) JOIN books b USING (book_id)
         JOIN games g ON g.game_id = o.game_id AND g.sport_id = sn.sport_id
         WHERE o.game_id = ? AND o.snapshot_id = ? AND o.book_id = ? AND o.market = ?
@@ -181,8 +195,9 @@ def _verified_quote(
         predicted = _utc(pick["predicted_at"])
         if not fetched <= predicted <= now or now - fetched > timedelta(minutes=max_age):
             return None
+        start = _utc(pick["start_time_utc"])
         if contract:
-            lead = _utc(pick["start_time_utc"]) - now
+            lead = start - now
             if not timedelta(minutes=contract["min_minutes_before_start"]) <= lead <= timedelta(
                 hours=contract["max_hours_before_start"]
             ):
@@ -198,6 +213,7 @@ def _verified_quote(
             or (row["outcome"] == pick["side"] and row["price_american"] != pick["moneyline"])
         ):
             return None
+    provider_start = None
     if contract:
         if quote["book"].lower() != contract["book"] or quote["source"] != contract["odds_source"]:
             return None
@@ -227,14 +243,34 @@ def _verified_quote(
                 or {row["outcome"]: row["price_american"] for row in inputs} != expected_inputs
             ):
                 return None
-    decision_close = _utc(pick["start_time_utc"]) - timedelta(
-        minutes=contract.get("min_minutes_before_start", 0)
-    )
-    return {
+        if market == "totals":
+            provider_start = _quote_source_start(
+                conn,
+                {
+                    "snapshot_id": pick["quote_snapshot_id"],
+                    "game_id": pick["game_id"],
+                    "sport_id": quote["sport_id"],
+                    "source": quote["source"],
+                    "line": pick["total_line"],
+                    "over_price": prices["over"],
+                    "under_price": prices["under"],
+                },
+                fetched,
+            )
+            if provider_start is None or abs(start - provider_start) > _START_TOLERANCE:
+                return None
+    earliest_start = min(start, provider_start) if provider_start is not None else start
+    decision_close = earliest_start - timedelta(minutes=contract.get("min_minutes_before_start", 0))
+    if now > decision_close:
+        return None
+    verified = {
         "book": quote["book"], "quote_fetched_at": fetched.isoformat(),
         "quote_expires_at": min(fetched + timedelta(minutes=max_age), decision_close).isoformat(),
         "quote_source": quote["source"], "quote_outcomes": sorted(expected),
     }
+    if provider_start is not None:
+        verified["quote_provider_start_utc"] = provider_start.isoformat()
+    return verified
 
 
 def publish_release(
@@ -321,7 +357,7 @@ def publish_release(
                         **original,
                         **{field: pick[field] for field in (
                             "quote_snapshot_id", "quote_book_id", "quote_fetched_at",
-                            "quote_expires_at", "predicted_at", "input_h2h_snapshot_id",
+                            "quote_expires_at", "quote_provider_start_utc", "predicted_at", "input_h2h_snapshot_id",
                             "input_h2h_book_id", "input_home_moneyline", "input_away_moneyline",
                         ) if field in pick},
                     })
@@ -385,9 +421,10 @@ def load_active_release(db_path: Path | None = None) -> dict[str, Any]:
                 and current["away_team_id"] == current["published_away"]
                 and _utc(current["start_time_utc"]) == _utc(pick["start_time_utc"])
                 and _valid_pick(pick, now)
-                and _verified_quote(conn, pick, now) is not None
             ):
-                active.append(pick)
+                verified = _verified_quote(conn, pick, now)
+                if verified is not None:
+                    active.append({**pick, **verified})
         return {**payload, "bets": active, "bet_count": len(active),
                 "publishable_profitable_list_exists": bool(active)}
 
@@ -431,9 +468,9 @@ def checkout_has_recent_delivery(db_path: Path, *, now: datetime | None = None) 
         ):
             return False
         delivering_rules = [rule for rule in passing if rule not in skipped]
-        match = conn.execute(
+        delivered = conn.execute(
             """
-            SELECT 1 FROM published_picks p
+            SELECT p.payload, p.published_at, g.start_time_utc FROM published_picks p
             JOIN games g USING (game_id)
             LEFT JOIN published_settlements s USING (pick_id)
             WHERE julianday(p.published_at) BETWEEN julianday(?) AND julianday(?)
@@ -443,10 +480,7 @@ def checkout_has_recent_delivery(db_path: Path, *, now: datetime | None = None) 
               AND g.home_team_id = p.home_team_id AND g.away_team_id = p.away_team_id
               AND lower(g.status) NOT IN (SELECT value FROM json_each(?))
               AND julianday(g.start_time_utc) > julianday(p.published_at)
-              AND abs(unixepoch(g.start_time_utc)
-                      - unixepoch(json_extract(p.payload, '$.start_time_utc'))) <= 600
               AND (s.outcome IS NULL OR s.outcome <> 'void')
-            LIMIT 1
             """,
             (
                 (now - RECENT_DELIVERY_WINDOW).isoformat(),
@@ -454,8 +488,13 @@ def checkout_has_recent_delivery(db_path: Path, *, now: datetime | None = None) 
                 json.dumps(delivering_rules),
                 json.dumps(sorted(VOID_STATUSES)),
             ),
-        ).fetchone()
-    return match is not None
+        )
+        return any(
+            _publication_schedule(
+                json.loads(pick["payload"]), _utc(pick["published_at"]), _utc(pick["start_time_utc"])
+            )[1] is None
+            for pick in delivered
+        )
 
 
 def published_record(

@@ -276,6 +276,9 @@ def _create_publish_db(path, *, include_history: bool) -> None:
             WHERE game_id = 'CUR1';
             """
         )
+        store_odds_snapshot_game_starts(
+            conn, "current", {"CUR1": "2026-02-02T20:00:00+00:00"}
+        )
     if include_history:
         _seed_paper_evidence(path)
 

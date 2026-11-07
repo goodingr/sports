@@ -3,13 +3,18 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import src.predict.published_ledger as ledger
-from src.db.core import initialize
+from src.db.core import initialize, store_odds_snapshot_game_starts
+from src.predict.paper_approval import rule_for_trial
+from src.predict.paper_ledger import load_trial
+from src.predict.publishable_bets import _serialize_bet
 from src.predict.published_ledger import (
     checkout_has_recent_delivery,
     load_active_release,
@@ -64,6 +69,102 @@ def release(start):
 
 def publish_at_evaluation(payload, path):
     return publish_release(payload, path, commit_at=datetime.fromisoformat(payload["generated_at"]))
+
+
+@pytest.mark.parametrize(("provider_lead", "issued"), [(12, False), (15, True), (31, False), (None, False)])
+def test_paper_approved_pick_uses_provider_tipoff_at_publication_and_live_read(
+    warehouse, monkeypatch, provider_lead, issued
+):
+    path, current_start = warehouse
+    published_at = current_start - timedelta(minutes=20)
+    provider_start = (
+        published_at + timedelta(minutes=provider_lead) if provider_lead is not None else None
+    )
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE odds_snapshots SET fetched_at_utc = ? WHERE snapshot_id = 'quote'",
+            ((published_at - timedelta(minutes=1)).isoformat(),),
+        )
+        conn.execute("UPDATE odds SET price_american = -110 WHERE market = 'totals'")
+        conn.execute(
+            """
+            INSERT INTO odds (snapshot_id, game_id, book_id, market, outcome, price_american)
+            VALUES ('quote', 'g', 1, 'h2h', 'home', -130), ('quote', 'g', 1, 'h2h', 'away', 110)
+            """
+        )
+        if provider_start is not None:
+            store_odds_snapshot_game_starts(conn, "quote", {"g": provider_start.isoformat()})
+
+    rule = rule_for_trial({"specification": asdict(load_trial())})
+    row = pd.Series(
+        {
+            **release(current_start)["bets"][0],
+            "predicted_at": published_at.isoformat(),
+            "model_type": rule["model_type"],
+            "moneyline": -110,
+            "edge": 0.25,
+            "predicted_prob": 0.75,
+            "no_vig_market_prob": 0.5,
+            "selected_h2h_snapshot_id": "quote",
+            "selected_h2h_book_id": 1,
+            "home_moneyline": -130,
+            "away_moneyline": 110,
+        }
+    )
+    pick = _serialize_bet(
+        row, rule, {"passes_launch_gate": True, "evidence_source": "prospective_paper"}
+    )
+    result = publish_at_evaluation(
+        {
+            "generated_at": published_at.isoformat(),
+            "approved_rule_ids": [rule["id"]],
+            "passing_approved_rule_ids": [rule["id"]],
+            "bets": [pick],
+        },
+        path,
+    )
+    assert result["bet_count"] == int(issued)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM published_picks").fetchone()[0] == int(issued)
+    if not issued:
+        return
+
+    deadline = provider_start - timedelta(minutes=15)
+    assert result["bets"][0]["quote_provider_start_utc"] == provider_start.isoformat()
+    assert result["bets"][0]["quote_expires_at"] == deadline.isoformat()
+
+    class LiveClock(datetime):
+        current = published_at
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current.astimezone(tz)
+
+    monkeypatch.setattr(ledger, "datetime", LiveClock)
+    assert load_active_release(path)["bet_count"] == 1
+    assert checkout_has_recent_delivery(path, now=published_at)
+    LiveClock.current = deadline + timedelta(microseconds=1)
+    active = load_active_release(path)
+    assert active["release_id"] == result["release_id"]
+    assert active["bets"] == []
+
+    corrected_start = provider_start - timedelta(minutes=1)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE games SET status = 'final', start_time_utc = ? WHERE game_id = 'g'",
+            (corrected_start.isoformat(),),
+        )
+        conn.execute("INSERT INTO game_results (game_id,home_score,away_score) VALUES ('g',120,110)")
+    assert not checkout_has_recent_delivery(path, now=current_start)
+    publish_at_evaluation(
+        {"generated_at": (current_start + timedelta(hours=4)).isoformat(), "bets": []}, path
+    )
+    record = published_record(path)["data"][0]
+    assert (record["outcome"], record["profit_units"], record["reason"]) == (
+        "void",
+        0.0,
+        "publication_inside_corrected_lead",
+    )
 
 
 @pytest.mark.parametrize(

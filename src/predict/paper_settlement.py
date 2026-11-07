@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from scripts.backup_evidence import read_raw_evidence
 from src.data.config import RAW_DATA_DIR
@@ -17,6 +19,8 @@ from src.predict.paper_settlement_history import (
     ensure_settlement_history,
     grades_as_of,
 )
+
+_Quote = sqlite3.Row | Mapping[str, Any]
 
 _CLOSE_WINDOW = timedelta(minutes=90)
 _START_TOLERANCE = timedelta(minutes=10)
@@ -50,7 +54,7 @@ def _valid_american_odds(value: object) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value) and abs(value) >= 100
 
 
-def _archived_totals_pair_matches(event: dict, quote: sqlite3.Row) -> bool:
+def _archived_totals_pair_matches(event: dict, quote: _Quote) -> bool:
     books = event.get("bookmakers")
     if not isinstance(books, list):
         return False
@@ -83,7 +87,7 @@ def _archived_totals_pair_matches(event: dict, quote: sqlite3.Row) -> bool:
 
 def _archived_quote_start(
     conn: sqlite3.Connection,
-    quote: sqlite3.Row,
+    quote: _Quote,
     fetched_at: datetime,
 ) -> datetime | None:
     """Recover legacy provenance from the original or relocated raw receipt."""
@@ -177,7 +181,7 @@ def _archived_quote_start(
 
 
 def _quote_source_start(
-    conn: sqlite3.Connection, quote: sqlite3.Row, fetched_at: datetime
+    conn: sqlite3.Connection, quote: _Quote, fetched_at: datetime
 ) -> datetime | None:
     """Resolve the provider's kickoff for the exact normalized totals pair."""
     if quote["source"] != _ODDS_SOURCE:
