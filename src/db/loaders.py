@@ -7,9 +7,10 @@ import logging
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -201,7 +202,9 @@ def _ensure_games_neutral_column(conn) -> None:
     conn.execute("ALTER TABLE games ADD COLUMN is_neutral INTEGER DEFAULT 0")
 
 
-def _parse_datetime(date_str: Any, time_str: Any) -> Optional[str]:
+def _parse_datetime(
+    date_str: Any, time_str: Any, *, naive_tz: tzinfo = timezone.utc
+) -> Optional[str]:
     if pd.isna(date_str):
         return None
     if isinstance(date_str, str) and date_str:
@@ -212,10 +215,14 @@ def _parse_datetime(date_str: Any, time_str: Any) -> Optional[str]:
     time_part = "00:00"
     if isinstance(time_str, str) and time_str:
         time_part = time_str
+    else:
+        naive_tz = timezone.utc
 
     try:
         dt = datetime.fromisoformat(f"{date_part}T{time_part}")
-        return dt.replace(tzinfo=timezone.utc).isoformat()
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=naive_tz)
+        return dt.astimezone(timezone.utc).isoformat()
     except ValueError:
         return None
 
@@ -361,6 +368,9 @@ def load_schedules(
         LOGGER.info("No schedules to load")
         return
 
+    # nflverse gametime uses Eastern time even for games played in other zones.
+    nflverse_schedule = league.upper() == "NFL" and source_version == "nfl_data_py"
+    kickoff_tz = ZoneInfo("America/New_York") if nflverse_schedule else timezone.utc
     with connect() as conn:
         sport_id = _ensure_sport(conn, name=sport_name, league=league, default_market=default_market)
         team_cache: Dict[str, int] = {}
@@ -403,8 +413,12 @@ def load_schedules(
             elif league.upper() == "LIGUE1" and not game_id.startswith("LIGUE1_"):
                 game_id = f"LIGUE1_{game_id}"
 
-            start_time = _parse_datetime(row.get("gameday"), row.get("gametime"))
-            season = _season_from_datetime(start_time, int(row.get("season")) if not pd.isna(row.get("season")) else None)
+            start_time = _parse_datetime(row.get("gameday"), row.get("gametime"), naive_tz=kickoff_tz)
+            source_season = int(row["season"]) if not pd.isna(row.get("season")) else None
+            if nflverse_schedule and source_season is not None:
+                season = source_season
+            else:
+                season = _season_from_datetime(start_time, source_season)
 
             gsis = row.get("gsis")
             if gsis is not None and not pd.isna(gsis):

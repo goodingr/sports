@@ -62,6 +62,36 @@ def test_has_successful_source_run(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert loaders.has_successful_source_run("missing") is False
 
 
+@pytest.mark.parametrize(
+    ("source", "day", "kickoff", "expected_start", "expected_season"),
+    [
+        ("nfl_data_py", "2026-09-13", "13:00", "2026-09-13T17:00:00+00:00", 2026),
+        ("nfl_data_py", "2027-01-03", "20:20", "2027-01-04T01:20:00+00:00", 2026),
+        ("nfl_data_py", "2027-01-03", None, "2027-01-03T00:00:00+00:00", 2026),
+        ("espn_api", "2026-09-13", "17:00", "2026-09-13T17:00:00+00:00", 2026),
+        ("espn_api", "2026-09-13", "13:00-04:00", "2026-09-13T17:00:00+00:00", 2026),
+    ],
+)
+def test_schedule_ingest_interprets_nflverse_kickoff_in_eastern_time(
+    tmp_path, monkeypatch, source, day, kickoff, expected_start, expected_season
+) -> None:
+    db_path = tmp_path / "schedules.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+    fixture = {
+        "game_id": "2026_01_PHI_DAL", "gameday": day, "gametime": kickoff,
+        "season": 2026, "home_team": "DAL", "away_team": "PHI",
+    }
+
+    loaders.load_schedules(pd.DataFrame([fixture]), source_version=source)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT start_time_utc, season FROM games").fetchone() == (
+            expected_start, expected_season,
+        )
+
+
 def test_espn_schedule_refresh_preserves_stored_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = tmp_path / "schedules.db"
     with sqlite3.connect(db_path) as conn:
