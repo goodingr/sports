@@ -199,7 +199,9 @@ docker compose exec -u app worker python -m src.models.train \
 ### NBA paper capture on Windows
 
 After the normal 6:04 p.m. Eastern pipeline and its 30-minute grace period,
-check the trial's odds receipt and capture record from the repository root.
+open **Daily NBA capture** on the internal **Paper Trials** page. The card shows
+the daily receipt, its matching trial evaluation, and any later attempt
+separately. You can also check the same evidence from the repository root.
 
 ```powershell
 poetry run python -m scripts.paper_capture_health

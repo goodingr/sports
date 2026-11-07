@@ -175,6 +175,73 @@ def test_missing_or_invalid_config_leaves_the_ledger_usable(ledger, config_conte
     assert "Trial nba" in text
 
 
+def test_daily_capture_panel_checks_the_exact_receipt_and_shows_later_attempt(ledger, monkeypatch):
+    rules = ledger.with_name("paper_trial.yml")
+    rules.write_bytes((dashboard.PROJECT_ROOT / "config/paper_trial.yml").read_bytes())
+    trial = load_trial(rules)
+    tick = NOW + timedelta(hours=19, minutes=4)
+    fetched = tick + timedelta(minutes=2)
+    captured = fetched + timedelta(seconds=4)
+    raw_dir = ledger.parent / "raw" / "odds" / "basketball_nba"
+    raw_dir.mkdir(parents=True)
+    receipt = raw_dir / fetched.strftime("odds_%Y-%m-%dT%H-%M-%SZ.json")
+    receipt.write_text(json.dumps({
+        "fetched_at": fetched.isoformat(),
+        "request": {
+            "url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds",
+            "params": {"regions": "us", "markets": "h2h,totals", "oddsFormat": "american"},
+        },
+        "results": [{
+            "id": "provider-fixture", "sport_key": "basketball_nba",
+            "commence_time": (tick + timedelta(hours=2)).isoformat(),
+        }],
+    }), encoding="utf-8")
+    with sqlite3.connect(ledger) as conn:
+        conn.executescript("""
+            CREATE TABLE sports (sport_id, league);
+            CREATE TABLE games (game_id, sport_id, odds_api_id, home_team_id, away_team_id);
+            CREATE TABLE odds_snapshots (snapshot_id, sport_id, source, fetched_at_utc, raw_path);
+            INSERT INTO sports VALUES (1, 'NBA');
+            INSERT INTO games VALUES ('game', 1, 'provider-fixture', 1, 2);
+        """)
+        conn.execute("INSERT INTO paper_trials VALUES (?, ?, ?)", (trial.trial_id, NOW.isoformat(), trial.specification))
+        run = conn.execute(
+            "INSERT INTO paper_capture_runs (trial_id, observed_at, status) VALUES (?, ?, 'evaluated')",
+            (trial.trial_id, captured.isoformat()),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO odds_snapshots VALUES ('snapshot', 1, 'the-odds-api', ?, ?)",
+            (fetched.isoformat(), str(receipt)),
+        )
+        conn.execute(
+            "INSERT INTO paper_fixture_observations VALUES (?, 'game', ?, 'below_edge_threshold', 'snapshot')",
+            (run, (tick + timedelta(hours=2)).isoformat()),
+        )
+        conn.execute(
+            "INSERT INTO paper_capture_runs (trial_id, observed_at, status) VALUES (?, ?, 'failed')",
+            (trial.trial_id, (captured + timedelta(minutes=5)).isoformat()),
+        )
+
+    assert "Daily NBA capture" in _text(dashboard.render_page("/paper"))
+    assert "Waiting for the first daily capture window" in _text(dashboard.show_daily_capture(None))
+
+    class AfterGrace(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return (tick + timedelta(minutes=31)).astimezone(tz)
+
+    monkeypatch.setattr(dashboard, "datetime", AfterGrace)
+    text = _text(dashboard.show_daily_capture(1))
+    assert "Daily receipt and evaluation verified" in text
+    assert "Expected Nov 07, 06:04:00 PM EST · Grace ends Nov 07, 06:34:00 PM EST" in text
+    assert "Evaluated 1 / 1 eligible fixtures · 1 below the edge threshold" in text
+    assert "Later attempt Nov 07, 06:11:04 PM EST · failed" in text
+    assert receipt.name in text
+
+    receipt.unlink()
+    assert "Daily odds receipt is missing" in _text(dashboard.show_daily_capture(2))
+
+
 def _schedule_report(*, audited_at=NOW, observed_at=NOW, linked=False):
     day = NOW.astimezone(dashboard.DISPLAY_TIMEZONE).date() + timedelta(days=1)
     return {
