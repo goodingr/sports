@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { isCheckoutAvailable } from "@/lib/api";
-import { getAppUrl, getStripe, getVerifiedCheckoutPrice } from "@/lib/billing";
+import {
+    configuredStripeScope, getAppUrl, getStripe, getVerifiedCheckoutPrice,
+    getVerifiedStripeAccount, hasScopedPremium,
+} from "@/lib/billing";
 import { createOrResumeCheckout } from "@/lib/checkout";
 import { CheckoutStore } from "@/lib/checkout-store";
 import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
+import { reconcileExistingCheckoutCustomer } from "@/lib/stripe-entitlements";
 
 export const runtime = "nodejs";
 
@@ -20,28 +24,27 @@ export async function POST() {
 
         const user = await currentUser();
         if (!user || user.id !== userId) return new NextResponse("Unauthorized", { status: 401 });
-        if (user.publicMetadata.is_premium === true || user.publicMetadata.isPremium === true) {
-            return new NextResponse("Already subscribed", { status: 409 });
-        }
-
+        const scope = configuredStripeScope();
+        if (!scope) throw new Error("Stripe scope is not configured");
         const path = process.env.SPORTS_CHECKOUT_DB_PATH;
         if (!path) throw new Error("Checkout storage is not configured");
         const stripe = getStripe();
-        const price = await getVerifiedCheckoutPrice(stripe);
+        const price = await getVerifiedCheckoutPrice(stripe, scope);
         if (!price) throw new Error("Checkout price differs from the offer");
-        const account = await stripe.accounts.retrieve();
-        if (!account.id || (price.livemode && account.charges_enabled !== true)) {
+        const account = await getVerifiedStripeAccount(stripe, scope);
+        if (scope.livemode && account.charges_enabled !== true) {
             throw new Error("Stripe account cannot accept charges");
         }
-        const legacyId = user.publicMetadata.stripe_customer_id;
+        if (hasScopedPremium(user.publicMetadata, scope)) {
+            return new NextResponse("Already subscribed", { status: 409 });
+        }
         const store = new CheckoutStore(path, { requireExisting: true });
         try {
             const result = await createOrResumeCheckout(
-                stripe, store, { account: account.id, livemode: price.livemode, userId },
-                typeof legacyId === "string" && legacyId.length > 0 ? legacyId : null,
-                price.id, getAppUrl(),
+                stripe, store, { ...scope, userId }, user.publicMetadata, getAppUrl(),
             );
             if ("blocked" in result) {
+                await reconcileExistingCheckoutCustomer(stripe, scope, result.customer, userId);
                 return new NextResponse("Subscription or payment already in progress", { status: 409 });
             }
             return NextResponse.json({ url: result.url }, { headers: { "Cache-Control": "no-store" } });

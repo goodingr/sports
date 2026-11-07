@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import Stripe from 'stripe';
 import { reconcileCheckoutReturn } from '@/app/account/checkout-return';
+import { POST as billingPortal } from '@/app/api/billing/portal/route';
 import { POST as stripeWebhook } from '@/app/api/webhooks/stripe/route';
-import { getClerk, getStripe, setClerkForTests } from '@/lib/billing';
+import { configuredStripeScope, getClerk, getStripe, hasScopedPremium, setClerkForTests } from '@/lib/billing';
 import { CheckoutStore, type CheckoutSessionParams } from '@/lib/checkout-store';
 import { POST } from './route';
 
@@ -54,6 +55,7 @@ const retrieveSession = vi.fn();
 const listSessions = vi.fn();
 const listSubscriptions = vi.fn();
 const retrieveSubscription = vi.fn();
+const createPortalSession = vi.fn();
 const updateMetadata = vi.fn();
 const sessions = new Map<string, Session>();
 const sessionKeys = new Map<string, string>();
@@ -73,11 +75,12 @@ async function* records<T>(rows: Iterable<T>) {
 function sessionFor(params: CheckoutSessionParams, key: string): Session {
     let id = sessionKeys.get(key);
     if (!id) {
-        id = `cs_test_${sessionKeys.size + 1}`;
+        const livemode = configuredStripeScope()!.livemode;
+        id = `cs_${livemode ? 'live' : 'test'}_${sessionKeys.size + 1}`;
         sessionKeys.set(key, id);
         sessions.set(id, {
             id, customer: params.customer, metadata: params.metadata, currency: params.currency,
-            livemode: false, status: 'open', mode: 'subscription',
+            livemode, status: 'open', mode: 'subscription',
             url: `https://checkout.stripe.com/${id}`,
             expires_at: Math.floor(Date.now() / 1000) + 3600,
             subscription: null,
@@ -102,7 +105,7 @@ async function completeCheckout() {
     };
     Object.assign(session, { status: 'complete', subscription: sub.id, payment_status: 'paid' });
     retrieveSubscription.mockResolvedValue(sub);
-    listSubscriptions.mockImplementation(() => records([sub]));
+    listSubscriptions.mockImplementation(({ customer }) => records(customer === sub.customer ? [sub] : []));
     return { session, sub };
 }
 
@@ -113,6 +116,8 @@ beforeEach(() => {
     new CheckoutStore(path).close();
     vi.stubEnv('SPORTS_CHECKOUT_DB_PATH', path);
     vi.stubEnv('STRIPE_PRICE_ID', validPrice.id);
+    vi.stubEnv('STRIPE_ACCOUNT_ID', scope.account);
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_checkout_return_fixture');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', webhookSecret);
     vi.stubGlobal('fetch', fetchAccess);
     fetchAccess.mockImplementation(async () => Response.json({ checkout_available: true }));
@@ -141,6 +146,7 @@ beforeEach(() => {
         customers: { create: createCustomer, retrieve: retrieveCustomer },
         checkout: { sessions: { create: createSession, retrieve: retrieveSession, list: listSessions } },
         subscriptions: { list: listSubscriptions, retrieve: retrieveSubscription },
+        billingPortal: { sessions: { create: createPortalSession } },
         webhooks,
     } as unknown as ReturnType<typeof getStripe>);
     sessions.clear();
@@ -150,15 +156,17 @@ beforeEach(() => {
     retrievePrice.mockResolvedValue(validPrice);
     createCustomer.mockImplementation(async (params, { idempotencyKey }) => {
         customerKeys.add(idempotencyKey);
-        return { id: 'cus_test', livemode: false, metadata: params.metadata };
+        const livemode = configuredStripeScope()!.livemode;
+        return { id: livemode ? 'cus_live' : 'cus_test', livemode, metadata: params.metadata };
     });
     retrieveCustomer.mockImplementation(async (id) => ({
-        id, livemode: false, metadata: { userId: scope.userId },
+        id, livemode: configuredStripeScope()!.livemode, metadata: { userId: scope.userId },
     }));
     createSession.mockImplementation(async (params, { idempotencyKey }) => sessionFor(params, idempotencyKey));
     retrieveSession.mockImplementation(async (id) => sessions.get(id));
-    listSessions.mockImplementation(() => records(sessions.values()));
+    listSessions.mockImplementation(({ customer }) => records([...sessions.values()].filter((session) => session.customer === customer)));
     listSubscriptions.mockImplementation(() => records([]));
+    createPortalSession.mockResolvedValue({ url: 'https://billing.stripe.com/session/fixture' });
 });
 
 afterEach(() => {
@@ -231,10 +239,65 @@ describe('POST /api/checkout', () => {
     });
 
     it('blocks a second checkout for an existing Clerk subscriber', async () => {
-        metadata.is_premium = true;
+        Object.assign(metadata, {
+            is_premium: true, stripe_customer_id: 'cus_test',
+            stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
+            stripe_entitlement: {
+                customer_id: 'cus_test', account_id: scope.account, livemode: scope.livemode, price_id: validPrice.id,
+            },
+        });
 
         expect((await POST()).status).toBe(409);
         expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('lets the same Clerk user enter live checkout after an actual test entitlement', async () => {
+        const { session } = await completeCheckout();
+        expect(await reconcileCheckoutReturn(session.id)).toBe(true);
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(true);
+
+        vi.stubEnv('STRIPE_SECRET_KEY', 'rk_live_checkout_fixture');
+        vi.stubEnv('STRIPE_PRICE_ID', 'price_live');
+        retrievePrice.mockResolvedValue({ ...validPrice, id: 'price_live', livemode: true });
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(false);
+        retrieveCustomer.mockClear();
+        retrieveSession.mockClear();
+
+        const response = await POST();
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ url: 'https://checkout.stripe.com/cs_live_2' });
+        expect(metadata).toMatchObject({
+            stripe_customer_id: 'cus_live', stripe_customer_account_id: scope.account, stripe_customer_livemode: true,
+        });
+        expect(retrieveCustomer).not.toHaveBeenCalledWith('cus_test');
+        expect(await reconcileCheckoutReturn(session.id)).toBe(false);
+        expect(retrieveSession).not.toHaveBeenCalledWith(session.id, { expand: ['line_items'] });
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(false);
+    });
+
+    it('verifies the account and price mode before creating a customer or checkout', async () => {
+        retrieveAccount.mockResolvedValueOnce({ id: 'acct_other', charges_enabled: true });
+        expect((await POST()).status).toBe(503);
+        retrievePrice.mockResolvedValueOnce({ ...validPrice, livemode: true });
+        expect((await POST()).status).toBe(503);
+        expect(createCustomer).not.toHaveBeenCalled();
+        expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('keeps the canonical customer and duplicate guard when only the price changes', async () => {
+        const { session } = await completeCheckout();
+        expect(await reconcileCheckoutReturn(session.id)).toBe(true);
+        vi.stubEnv('STRIPE_PRICE_ID', 'price_new');
+        retrievePrice.mockResolvedValue({ ...validPrice, id: 'price_new' });
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(false);
+
+        const response = await POST();
+        expect(response.status).toBe(409);
+        expect(await response.text()).toBe('Subscription or payment already in progress');
+        expect(createCustomer).toHaveBeenCalledTimes(1);
+        expect(createSession).toHaveBeenCalledTimes(1);
+        expect(metadata.stripe_customer_id).toBe(session.customer);
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(false);
     });
 
     it('converges racing requests and later requests on one customer and session', async () => {
@@ -298,6 +361,56 @@ describe('POST /api/checkout', () => {
 
         expect((await POST()).status).toBe(409);
         expect(retrieveCustomer).toHaveBeenCalledWith('cus_legacy');
+        expect(createCustomer).not.toHaveBeenCalled();
+        expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('upgrades a matching unscoped live subscriber with provider evidence and creates no duplicate', async () => {
+        vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_existing_fixture');
+        vi.stubEnv('STRIPE_PRICE_ID', 'price_live');
+        retrievePrice.mockResolvedValue({ ...validPrice, id: 'price_live', livemode: true });
+        Object.assign(metadata, { stripe_customer_id: 'cus_legacy', is_premium: true });
+        const sub = {
+            id: 'sub_existing', customer: 'cus_legacy', status: 'active', livemode: true,
+            created: 1_800_000_000, metadata: { userId: scope.userId },
+            items: { data: [{ price: { id: 'price_live' }, current_period_end: 1_803_000_000 }] },
+        };
+        listSubscriptions.mockImplementation(() => records([sub]));
+
+        expect((await POST()).status).toBe(409);
+        expect(retrieveCustomer).toHaveBeenCalledWith('cus_legacy');
+        expect(createCustomer).not.toHaveBeenCalled();
+        expect(createSession).not.toHaveBeenCalled();
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(true);
+    });
+
+    it('rebinds an unscoped customer only after Stripe confirms it is missing', async () => {
+        Object.assign(metadata, { stripe_customer_id: 'cus_legacy', is_premium: true });
+        retrieveCustomer.mockRejectedValueOnce(new Error('Stripe unavailable'));
+        expect((await POST()).status).toBe(503);
+        expect(createCustomer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+
+        retrieveCustomer.mockRejectedValueOnce(new Stripe.errors.StripeInvalidRequestError({
+            type: 'invalid_request_error', code: 'resource_missing', statusCode: 404,
+            message: 'No such customer',
+        }));
+        expect((await POST()).status).toBe(200);
+        expect(createCustomer).toHaveBeenCalledTimes(1);
+        expect(metadata).toMatchObject({
+            stripe_customer_id: 'cus_test', stripe_customer_account_id: scope.account, stripe_customer_livemode: false,
+        });
+        expect(hasScopedPremium(metadata, configuredStripeScope())).toBe(false);
+    });
+
+    it.each([
+        { stripe_customer_id: 'cus_legacy', stripe_customer_account_id: 'acct_other', stripe_customer_livemode: 'false' },
+        { stripe_customer_id: 'cus_legacy', stripe_customer_account_id: 'invalid', stripe_customer_livemode: true },
+        { stripe_customer_id: 'invalid', stripe_customer_account_id: 'acct_other', stripe_customer_livemode: true },
+    ])('fails closed on a malformed canonical customer binding', async (binding) => {
+        Object.assign(metadata, binding);
+        expect((await POST()).status).toBe(503);
+        expect(retrieveCustomer).not.toHaveBeenCalled();
         expect(createCustomer).not.toHaveBeenCalled();
         expect(createSession).not.toHaveBeenCalled();
     });
@@ -380,7 +493,7 @@ describe('authenticated Checkout return', () => {
 
         sub.status = 'canceled';
         const body = JSON.stringify({
-            id: 'evt_cancel_return_fixture', type: 'customer.subscription.deleted', data: { object: sub },
+            id: 'evt_cancel_return_fixture', livemode: false, type: 'customer.subscription.deleted', data: { object: sub },
         });
         signature = webhooks.generateTestHeaderString({ payload: body, secret: webhookSecret });
         expect((await stripeWebhook(new Request('https://app.example.test/api/webhooks/stripe', { method: 'POST', body }))).status).toBe(200);
@@ -432,5 +545,30 @@ describe('authenticated Checkout return', () => {
         expect(await reconcileCheckoutReturn('invalid-session')).toBe(false);
         expect(retrieveSession).not.toHaveBeenCalled();
         expect(updateMetadata).not.toHaveBeenCalled();
+    });
+});
+
+describe('authenticated billing portal', () => {
+    it('rejects a known foreign scope before looking up the customer', async () => {
+        Object.assign(metadata, {
+            stripe_customer_id: 'cus_wrong_scope',
+            stripe_customer_account_id: scope.account,
+            stripe_customer_livemode: true,
+        });
+        expect((await billingPortal()).status).toBe(404);
+        expect(retrieveCustomer).not.toHaveBeenCalled();
+        expect(createPortalSession).not.toHaveBeenCalled();
+    });
+
+    it('allows a legacy customer only after verifying its provider account, mode and owner', async () => {
+        metadata.stripe_customer_id = 'cus_legacy';
+        retrieveCustomer.mockResolvedValueOnce({ id: 'cus_legacy', livemode: true, metadata: { userId: scope.userId } });
+        expect((await billingPortal()).status).toBe(404);
+        expect(createPortalSession).not.toHaveBeenCalled();
+
+        expect((await billingPortal()).status).toBe(200);
+        expect(createPortalSession).toHaveBeenCalledExactlyOnceWith({
+            customer: 'cus_legacy', return_url: 'https://app.example.test/account',
+        });
     });
 });

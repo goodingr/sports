@@ -1,7 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { reconcileCheckoutReturn } from "./checkout-return";
 import AccountPage from "./page";
 
@@ -20,6 +20,8 @@ beforeEach(() => {
         id: "user_buyer", publicMetadata: {},
     } as Awaited<ReturnType<typeof currentUser>>);
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("account checkout return", () => {
     it("renders the check without mutating entitlements on GET", async () => {
@@ -48,5 +50,32 @@ describe("account checkout return", () => {
             "/login?redirect_url=%2Faccount%3Fsuccess%3Dtrue%26session_id%3Dcs_test_checkout",
         );
         expect(reconcileCheckoutReturn).not.toHaveBeenCalled();
+    });
+
+    it("shows account access only for the current Stripe scope", async () => {
+        vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_account_fixture");
+        vi.stubEnv("STRIPE_ACCOUNT_ID", "acct_fixture");
+        vi.stubEnv("STRIPE_PRICE_ID", "price_live");
+        const publicMetadata = {
+            is_premium: true, subscription_status: "active",
+            stripe_customer_id: "cus_fixture", stripe_customer_account_id: "acct_fixture",
+            stripe_customer_livemode: false,
+            stripe_entitlement: {
+                customer_id: "cus_fixture", account_id: "acct_fixture", livemode: false, price_id: "price_test",
+            },
+        };
+        vi.mocked(currentUser).mockResolvedValue({
+            id: "user_buyer", publicMetadata,
+        } as unknown as Awaited<ReturnType<typeof currentUser>>);
+        const props = { searchParams: Promise.resolve({ success: "true" }) };
+        const stale = renderToStaticMarkup(await AccountPage(props));
+        expect(stale).toContain("No active subscription");
+        expect(stale).toContain("Billing confirmation is pending");
+
+        publicMetadata.stripe_customer_livemode = true;
+        Object.assign(publicMetadata.stripe_entitlement, { livemode: true, price_id: "price_live" });
+        const current = renderToStaticMarkup(await AccountPage(props));
+        expect(current).toContain("Subscription confirmed.");
+        expect(current).toContain("Pro Access");
     });
 });

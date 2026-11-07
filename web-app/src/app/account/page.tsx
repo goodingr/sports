@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { ManageSubscriptionButton } from "@/components/account/ManageSubscriptionButton";
 import { isCheckoutSessionId } from "@/lib/stripe-entitlements";
+import { configuredStripeScope, hasScopedPremium, isPremiumStatus, scopedCustomerId } from "@/lib/billing";
 import { CheckoutReturnStatus } from "./CheckoutReturnStatus";
 
 export const metadata: Metadata = {
@@ -38,15 +39,16 @@ export default async function AccountPage({ searchParams }: PageProps) {
     const showLegacyStatus = params.success === "true" && params.session_id === undefined;
 
     const meta = (user?.publicMetadata ?? {}) as Record<string, unknown>;
-    const isPremium = meta.is_premium === true || meta.isPremium === true;
-    const status = typeof meta.subscription_status === "string" ? meta.subscription_status : null;
+    const scope = configuredStripeScope();
+    const isPremium = hasScopedPremium(meta, scope);
+    const hasCustomer = scopedCustomerId(meta, scope) !== null;
+    const status = hasCustomer && typeof meta.subscription_status === "string"
+        && (isPremium || !isPremiumStatus(meta.subscription_status)) ? meta.subscription_status : null;
     const cancelScheduled = meta.subscription_cancel_at_period_end === true;
     const periodEnd =
         typeof meta.subscription_current_period_end === "number"
             ? meta.subscription_current_period_end
             : null;
-    const hasCustomer =
-        typeof meta.stripe_customer_id === "string" && meta.stripe_customer_id.length > 0;
     const email = user?.emailAddresses?.[0]?.emailAddress ?? "";
 
     return (

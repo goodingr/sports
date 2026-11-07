@@ -6,6 +6,7 @@ vi.mock("server-only", () => ({}));
 process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_secret";
 process.env.STRIPE_PRICE_ID = "price_test";
+process.env.STRIPE_ACCOUNT_ID = "acct_fixture";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
 const headersStore = new Map<string, string>();
@@ -40,11 +41,13 @@ function makeCustomer(overrides: Partial<Stripe.Customer> = {}): Stripe.Customer
 function makeStripeWithMocks(opts: {
     subscriptions?: Record<string, Stripe.Subscription>;
     customers?: Record<string, Stripe.Customer | Stripe.DeletedCustomer>;
+    account?: string;
 }): Stripe {
     const real = new Stripe("sk_test_dummy", { typescript: true });
     const subs = opts.subscriptions ?? {};
     const customers = opts.customers ?? { cus_test: makeCustomer() };
     Object.assign(real, {
+        accounts: { retrieve: async () => ({ id: opts.account ?? 'acct_fixture' }) },
         subscriptions: {
             retrieve: async (id: string) => {
                 if (!subs[id]) throw new Error(`subscription not found: ${id}`);
@@ -71,10 +74,10 @@ function makeStripeWithMocks(opts: {
     return real;
 }
 
-type TestEvent = { id: string; type: string; data: { object: unknown } };
+type TestEvent = { id: string; type: string; data: { object: unknown }; livemode?: boolean; account?: string };
 
 function signedRequest(stripe: Stripe, event: TestEvent): Request {
-    const body = JSON.stringify(event);
+    const body = JSON.stringify({ livemode: false, ...event });
     const signature = stripe.webhooks.generateTestHeaderString({
         payload: body,
         secret: WEBHOOK_SECRET,
@@ -193,9 +196,49 @@ describe("POST /api/webhooks/stripe", () => {
         expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBe(true);
         expect(users.user_clerk_1.publicMetadata.subscription_status).toBe("active");
         expect(users.user_clerk_1.publicMetadata.stripe_customer_id).toBe("cus_test");
+        expect(users.user_clerk_1.publicMetadata).toMatchObject({
+            stripe_customer_account_id: 'acct_fixture', stripe_customer_livemode: false,
+            stripe_entitlement: {
+                customer_id: 'cus_test', account_id: 'acct_fixture', livemode: false, price_id: PRICE_ID,
+            },
+        });
         expect(users.user_clerk_1.privateMetadata.stripe_last_event_id).toBe(
             "evt_checkout_1",
         );
+    });
+
+    it('ignores signed events with a different mode or connected account', async () => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const sub = makeSubscription();
+        const stripe = makeStripeWithMocks({ subscriptions: { sub_test: sub } });
+        setStripeForTests(stripe);
+        const provider = vi.spyOn(stripe.accounts, 'retrieve');
+        const event = {
+            id: 'evt_wrong_scope', type: 'customer.subscription.created', data: { object: sub },
+        };
+
+        expect((await POST(signedRequest(stripe, { ...event, livemode: true }))).status).toBe(200);
+        expect((await POST(signedRequest(stripe, { ...event, account: 'acct_other' }))).status).toBe(200);
+        expect(provider).not.toHaveBeenCalled();
+        expect(users.user_clerk_1.publicMetadata.is_premium).toBeUndefined();
+    });
+
+    it('requires the actual Stripe account to match before writing entitlement metadata', async () => {
+        const users = makeUsers();
+        setClerkForTests(makeFakeClerk(users) as never);
+        const sub = makeSubscription();
+        const stripe = makeStripeWithMocks({ account: 'acct_other', subscriptions: { sub_test: sub } });
+        setStripeForTests(stripe);
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            expect((await POST(signedRequest(stripe, {
+                id: 'evt_wrong_provider', type: 'customer.subscription.created', data: { object: sub },
+            }))).status).toBe(500);
+            expect(users.user_clerk_1.publicMetadata.is_premium).toBeUndefined();
+        } finally {
+            log.mockRestore();
+        }
     });
 
     it("revokes premium on customer.subscription.deleted", async () => {

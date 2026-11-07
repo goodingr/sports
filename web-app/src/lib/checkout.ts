@@ -1,5 +1,8 @@
 import type Stripe from "stripe";
-import { CHECKOUT_CURRENCY, getClerk } from "./billing";
+import {
+    CHECKOUT_CURRENCY, customerBinding, customerBindingMetadata, getClerk,
+    isMissingStripeCustomer, ownsStripeCustomer, type StripeScope,
+} from "./billing";
 import type { CheckoutScope, CheckoutSessionParams, CheckoutStore } from "./checkout-store";
 
 const TERMINAL_SUBSCRIPTIONS: ReadonlySet<Stripe.Subscription.Status> = new Set([
@@ -7,47 +10,48 @@ const TERMINAL_SUBSCRIPTIONS: ReadonlySet<Stripe.Subscription.Status> = new Set(
     "incomplete_expired",
 ]);
 
-type CheckoutResult = { url: string } | { blocked: true };
-
-function ownsCustomer(customer: Stripe.Customer | Stripe.DeletedCustomer, scope: CheckoutScope): boolean {
-    return !("deleted" in customer && customer.deleted)
-        && customer.livemode === scope.livemode
-        && (customer.metadata.userId ?? customer.metadata.clerkUserId) === scope.userId;
-}
+type CheckoutResult = { url: string } | { blocked: true; customer: string };
 
 async function canonicalCustomer(
     stripe: Stripe,
     store: CheckoutStore,
-    scope: CheckoutScope,
-    legacyCustomerId: string | null,
+    scope: CheckoutScope & StripeScope,
+    metadata: Record<string, unknown>,
 ): Promise<string> {
     let attempt = store.getCustomer(scope);
-    if (!attempt) {
-        if (legacyCustomerId) {
-            const legacy = await stripe.customers.retrieve(legacyCustomerId);
-            if (legacy.id !== legacyCustomerId || !ownsCustomer(legacy, scope)) {
+    const binding = customerBinding(metadata, scope);
+    let boundId = binding?.id ?? null;
+    if (binding && (!attempt || !binding.scoped)) {
+        try {
+            const customer = await stripe.customers.retrieve(binding.id);
+            if (customer.id !== binding.id || !ownsStripeCustomer(customer, scope.userId, scope.livemode)) {
                 throw new Error("Checkout customer ownership could not be verified");
             }
+        } catch (error) {
+            if (binding.scoped || !isMissingStripeCustomer(error) || attempt?.stripeId === binding.id) throw error;
+            boundId = null;
         }
-        attempt = store.reserveCustomer(scope, { metadata: { userId: scope.userId } }, legacyCustomerId ?? undefined);
+    }
+    if (!attempt) {
+        attempt = store.reserveCustomer(scope, { metadata: { userId: scope.userId } }, boundId ?? undefined);
     }
 
     let customerId = attempt.stripeId;
-    if (legacyCustomerId && customerId !== legacyCustomerId) {
+    if (boundId && customerId !== boundId) {
         throw new Error("Checkout customer references disagree");
     }
     if (!customerId) {
         if (!attempt.retryable) throw new Error("Checkout customer needs reconciliation");
         const customer = await stripe.customers.create(attempt.params, { idempotencyKey: attempt.key });
-        if (!ownsCustomer(customer, scope) || !store.saveCustomer(scope, attempt.key, customer.id)) {
+        if (!ownsStripeCustomer(customer, scope.userId, scope.livemode) || !store.saveCustomer(scope, attempt.key, customer.id)) {
             throw new Error("Checkout customer response could not be recorded");
         }
         customerId = customer.id;
     }
 
-    if (!legacyCustomerId) {
+    if (boundId !== customerId || !binding?.scoped) {
         const clerk = await getClerk();
-        await clerk.users.updateUserMetadata(scope.userId, { publicMetadata: { stripe_customer_id: customerId } });
+        await clerk.users.updateUserMetadata(scope.userId, { publicMetadata: customerBindingMetadata(customerId, scope) });
     }
     return customerId;
 }
@@ -91,12 +95,13 @@ async function hasUnresolvedCheckout(
 export async function createOrResumeCheckout(
     stripe: Stripe,
     store: CheckoutStore,
-    scope: CheckoutScope,
-    legacyCustomerId: string | null,
-    priceId: string,
+    scope: CheckoutScope & StripeScope,
+    metadata: Record<string, unknown>,
     appUrl: string,
 ): Promise<CheckoutResult> {
-    const customer = await canonicalCustomer(stripe, store, scope, legacyCustomerId);
+    const { priceId } = scope;
+    const customer = await canonicalCustomer(stripe, store, scope, metadata);
+    const blocked = { blocked: true, customer } as const;
     const params: CheckoutSessionParams = {
         customer,
         currency: CHECKOUT_CURRENCY,
@@ -127,11 +132,11 @@ export async function createOrResumeCheckout(
                     throw new Error("Existing checkout needs reconciliation");
                 }
                 if (await hasUnresolvedCheckout(stripe, customer, scope.livemode, session.id)
-                    || await hasNonterminalSubscription(stripe, customer)) return { blocked: true };
+                    || await hasNonterminalSubscription(stripe, customer)) return blocked;
                 return { url: session.url };
             }
             if (session.status === "complete") {
-                if (!(await subscriptionEnded(stripe, session, customer, scope.livemode))) return { blocked: true };
+                if (!(await subscriptionEnded(stripe, session, customer, scope.livemode))) return blocked;
             } else if (session.status !== "expired") {
                 throw new Error("Checkout session is in an unknown state");
             }
@@ -142,9 +147,9 @@ export async function createOrResumeCheckout(
             if (await hasUnresolvedCheckout(stripe, customer, scope.livemode, replace?.sessionId)) {
                 const current = store.getSession(scope);
                 if (current && current.key !== attempt?.key) continue;
-                return { blocked: true };
+                return blocked;
             }
-            if (await hasNonterminalSubscription(stripe, customer)) return { blocked: true };
+            if (await hasNonterminalSubscription(stripe, customer)) return blocked;
             attempt = store.reserveSession(scope, params, replace);
             if (attempt.stripeId) continue;
         }

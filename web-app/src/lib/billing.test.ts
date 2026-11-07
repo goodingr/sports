@@ -5,13 +5,17 @@ import {
     applySnapshot,
     createBillingPortalSession,
     getStoredCustomerId,
+    hasScopedPremium,
     getVerifiedCheckoutPrice,
     isPremiumStatus,
     revokedSnapshot,
     setClerkForTests,
     setStripeForTests,
+    type StripeScope,
     snapshotFromSubscription,
 } from "./billing";
+
+const scope: StripeScope = { account: 'acct_test', livemode: false, priceId: 'price_test' };
 
 type StoredUser = {
     id: string;
@@ -93,7 +97,7 @@ describe("getVerifiedCheckoutPrice", () => {
         vi.stubEnv("NODE_ENV", "production");
         retrieve.mockResolvedValue({ ...price, livemode });
 
-        await expect(getVerifiedCheckoutPrice(stripe)).resolves.toEqual({ id: price.id, livemode });
+        await expect(getVerifiedCheckoutPrice(stripe, { ...scope, livemode })).resolves.toEqual({ id: price.id, livemode });
         expect(retrieve).toHaveBeenCalledExactlyOnceWith(price.id, { expand: ["product"] });
     });
 
@@ -117,7 +121,7 @@ describe("getVerifiedCheckoutPrice", () => {
     ])("rejects %s", async (_, overrides) => {
         retrieve.mockResolvedValue({ ...price, ...overrides });
 
-        await expect(getVerifiedCheckoutPrice(stripe)).resolves.toBeNull();
+        await expect(getVerifiedCheckoutPrice(stripe, scope)).resolves.toBeNull();
     });
 });
 
@@ -171,9 +175,10 @@ describe("applySnapshot", () => {
         const changed = await applySnapshot(
             "user_clerk_1",
             snapshotFromSubscription(makeSubscription()),
-            "evt_1",
+            "evt_1", scope,
         );
         expect(changed).toBe(true);
+        expect(hasScopedPremium(users.user_clerk_1.publicMetadata, scope)).toBe(true);
         expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBe(true);
         expect(users.user_clerk_1.publicMetadata.subscription_status).toBe("active");
         expect(users.user_clerk_1.publicMetadata.stripe_customer_id).toBe("cus_abc");
@@ -187,7 +192,11 @@ describe("applySnapshot", () => {
         const users: Record<string, StoredUser> = {
             user_clerk_1: {
                 id: "user_clerk_1",
-                publicMetadata: { ...snapshotFromSubscription(makeSubscription()) },
+                publicMetadata: {
+                    ...snapshotFromSubscription(makeSubscription()),
+                    stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
+                    stripe_entitlement: { customer_id: 'cus_abc', account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId },
+                },
                 privateMetadata: { stripe_last_event_id: "evt_dup" },
             },
         };
@@ -195,7 +204,7 @@ describe("applySnapshot", () => {
         const changed = await applySnapshot(
             "user_clerk_1",
             snapshotFromSubscription(makeSubscription()),
-            "evt_dup",
+            "evt_dup", scope,
         );
         expect(changed).toBe(false);
         expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBe(true);
@@ -220,7 +229,7 @@ describe("applySnapshot", () => {
         await applySnapshot(
             "user_clerk_1",
             revokedSnapshot("cus_abc", "canceled"),
-            "evt_cancel",
+            "evt_cancel", scope,
         );
         expect(users.user_clerk_1.publicMetadata[PREMIUM_KEY]).toBe(false);
         expect(users.user_clerk_1.publicMetadata.subscription_status).toBe("canceled");
@@ -235,13 +244,17 @@ describe("applySnapshot", () => {
         const users = {
             user_clerk_1: {
                 id: 'user_clerk_1',
-                publicMetadata: { ...snapshotFromSubscription(makeSubscription()) },
+                publicMetadata: {
+                    ...snapshotFromSubscription(makeSubscription()),
+                    stripe_customer_account_id: scope.account, stripe_customer_livemode: scope.livemode,
+                    stripe_entitlement: { customer_id: 'cus_abc', account_id: scope.account, livemode: scope.livemode, price_id: scope.priceId },
+                },
                 privateMetadata: { stripe_last_event_id: 'evt_retry' },
             },
         };
         setClerkForTests(makeFakeClerk(users) as never);
 
-        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_retry')).toBe(true);
+        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_retry', scope)).toBe(true);
         expect(users.user_clerk_1.publicMetadata.is_premium).toBe(false);
     });
 
@@ -252,7 +265,7 @@ describe("applySnapshot", () => {
         };
         setClerkForTests(makeFakeClerk(users) as never);
 
-        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_old')).toBe(false);
+        expect(await applySnapshot('user_clerk_1', revokedSnapshot('cus_abc', 'canceled'), 'evt_old', scope)).toBe(false);
         expect(users.user_clerk_1.publicMetadata).toEqual(prior);
         expect(users.user_clerk_1.privateMetadata).toEqual({});
     });
@@ -268,7 +281,7 @@ describe("getStoredCustomerId", () => {
             },
         };
         setClerkForTests(makeFakeClerk(users) as never);
-        const id = await getStoredCustomerId("user_clerk_1");
+        const id = await getStoredCustomerId("user_clerk_1", scope);
         expect(id).toBe("cus_existing");
     });
 
@@ -277,7 +290,7 @@ describe("getStoredCustomerId", () => {
             user_clerk_1: { id: "user_clerk_1", publicMetadata: {}, privateMetadata: {} },
         };
         setClerkForTests(makeFakeClerk(users) as never);
-        const id = await getStoredCustomerId("user_clerk_1");
+        const id = await getStoredCustomerId("user_clerk_1", scope);
         expect(id).toBeNull();
     });
 });
@@ -285,7 +298,7 @@ describe("getStoredCustomerId", () => {
 describe("createBillingPortalSession", () => {
     it("forwards customer + return_url to Stripe and returns the redirect URL", async () => {
         let received: { customer?: string; return_url?: string } = {};
-        setStripeForTests({
+        const stripe = {
             billingPortal: {
                 sessions: {
                     create: async (params: { customer: string; return_url: string }) => {
@@ -294,8 +307,9 @@ describe("createBillingPortalSession", () => {
                     },
                 },
             },
-        } as unknown as Stripe);
+        } as unknown as Stripe;
         const url = await createBillingPortalSession(
+            stripe,
             "cus_abc",
             "https://example.test/account",
         );

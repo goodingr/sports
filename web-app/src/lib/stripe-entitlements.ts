@@ -4,11 +4,14 @@ import type Stripe from "stripe";
 import {
     applySnapshot,
     CHECKOUT_CURRENCY,
+    configuredStripeScope,
     getStoredCustomerId,
-    getStripePriceId,
+    getVerifiedStripeAccount,
     isPremiumStatus,
+    ownsStripeCustomer,
     revokedSnapshot,
     snapshotFromSubscription,
+    type StripeScope,
 } from "./billing";
 
 export function resourceId(resource: string | { id: string } | null): string | null {
@@ -26,15 +29,18 @@ function hasPrice(sub: Stripe.Subscription, priceId: string): boolean {
 export async function reconcilePaidCheckoutReturn(
     stripe: Stripe, sessionId: string, userId: string,
 ): Promise<boolean> {
-    const priceId = getStripePriceId();
-    const customerId = await getStoredCustomerId(userId);
+    const scope = configuredStripeScope();
+    if (!scope || !sessionId.startsWith(scope.livemode ? "cs_live_" : "cs_test_")) return false;
+    const { priceId, livemode } = scope;
+    const customerId = await getStoredCustomerId(userId, scope);
     if (!customerId) return false;
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ["line_items"] });
     const owner = session.metadata?.userId ?? session.metadata?.clerkUserId;
     const items = session.line_items;
     if (session.id !== sessionId || resourceId(session.customer) !== customerId || owner !== userId
-        || session.mode !== "subscription" || session.status !== "complete" || session.payment_status !== "paid"
+        || session.livemode !== livemode || session.mode !== "subscription"
+        || session.status !== "complete" || session.payment_status !== "paid"
         || session.currency !== CHECKOUT_CURRENCY || !(session.amount_total && session.amount_total > 0)
         || !items || items.has_more || items.data.length !== 1
         || items.data[0].price?.id !== priceId || items.data[0].quantity !== 1) return false;
@@ -55,8 +61,12 @@ export async function reconcileStripeSubscription(
     checkoutMetadata: Stripe.Metadata | null,
     expectedUserId?: string,
 ): Promise<boolean> {
+    const scope = configuredStripeScope();
+    if (!scope) throw new Error("Stripe scope is not configured");
+    if (sub.livemode !== scope.livemode) return false;
     const customerId = resourceId(sub.customer);
     if (!customerId) return false;
+    await getVerifiedStripeAccount(stripe, scope);
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.id !== customerId) return false;
     const deleted = "deleted" in customer && customer.deleted;
@@ -69,24 +79,39 @@ export async function reconcileStripeSubscription(
     ].filter((id): id is string => Boolean(id)));
     if (owners.size !== 1) return false;
     const [userId] = owners;
-    if ((expectedUserId && expectedUserId !== userId) || await getStoredCustomerId(userId) !== customerId) {
+    if ((expectedUserId && expectedUserId !== userId) || await getStoredCustomerId(userId, scope) !== customerId) {
         return false;
     }
     if (deleted) {
-        await applySnapshot(userId, revokedSnapshot(customerId, "canceled"), eventId);
+        await applySnapshot(userId, revokedSnapshot(customerId, "canceled"), eventId, scope);
         return false;
     }
 
-    const priceId = getStripePriceId();
-    const requiredActiveId = expectedUserId ? sub.id : undefined;
+    return synchronizeCustomer(stripe, scope, customerId, userId, eventId, expectedUserId ? sub.id : undefined);
+}
+
+/** Recover an existing current-price entitlement when verified checkout detects an existing subscription. */
+export async function reconcileExistingCheckoutCustomer(
+    stripe: Stripe, scope: StripeScope, customerId: string, userId: string,
+): Promise<void> {
+    // Checkout has already verified the provider account and price for this scope.
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.id !== customerId || !ownsStripeCustomer(customer, userId, scope.livemode)) return;
+    await synchronizeCustomer(stripe, scope, customerId, userId, `checkout_existing:${customerId}:${scope.priceId}`, undefined, true);
+}
+
+async function synchronizeCustomer(
+    stripe: Stripe, scope: StripeScope, customerId: string, userId: string, eventId: string,
+    requiredActiveId?: string, requireInitialPremium = false,
+): Promise<boolean> {
     // Re-read current provider state after writing to handle delayed and racing updates.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        const state = await currentCustomerState(stripe, customerId, userId, priceId, sub.livemode, requiredActiveId);
-        if (attempt === 0 && !state.verified) return false;
-        await applySnapshot(userId, state.snapshot, eventId);
-        const confirmed = await currentCustomerState(stripe, customerId, userId, priceId, sub.livemode, requiredActiveId);
+        const state = await currentCustomerState(stripe, customerId, userId, scope, requiredActiveId);
+        if (attempt === 0 && (!state.verified || (requireInitialPremium && !state.snapshot.is_premium))) return false;
+        await applySnapshot(userId, state.snapshot, eventId, scope);
+        const confirmed = await currentCustomerState(stripe, customerId, userId, scope, requiredActiveId);
         if (JSON.stringify(state) === JSON.stringify(confirmed)) {
-            return confirmed.verified && (!expectedUserId || await getStoredCustomerId(userId) === customerId);
+            return confirmed.verified && await getStoredCustomerId(userId, scope) === customerId;
         }
     }
     throw new Error("Subscription state changed during synchronization");
@@ -96,8 +121,7 @@ async function currentCustomerState(
     stripe: Stripe,
     customerId: string,
     userId: string,
-    priceId: string,
-    livemode: boolean,
+    { priceId, livemode }: StripeScope,
     requiredActiveId?: string,
 ) {
     const subscriptions: Stripe.Subscription[] = [];

@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { isPilotOnly, pilotBillingUnavailable } from "@/lib/pilot";
-import { getStripe, getStripeWebhookSecret } from "@/lib/billing";
+import { configuredStripeScope, getStripe, getStripeWebhookSecret } from "@/lib/billing";
 import { reconcileStripeSubscription, resourceId } from "@/lib/stripe-entitlements";
 
 const HANDLED: ReadonlySet<Stripe.Event["type"]> = new Set([
@@ -48,6 +48,11 @@ export async function POST(req: Request) {
     }
 
     try {
+        const scope = configuredStripeScope();
+        if (!scope) throw new Error("Stripe scope is not configured");
+        if (event.livemode !== scope.livemode || (event.account && event.account !== scope.account)) {
+            return new NextResponse(null, { status: 200 });
+        }
         await handleEvent(stripe, event);
     } catch (error) {
         console.error("[WEBHOOK_HANDLER_ERROR]", event.type, event.id, error);

@@ -12,10 +12,6 @@ function buildAuthHeaders(token: string | null): Record<string, string> {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function hasPremiumAccess(metadata: Record<string, unknown> | null | undefined): boolean {
-    return metadata?.is_premium === true || metadata?.isPremium === true;
-}
-
 function groupByDate(bets: Bet[]): Array<[string, Bet[]]> {
     const groups: Record<string, Bet[]> = {};
     for (const bet of bets) {
@@ -47,8 +43,7 @@ export function BetFeed() {
     const [apiPremium, setApiPremium] = useState<boolean | null>(null);
     const loadMoreController = useRef<AbortController | null>(null);
 
-    const hasPremium = hasPremiumAccess(user?.publicMetadata);
-    const isPremium = apiPremium ?? hasPremium;
+    const isPremium = apiPremium === true;
 
     useEffect(() => {
         function openModelHistory() {
@@ -182,7 +177,7 @@ export function BetFeed() {
             window.removeEventListener('focus', refreshVisible);
             document.removeEventListener('visibilitychange', refreshVisible);
         };
-    }, [isLoaded, getToken, reloadKey, user?.id, hasPremium]);
+    }, [isLoaded, getToken, reloadKey, user?.id]);
 
     useEffect(() => {
         if (upcoming.length === 0) return;
