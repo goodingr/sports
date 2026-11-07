@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+from src.predict.paper_coverage import capture_coverage
+
 GRADING_GRACE = timedelta(days=7)
 BOOTSTRAP_SAMPLES = 3000
 BOOTSTRAP_SEED = 42
@@ -193,6 +195,9 @@ def build_paper_report(conn: sqlite3.Connection, observed_at: datetime) -> dict[
                 "review_status": status,
                 "review_verdict": verdict,
                 "review_failures": failures,
+                "capture_coverage": capture_coverage(
+                    conn, row["trial_id"], registered_at, review_at, observed_at
+                ),
                 "metrics": metrics,
             }
         )

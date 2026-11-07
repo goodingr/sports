@@ -191,11 +191,20 @@ if (( ! SKIP_ODDS )); then
 	log "step 2: live odds"
 	for league in "${LEAGUES[@]}"; do
 		log "  fetching odds: $league"
-		bucket_run ingest "odds[$league]" -- \
+		if bucket_run ingest "odds[$league]" -- \
 			python -m src.data.ingest_odds \
 				--league "$league" \
 				--market h2h,totals \
-				--force-refresh
+				--force-refresh; then
+			if (( PAPER_ENABLED && ! SKIP_PREDICTION )) && [[ "$league" == NBA ]]; then
+				log "  capture paper decisions from fresh NBA odds"
+				bucket_run paper "NBA/random_forest capture" -- \
+					python -m src.predict.runner --leagues NBA --model-type random_forest --paper
+			fi
+		elif (( PAPER_ENABLED && ! SKIP_PREDICTION )) && [[ "$league" == NBA ]]; then
+			PAPER_FAIL=$((PAPER_FAIL + 1))
+			note_failure "paper" "NBA odds refresh failed; paper capture could not run"
+		fi
 	done
 
 	log "step 3: live scores"
@@ -255,7 +264,8 @@ if (( ! SKIP_TRAINING || ! SKIP_PUBLISH )); then
 		RELEASE_QUALITY_PASSED=0
 		QUALITY_FAIL=$((QUALITY_FAIL + 1))
 		note_failure "quality" "paid-release data quality failed"
-		if (( ! SKIP_PUBLISH )) && ! rm -f -- "$PAID_OUTPUT"; then
+		if (( ! SKIP_PUBLISH )) && ! python -m src.predict.publishable_bets revoke \
+			--output "$PAID_OUTPUT" --reason data_quality_failed; then
 			PUBLISH_FAIL=$((PUBLISH_FAIL + 1))
 			note_failure "publish" "could not revoke the previous paid output"
 		fi
@@ -273,20 +283,11 @@ if (( ! SKIP_PREDICTION )); then
 	for league in "${LEAGUES[@]}"; do
 		for mt in "${MODEL_TYPES[@]}"; do
 			log "  predicting: $league / $mt"
-			PAPER_ARGS=()
-			if (( PAPER_ENABLED && ! SKIP_ODDS )) && [[ "$league/$mt" == NBA/random_forest ]]; then
-				PAPER_ARGS+=(--paper)
-			fi
-			if ! bucket_run predict "predict[$league/$mt]" -- \
+			bucket_run predict "predict[$league/$mt]" -- \
 				python -m src.predict.runner \
 					--leagues "$league" \
 					--model-type "$mt" \
-					--log-level INFO "${PAPER_ARGS[@]}"; then
-				if (( ${#PAPER_ARGS[@]} )); then
-					PAPER_FAIL=$((PAPER_FAIL + 1))
-					note_failure "paper" "NBA/random_forest paper capture run failed"
-				fi
-			fi
+					--log-level INFO
 		done
 	done
 else

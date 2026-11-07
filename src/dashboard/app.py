@@ -892,6 +892,41 @@ def show_paper_trials(_n_clicks: Optional[int]):
             f"{brier_model:.3f} vs {brier_market:.3f}"
             if brier_model is not None and brier_market is not None else "—"
         )
+        coverage = trial.get("capture_coverage", {})
+        coverage_details = [html.Div("No capture history is available.")]
+        if coverage.get("available"):
+            if coverage["last_run_at"] is None:
+                coverage_details = [html.Div("No capture attempts have been recorded.")]
+            else:
+                last_attempt = pd.Timestamp(coverage["last_run_at"]).tz_convert(DISPLAY_TIMEZONE)
+                status = coverage["last_run_status"].replace("_", " ")
+                coverage_details = [
+                    html.Div(
+                        f"Last capture attempt {last_attempt.strftime('%b %d, %Y %I:%M %p %Z')} "
+                        f"· {status} · Capture attempts {coverage['runs']}"
+                    )
+                ]
+                if coverage["observed_fixtures"]:
+                    coverage_details.append(
+                        html.Div(
+                            f"Fully evaluated {coverage['fully_evaluated_fixtures']} / "
+                            f"{coverage['observed_fixtures']} observed fixtures · "
+                            f"{coverage['below_edge_fixtures']} below the edge threshold"
+                        )
+                    )
+                else:
+                    coverage_details.append(
+                        html.Div("No fixtures were observed inside the capture window.")
+                    )
+                if coverage["attempts_by_outcome"]:
+                    coverage_details.append(
+                        html.Div(
+                            "Fixture attempts · " + " · ".join(
+                                f"{outcome.replace('_', ' ').capitalize()} {count}"
+                                for outcome, count in sorted(coverage["attempts_by_outcome"].items())
+                            )
+                        )
+                    )
         cards.append(
             dbc.Card(
                 dbc.CardBody(
@@ -925,6 +960,7 @@ def show_paper_trials(_n_clicks: Optional[int]):
                             ],
                             className="g-3",
                         ),
+                        html.Div(coverage_details, className="small text-muted mt-3"),
                         html.Small(
                             f"Review verdict {trial['review_verdict']}"
                             if trial["review_verdict"] else f"Trial {trial['trial_id']}",

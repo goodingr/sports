@@ -53,8 +53,11 @@ if ($LASTEXITCODE -ne 0) {
 
 # 1. Ingest All Data
 Write-Host "=== Starting Data Ingestion ==="
-& "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds
-if ($LASTEXITCODE -ne 0) {
+& "$scriptDir/ingest_all.ps1" -SoccerOnly:$SoccerOnly -SkipOdds:$SkipOdds -Paper:($paperEnabled -and -not $SkipPrediction)
+if ($LASTEXITCODE -eq 2) {
+    Write-Warning "The immediate NBA paper capture failed. Data ingestion continued."
+    $paperFailed = $true
+} elseif ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Data ingestion failed."
     exit $LASTEXITCODE
 }
@@ -69,8 +72,12 @@ if ($runBenchmark -or -not $SkipPublish) {
     $releaseQualityPassed = $LASTEXITCODE -eq 0
     if (-not $releaseQualityPassed) {
         Write-Warning "Paid-release data quality failed."
-        if (-not $SkipPublish -and (Test-Path -LiteralPath $paidOutput -PathType Leaf)) {
-            Remove-Item -LiteralPath $paidOutput -ErrorAction Stop
+        if (-not $SkipPublish) {
+            python -m src.predict.publishable_bets revoke --output $paidOutput --reason data_quality_failed
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Failed to revoke the active paid release."
+                exit $LASTEXITCODE
+            }
         }
     }
 }
@@ -88,7 +95,7 @@ if ($paperEnabled) {
 # publish gate matches them to an approved, passing rule.
 if (-not $SkipPrediction) {
     Write-Host "=== Starting Current Prediction Refresh ==="
-    & "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly -Paper:($paperEnabled -and -not $SkipOdds)
+    & "$scriptDir/predict.ps1" -SoccerOnly:$SoccerOnly
     if ($LASTEXITCODE -eq 2) {
         Write-Warning "The NBA paper capture run failed. Other predictions completed."
         $paperFailed = $true

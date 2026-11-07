@@ -8,7 +8,13 @@ from typing import List
 from src.models.train import CalibratedModel, EnsembleModel, ProbabilityCalibrator  # noqa: F401
 from src.predict.config import SUPPORTED_LEAGUES
 from src.predict.engine import PredictionEngine
-from src.predict.paper_ledger import DEFAULT_RULES, capture_predictions, load_trial, register_trial
+from src.predict.paper_ledger import (
+    DEFAULT_RULES,
+    capture_predictions,
+    load_trial,
+    record_capture_failure,
+    register_trial,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,10 +33,16 @@ def run_predictions(
             continue
 
         register_trial(trial)
-        predictions = engine.predict(league, trace_totals=True)
-        if predictions is not None:
+        try:
+            predictions = engine.predict(league, trace_totals=True)
             counts = capture_predictions(trial, predictions, engine.totals_model_sha256)
             LOGGER.info("Paper trial %s capture: %s", trial.trial_id, counts)
+        except Exception:
+            try:
+                record_capture_failure(trial)
+            except Exception:
+                LOGGER.exception("Could not record the failed paper capture")
+            raise
 
 
 def main():

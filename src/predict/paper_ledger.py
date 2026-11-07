@@ -314,13 +314,66 @@ def _capture_one(
     return "recorded" if cursor.rowcount else "already_recorded"
 
 
+def _record_observations(
+    conn: sqlite3.Connection,
+    trial: PaperTrial,
+    now: datetime,
+    status: str,
+    outcomes: dict[str, tuple[str, str | None]],
+) -> int:
+    cursor = conn.execute(
+        "INSERT INTO paper_capture_runs (trial_id, observed_at, status) VALUES (?, ?, ?)",
+        (trial.trial_id, now.isoformat(), status),
+    )
+    fixtures = conn.execute(
+        """
+        SELECT g.game_id, g.start_time_utc
+        FROM games g JOIN sports s ON s.sport_id = g.sport_id
+        WHERE s.league = ? AND lower(g.status) = 'scheduled'
+          AND julianday(g.start_time_utc) BETWEEN julianday(?) AND julianday(?)
+        ORDER BY g.game_id
+        """,
+        (
+            trial.league,
+            (now + timedelta(minutes=trial.min_minutes_before_start)).isoformat(),
+            (now + timedelta(hours=trial.max_hours_before_start)).isoformat(),
+        ),
+    ).fetchall()
+    conn.executemany(
+        """
+        INSERT INTO paper_fixture_observations
+            (run_id, game_id, start_time_utc, outcome, snapshot_id)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                cursor.lastrowid,
+                fixture["game_id"],
+                fixture["start_time_utc"],
+                *outcomes.get(fixture["game_id"], ("prediction_missing", None)),
+            )
+            for fixture in fixtures
+        ],
+    )
+    return sum(fixture["game_id"] not in outcomes for fixture in fixtures)
+
+
+def record_capture_failure(trial: PaperTrial, db_path: Path | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        now = datetime.now(timezone.utc)
+        _register(conn, trial, now)
+        if now < _utc(trial.review_at):
+            _record_observations(conn, trial, now, "failed", {})
+
+
 def capture_predictions(
     trial: PaperTrial,
-    predictions: pd.DataFrame,
+    predictions: pd.DataFrame | None,
     model_sha256: str | None,
     db_path: Path | None = None,
 ) -> dict[str, int]:
-    if model_sha256 != trial.model_sha256:
+    if predictions is not None and not predictions.empty and model_sha256 != trial.model_sha256:
         raise ValueError(
             f"loaded totals model does not match the pinned digest for {trial.trial_id}"
         )
@@ -331,8 +384,17 @@ def capture_predictions(
         registered = _register(conn, trial, now)
         if now >= _utc(trial.review_at):
             return {"trial_closed": 1}
-        for row in predictions.itertuples(index=False):
-            counts[_capture_one(conn, trial, row, registered, now)] += 1
+        outcomes: dict[str, tuple[str, str | None]] = {}
+        if predictions is not None:
+            for row in predictions.itertuples(index=False):
+                outcome = _capture_one(conn, trial, row, registered, now)
+                counts[outcome] += 1
+                snapshot = row.selected_totals_snapshot_id
+                outcomes[row.game_id] = (outcome, None if pd.isna(snapshot) else str(snapshot))
+        status = "no_predictions" if predictions is None or predictions.empty else "evaluated"
+        missing = _record_observations(conn, trial, now, status, outcomes)
+        if missing:
+            counts["prediction_missing"] += missing
     return dict(counts)
 
 

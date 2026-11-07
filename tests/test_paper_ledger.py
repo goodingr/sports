@@ -7,6 +7,7 @@ import pytest
 
 from src.db.core import connect, initialize
 from src.predict.paper_ledger import capture_predictions, load_trial, register_trial, update
+from src.predict.runner import run_predictions
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def warehouse(tmp_path: Path):
             INSERT INTO games (game_id, sport_id, home_team_id, away_team_id, start_time_utc)
             VALUES ('game', 1, 1, 2, ?), ('duplicate', 1, 1, 2, ?)
             """,
-            (start, start),
+            (start, (now + timedelta(days=3)).isoformat()),
         )
         conn.execute(
             "INSERT INTO odds_snapshots VALUES ('snapshot', ?, 1, 'the-odds-api', NULL)",
@@ -75,8 +76,15 @@ def test_capture_freezes_first_eligible_decision(warehouse):
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {
         "already_recorded": 1
     }
+    with connect(db) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'duplicate'",
+            (predictions.iloc[0]["commence_time"],),
+        )
     duplicate = predictions.assign(game_id="duplicate")
-    assert capture_predictions(trial, duplicate, trial.model_sha256, db) == {"already_recorded": 1}
+    assert capture_predictions(
+        trial, pd.concat([predictions, duplicate]), trial.model_sha256, db
+    ) == {"already_recorded": 2}
     with connect(db) as conn:
         decision = conn.execute("SELECT * FROM paper_decisions").fetchone()
     assert decision["side"] == "over"
@@ -108,10 +116,45 @@ def test_capture_rejects_missing_provenance_wrong_model_and_invalid_market(wareh
         db,
     ) == {"below_edge_threshold": 1}
     with connect(db) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'duplicate'",
+            (predictions.iloc[0]["commence_time"],),
+        )
         conn.execute("INSERT INTO game_results (game_id, home_score) VALUES ('duplicate', 0)")
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {
-        "game_unavailable": 1
+        "game_unavailable": 1,
+        "prediction_missing": 1,
     }
+
+
+def test_capture_records_empty_and_failed_runs(warehouse, monkeypatch):
+    db, trial, _, _ = warehouse
+    assert capture_predictions(trial, None, None, db) == {"prediction_missing": 1}
+    with connect(db) as conn:
+        run = conn.execute("SELECT * FROM paper_capture_runs").fetchone()
+        observation = conn.execute("SELECT * FROM paper_fixture_observations").fetchone()
+    assert run["status"] == "no_predictions"
+    assert observation["game_id"] == "game"
+    assert observation["outcome"] == "prediction_missing"
+    assert observation["snapshot_id"] is None
+
+    class FailedEngine:
+        def __init__(self, model_type):
+            pass
+
+        def predict(self, league, *, trace_totals):
+            raise ValueError("synthetic inference failure")
+
+    monkeypatch.setenv("SPORTS_DB_PATH", str(db))
+    monkeypatch.setattr("src.predict.runner.PredictionEngine", FailedEngine)
+    monkeypatch.setattr("src.predict.runner.load_trial", lambda _: trial)
+    with pytest.raises(ValueError, match="synthetic inference failure"):
+        run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
+    with connect(db) as conn:
+        rows = conn.execute("SELECT * FROM paper_capture_runs ORDER BY run_id").fetchall()
+        observations = conn.execute("SELECT * FROM paper_fixture_observations").fetchall()
+    assert [row["status"] for row in rows] == ["no_predictions", "failed"]
+    assert len(observations) == 2
 
 
 def test_capture_rejects_stale_superseded_and_future_predictions(warehouse):

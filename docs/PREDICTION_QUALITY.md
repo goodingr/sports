@@ -299,8 +299,9 @@ The latest totals snapshot for the fixture must have been fetched within 10 minu
 capture. This measures the quote the feed returned, without assuming sportsbook
 acceptance or recording any wager.
 
-The scheduled pipeline runs the paper update after data ingestion and captures
-eligible decisions during NBA prediction refresh. To run the same steps locally,
+The scheduled pipeline captures eligible decisions immediately after a successful
+NBA odds download, reusing that download. It runs settlement updates after data
+ingestion. To run the same steps locally,
 use these commands from the repository root.
 
 ```powershell
@@ -314,6 +315,13 @@ The update command registers the trial on its first run and appends available
 settlements. The report command reads the existing ledger. The refresh command
 consumes live odds quota. The warehouse backup includes trial registrations,
 decisions, and grades.
+
+The report also shows retained capture runs and observations for scheduled
+fixtures inside the decision window. It separates fully evaluated fixtures,
+below-threshold opportunities, missing predictions, stale quotes, and inference
+failures. Empty runs retain their timestamps. This coverage starts with the first
+retained run and covers observations made since that time. Upgrading the worker
+adds these tables without reconstructing earlier opportunities.
 
 Settlement uses full-game final scores, including overtime, at one paper unit
 per decision. A push returns the stake. Cancelled games and starts that moved

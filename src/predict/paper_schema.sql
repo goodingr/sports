@@ -43,3 +43,22 @@ CREATE TABLE IF NOT EXISTS paper_settlements (
     PRIMARY KEY (trial_id, game_id),
     FOREIGN KEY (trial_id, game_id) REFERENCES paper_decisions(trial_id, game_id)
 );
+
+CREATE TABLE IF NOT EXISTS paper_capture_runs (
+    run_id INTEGER PRIMARY KEY,
+    trial_id TEXT NOT NULL REFERENCES paper_trials(trial_id),
+    observed_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('evaluated', 'no_predictions', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_capture_runs_trial_time
+    ON paper_capture_runs(trial_id, observed_at);
+
+CREATE TABLE IF NOT EXISTS paper_fixture_observations (
+    run_id INTEGER NOT NULL REFERENCES paper_capture_runs(run_id),
+    game_id TEXT NOT NULL,
+    start_time_utc TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    snapshot_id TEXT,
+    PRIMARY KEY (run_id, game_id)
+);
