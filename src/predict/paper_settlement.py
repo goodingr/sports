@@ -289,7 +289,9 @@ def _close_for_decision(
             continue
         provider_start = _quote_source_start(conn, row, fetched)
         if provider_start is not None and not inside_closing_window(fetched, provider_start):
-            continue
+            original_start = _quote_source_start(conn, row, fetched, require_original=True)
+            if original_start is not None and not inside_closing_window(fetched, original_start):
+                continue
         # Keep an otherwise eligible unresolved quote in the ordering. A
         # disputed newest receipt cannot turn an earlier price into the close.
         candidate = (fetched, row)

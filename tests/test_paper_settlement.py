@@ -504,3 +504,24 @@ def test_disputed_latest_close_cannot_fall_back_to_earlier_quote(ledger, normali
     assert grade["profit_units"] == pytest.approx(100 / 110)
     assert grade["close_snapshot_id"] is None
     assert grade["clv_points"] is None
+
+
+@pytest.mark.parametrize(("original_agrees", "expected"), [(True, "earlier"), (False, None)])
+def test_later_close_needs_original_proof_to_rule_it_out_on_provider_clock(
+    ledger, original_agrees, expected
+):
+    _decision(ledger, "game")
+    _quote(ledger, "game", "earlier", timedelta(minutes=-20))
+    _quote(
+        ledger, "game", "latest", timedelta(minutes=-2), lines=(224, 224),
+        provider_start=START - timedelta(minutes=3),
+    )
+    if not original_agrees:
+        path = paper_settlement.RAW_DATA_DIR / "odds" / "basketball_nba" / "latest.json"
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt["results"][0]["commence_time"] = START.isoformat()
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    assert settle_open_trials(ledger, START + timedelta(hours=3)) == 1
+    grade = ledger.execute("SELECT outcome, close_snapshot_id FROM paper_settlements").fetchone()
+    assert tuple(grade) == ("win", expected)
