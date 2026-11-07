@@ -99,7 +99,8 @@ customer's first observed payment. Keep both exports outside the repository.
 - Export itemized USD Stripe Balance activity with
   `balance_transaction_id,created_utc,currency,gross,fee,net,reporting_category,invoice_id,charge_id`.
   Use a decimal point for the USD amounts. Export all activity categories so
-  refunds, reversals, and disputes stay visible. [Stripe Balance columns](https://docs.stripe.com/reports/report-types/balance)
+  refunds, reversals, and disputes stay visible. Include `source_id` to track
+  separate refunds or disputes on the same charge. [Stripe Balance columns](https://docs.stripe.com/reports/report-types/balance)
 
 ```powershell
 poetry run python scripts/commercial_cash_report.py --invoices C:/private/invoices.csv --balance C:/private/balance.csv --price-id price_replace_me
@@ -108,9 +109,14 @@ poetry run python scripts/commercial_cash_report.py --invoices C:/private/invoic
 Repeat `--exclude-customer-id` for staff or other known internal accounts. The
 report emits aggregates by UTC posting month and counts exceptions without
 customer identifiers. The automatic match covers paid, live, single-price USD
-invoices with zero tax and one charge for the exact paid amount. Review the
-audit counts and reconcile excluded invoices, standalone fees, taxes, and
-other cash adjustments separately. The report measures Stripe balance activity.
+invoices with zero tax and one charge for the exact paid amount. Refunds and
+disputes must identify that charge and post at or after it. A reversal can
+restore only the remaining principal and fees from the matching debit category
+on that charge. When available, `source_id` must also match between debit and
+credit. Excluded adjustments appear as `unmatched_charge_adjustments` or
+`unreconciled_adjustment_credits` in the audit. Reconcile those exceptions,
+excluded invoices, standalone fees, and taxes separately before relying on the
+totals. The report measures Stripe balance activity. [Stripe refund failures](https://docs.stripe.com/refunds#failed-refunds) · [Stripe dispute resolution](https://docs.stripe.com/disputes/how-disputes-work#dispute-resolution)
 Use billing periods for renewals and actual business costs for operating profit.
 
 ## Paid launch evidence

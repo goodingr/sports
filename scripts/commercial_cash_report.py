@@ -35,6 +35,7 @@ _BALANCE_COLUMNS = (
 )
 _REFUNDS = {"refund", "refund_failure"}
 _DISPUTES = {"dispute", "dispute_reversal"}
+_REVERSAL_DEBITS = {"refund_failure": "refund", "dispute_reversal": "dispute"}
 _ACTIVITY = {"charge"} | _REFUNDS | _DISPUTES
 
 
@@ -58,6 +59,7 @@ class BalanceRow:
     gross: int
     fee: int
     net: int
+    source_id: str
 
 
 @dataclass
@@ -82,16 +84,19 @@ class Month:
         self.net_stripe_cash_cents += row.net
 
 
-def _rows(path: Path, columns: tuple[str, ...], label: str) -> Iterator[tuple[int, dict[str, str]]]:
+def _rows(
+    path: Path, columns: tuple[str, ...], label: str, *, optional: tuple[str, ...] = ()
+) -> Iterator[tuple[int, dict[str, str]]]:
     with path.open(encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         fields = reader.fieldnames or []
         if len(set(fields)) != len(fields) or not set(columns).issubset(fields):
             raise ValueError(f"{label} CSV must contain {', '.join(columns)}")
+        selected = columns + tuple(column for column in optional if column in fields)
         for row in reader:
-            if None in row or any(row[column] is None for column in columns):
+            if None in row or any(row[column] is None for column in selected):
                 raise ValueError(f"Malformed {label} CSV row {reader.line_num}")
-            yield reader.line_num, {column: row[column].strip() for column in columns}
+            yield reader.line_num, {column: row[column].strip() for column in selected}
 
 
 def _invoices(path: Path) -> dict[str, Invoice]:
@@ -133,7 +138,7 @@ def _cents(value: str) -> int:
 def _balance(path: Path) -> tuple[list[BalanceRow], int]:
     balance: dict[str, BalanceRow] = {}
     duplicates = 0
-    for line, row in _rows(path, _BALANCE_COLUMNS, "balance"):
+    for line, row in _rows(path, _BALANCE_COLUMNS, "balance", optional=("source_id",)):
         try:
             if row["currency"].lower() != "usd" or not row["balance_transaction_id"].startswith(
                 "txn_"
@@ -152,6 +157,7 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
                 _cents(row["gross"]),
                 _cents(row["fee"]),
                 _cents(row["net"]),
+                row.get("source_id", ""),
             )
             if parsed.gross - parsed.fee != parsed.net or not parsed.category:
                 raise ValueError
@@ -172,7 +178,12 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
             duplicates += 1
         else:
             raise ValueError(f"Conflicting duplicate balance transaction at CSV row {line}")
-    return list(balance.values()), duplicates
+    # Stripe timestamps can tie, so debit rows go first and transaction IDs break remaining ties.
+    ordered = sorted(
+        balance.items(),
+        key=lambda item: (item[1].created_at, item[1].category in _REVERSAL_DEBITS, item[0]),
+    )
+    return [row for _, row in ordered], duplicates
 
 
 def build_report(
@@ -194,6 +205,8 @@ def build_report(
         "unattributed_balance_rows": 0,
         "unsupported_linked_balance_rows": 0,
         "unallocated_fee_rows": 0,
+        "unmatched_charge_adjustments": 0,
+        "unreconciled_adjustment_credits": 0,
     }
 
     charge_invoices: dict[str, str] = {}
@@ -239,11 +252,30 @@ def build_report(
         first_paid_at[invoice.customer_id] = min(
             charge.created_at, first_paid_at.get(invoice.customer_id, charge.created_at)
         )
+        months[charge.created_at.strftime("%Y-%m")].add(charge)
+        unreversed: dict[tuple[str, str], tuple[int, int]] = {}
         for row in rows:
-            if row.category in _ACTIVITY:
-                months[row.created_at.strftime("%Y-%m")].add(row)
-            else:
+            if row is charge:
+                continue
+            if row.category not in _ACTIVITY:
                 audit["unsupported_linked_balance_rows"] += 1
+                continue
+            if (
+                not row.charge_id
+                or row.charge_id != charge.charge_id
+                or row.created_at < charge.created_at
+            ):
+                audit["unmatched_charge_adjustments"] += 1
+                continue
+
+            debit_category = _REVERSAL_DEBITS.get(row.category, row.category)
+            key = (debit_category, row.source_id)
+            principal, fees = unreversed.get(key, (0, 0))
+            if row.gross > principal or -row.fee > fees:
+                audit["unreconciled_adjustment_credits"] += 1
+                continue
+            unreversed[key] = (principal - row.gross, fees + row.fee)
+            months[row.created_at.strftime("%Y-%m")].add(row)
 
     for paid_at in first_paid_at.values():
         months[paid_at.strftime("%Y-%m")].first_observed_paying_customers += 1

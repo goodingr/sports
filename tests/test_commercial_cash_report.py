@@ -59,12 +59,15 @@ def write_inputs(
     tmp_path: Path,
     invoices: list[tuple[str, ...]],
     balance: list[tuple[str, ...]],
+    *,
+    include_source_id: bool = False,
 ) -> tuple[Path, Path]:
     invoices_path = tmp_path / "invoices.csv"
     balance_path = tmp_path / "balance.csv"
+    balance_fields = (*BALANCE_FIELDS, "source_id") if include_source_id else BALANCE_FIELDS
     for path, fields, rows in (
         (invoices_path, INVOICE_FIELDS, invoices),
-        (balance_path, BALANCE_FIELDS, balance),
+        (balance_path, balance_fields, balance),
     ):
         with path.open("w", encoding="utf-8", newline="") as stream:
             writer = csv.writer(stream)
@@ -149,6 +152,196 @@ def test_rejects_conflicting_rows_for_same_balance_transaction(tmp_path):
 
     with pytest.raises(ValueError):
         build_report(*paths, price_id=PRICE_ID)
+
+
+def test_invoice_id_does_not_attach_adjustments_without_the_matched_charge(tmp_path):
+    paths = write_inputs(
+        tmp_path,
+        invoices=[invoice_row("in_paid", "cus_paid")],
+        balance=[
+            balance_row("txn_paid", "in_paid", "ch_paid"),
+            balance_row(
+                "txn_other_charge",
+                "in_paid",
+                "ch_unknown",
+                at="2026-12-01 00:00:00",
+                gross="-10",
+                fee="0",
+                net="-10",
+                category="refund",
+            ),
+            balance_row(
+                "txn_missing_charge",
+                "in_paid",
+                "",
+                at="2026-12-01 00:00:00",
+                gross="-29",
+                fee="15",
+                net="-44",
+                category="dispute",
+            ),
+            balance_row(
+                "txn_before_charge",
+                "in_paid",
+                "ch_paid",
+                at="2026-11-01 00:00:00",
+                gross="-10",
+                fee="0",
+                net="-10",
+                category="refund",
+            ),
+        ],
+    )
+
+    report = build_report(*paths, price_id=PRICE_ID)
+
+    assert report["audit"]["unmatched_charge_adjustments"] == 3
+    assert list(report["months"]) == ["2026-11"]
+    assert report["months"]["2026-11"]["net_stripe_cash_cents"] == 2766
+
+
+@pytest.mark.parametrize(
+    ("debit", "reversal", "other_debit", "net_field"),
+    [
+        ("refund", "refund_failure", "dispute", "refund_net_cents"),
+        ("dispute", "dispute_reversal", "refund", "dispute_net_cents"),
+    ],
+)
+def test_reversal_credits_cannot_outspend_prior_matching_debits(
+    tmp_path, debit, reversal, other_debit, net_field
+):
+    paths = write_inputs(
+        tmp_path,
+        invoices=[invoice_row("in_paid", "cus_paid")],
+        balance=[
+            balance_row("txn_paid", "in_paid", "ch_paid"),
+            balance_row(
+                "txn_oversized_reversal",
+                "",
+                "ch_paid",
+                at="2027-01-02 00:00:00",
+                gross="5",
+                fee="0",
+                net="5",
+                category=reversal,
+            ),
+            balance_row(
+                "txn_valid_reversal",
+                "",
+                "ch_paid",
+                at="2027-01-01 00:00:00",
+                gross="6",
+                fee="-2",
+                net="8",
+                category=reversal,
+            ),
+            balance_row(
+                "txn_valid_debit",
+                "",
+                "ch_paid",
+                at="2026-12-15 00:00:00",
+                gross="-10",
+                fee="2",
+                net="-12",
+                category=debit,
+            ),
+            balance_row(
+                "txn_wrong_category",
+                "",
+                "ch_paid",
+                at="2026-12-01 00:00:00",
+                gross="-10",
+                fee="2",
+                net="-12",
+                category=other_debit,
+            ),
+            balance_row(
+                "txn_early_reversal",
+                "",
+                "ch_paid",
+                at="2026-12-02 00:00:00",
+                gross="10",
+                fee="0",
+                net="10",
+                category=reversal,
+            ),
+            balance_row(
+                "txn_excess_fee_credit",
+                "",
+                "ch_paid",
+                at="2027-01-03 00:00:00",
+                gross="0",
+                fee="-1",
+                net="1",
+                category=reversal,
+            ),
+        ],
+    )
+
+    report = build_report(*paths, price_id=PRICE_ID)
+
+    assert report["audit"]["unreconciled_adjustment_credits"] == 3
+    assert report["months"]["2026-12"][net_field] == 1000
+    assert report["months"]["2026-12"]["net_stripe_cash_cents"] == -2400
+    assert report["months"]["2027-01"][net_field] == -600
+    assert report["months"]["2027-01"]["stripe_fees_cents"] == -200
+    assert report["months"]["2027-01"]["net_stripe_cash_cents"] == 800
+
+
+def test_exported_source_id_keeps_separate_disputes_on_one_charge_apart(tmp_path):
+    paths = write_inputs(
+        tmp_path,
+        invoices=[invoice_row("in_paid", "cus_paid")],
+        balance=[
+            (*balance_row("txn_paid", "in_paid", "ch_paid"), "ch_paid"),
+            (
+                *balance_row(
+                    "txn_debit",
+                    "",
+                    "ch_paid",
+                    at="2026-12-01 00:00:00",
+                    gross="-10",
+                    fee="0",
+                    net="-10",
+                    category="dispute",
+                ),
+                "du_paid",
+            ),
+            (
+                *balance_row(
+                    "txn_wrong_reversal",
+                    "",
+                    "ch_paid",
+                    at="2027-01-01 00:00:00",
+                    gross="10",
+                    fee="0",
+                    net="10",
+                    category="dispute_reversal",
+                ),
+                "du_other",
+            ),
+            (
+                *balance_row(
+                    "txn_reversal",
+                    "",
+                    "ch_paid",
+                    at="2027-02-01 00:00:00",
+                    gross="10",
+                    fee="0",
+                    net="10",
+                    category="dispute_reversal",
+                ),
+                "du_paid",
+            ),
+        ],
+        include_source_id=True,
+    )
+
+    report = build_report(*paths, price_id=PRICE_ID)
+
+    assert report["audit"]["unreconciled_adjustment_credits"] == 1
+    assert "2027-01" not in report["months"]
+    assert report["months"]["2027-02"]["net_stripe_cash_cents"] == 1000
 
 
 def test_posts_dispute_and_reversal_in_their_own_months_and_flags_unknown_adjustment(tmp_path):
