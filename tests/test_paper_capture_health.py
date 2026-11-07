@@ -4,11 +4,13 @@ import json
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+import zipfile
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from scripts import backup_evidence
 from scripts.paper_capture_health import assess_capture_health
 from src.predict.paper_ledger import load_trial
 
@@ -90,11 +92,17 @@ def _run(warehouse, *, at=CAPTURED, status="evaluated"):
 def _observe(
     warehouse, path, run_id, *, source="the-odds-api", fetched=FETCHED,
     outcome="below_edge_threshold", filename=None, snapshot_id="observed", game_id="game",
+    raw_path=None,
 ):
     conn, _ = warehouse
     conn.execute(
         "INSERT INTO odds_snapshots VALUES (?, 1, ?, ?, ?)",
-        (snapshot_id, source, fetched.isoformat(), rf"C:\original\archive\{filename or path.name}"),
+        (
+            snapshot_id,
+            source,
+            fetched.isoformat(),
+            raw_path or rf"C:\original\data\raw\odds\basketball_nba\{filename or path.name}",
+        ),
     )
     conn.execute(
         "INSERT INTO paper_fixture_observations VALUES (?, ?, ?, ?)",
@@ -358,3 +366,147 @@ def test_cli_returns_json_exit_code_and_keeps_inputs_read_only(warehouse, tmp_pa
     assert run.returncode == exit_code, run.stderr
     assert json.loads(run.stdout)["status"] == status
     assert db.read_bytes() == before
+
+
+
+def _archived_receipts(tmp_path):
+    raw = tmp_path / "source" / "raw"
+    nba = raw / "odds" / "basketball_nba"
+    nba.mkdir(parents=True)
+    restored = tmp_path / "restored"
+    restored.mkdir()
+    return raw, nba, restored
+
+
+def _bundle(raw, restored):
+    archive = restored / backup_evidence.EVIDENCE_ZIP
+    backup_evidence.create_evidence_zip(archive, [("raw", raw)])
+    return archive
+
+
+@pytest.mark.parametrize(("events", "status"), [(None, "healthy"), ([], "empty_slate_unverified")])
+def test_verified_restore_preserves_daily_receipt_outcomes(warehouse, tmp_path, events, status):
+    raw, nba, restored = _archived_receipts(tmp_path)
+    receipt = _archive(nba, events=events)
+    run = _run(warehouse, status="no_predictions" if events == [] else "evaluated")
+    if events is None:
+        _observe(warehouse, receipt, run)
+    _bundle(raw, restored)
+    raw_dir = restored / "raw" / "odds" / "basketball_nba"
+    result = _assess(warehouse, raw_dir, data_dir=restored)
+    assert result["status"] == status
+    assert result["receipt_file"] == receipt.name
+    assert datetime.fromisoformat(result["receipt_at"]) == FETCHED
+    assert not raw_dir.exists()
+
+
+@pytest.mark.parametrize("stored", ["supplemental", "local", "portable"])
+def test_lineage_uses_the_exact_daily_source_path(warehouse, tmp_path, stored):
+    receipt = _archive(tmp_path)
+    portable = f"raw/odds/basketball_nba/{receipt.name}"
+    if stored == "supplemental":
+        raw_path = rf"C:\old\data\raw\odds\basketball_nba\paper_entry\snapshot\{receipt.name}"
+    elif stored == "local":
+        raw_path = str(receipt.resolve())
+    else:
+        raw_path = portable
+    _observe(warehouse, receipt, _run(warehouse), raw_path=raw_path)
+    result = _assess(warehouse, tmp_path)
+    assert result["status"] == ("capture_incomplete" if stored == "supplemental" else "healthy")
+
+
+def test_restore_reads_only_direct_nba_members_on_eligible_utc_dates(warehouse, tmp_path, monkeypatch):
+    raw, nba, restored = _archived_receipts(tmp_path)
+    evening = TICK.replace(hour=18, minute=55)
+    fetched = evening + timedelta(minutes=10)
+    receipt = _archive(nba, fetched=fetched)
+    _archive(nba, fetched=fetched - timedelta(days=2))
+    supplemental = nba / "paper_entry" / "id"
+    supplemental.mkdir(parents=True)
+    _archive(supplemental, fetched=fetched)
+    other = raw / "odds" / "icehockey_nhl"
+    other.mkdir()
+    _archive(other, fetched=fetched)
+    _bundle(raw, restored)
+    _observe(warehouse, receipt, _run(warehouse, at=fetched + timedelta(seconds=4)), fetched=fetched)
+
+    read = zipfile.ZipFile.read
+    opened = []
+
+    def record(archive, name, *args, **kwargs):
+        if isinstance(name, str) and name.startswith("raw/"):
+            opened.append(name)
+        return read(archive, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", record)
+    result = _assess(
+        warehouse, restored / "raw" / "odds" / "basketball_nba",
+        now=evening + timedelta(minutes=31), expected_time=time(18, 55), data_dir=restored,
+    )
+    assert result["status"] == "healthy"
+    assert opened == [f"raw/odds/basketball_nba/{receipt.name}"]
+    assert receipt.name.startswith("odds_2026-11-08")
+
+
+def test_restore_rejects_a_candidate_with_wrong_digest(warehouse, tmp_path):
+    raw, nba, restored = _archived_receipts(tmp_path)
+    receipt = _archive(nba, events=[])
+    archive_path = _bundle(raw, restored)
+    name = f"raw/odds/basketball_nba/{receipt.name}"
+    with zipfile.ZipFile(archive_path) as archive:
+        contents = {member: archive.read(member) for member in archive.namelist()}
+    contents[name] = contents[name].replace(b'"results": []', b'"results": {}')
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for member, data in contents.items():
+            archive.writestr(member, data)
+    _run(warehouse, status="no_predictions")
+    result = _assess(warehouse, restored / "raw" / "odds" / "basketball_nba", data_dir=restored)
+    assert result["status"] == "receipt_invalid"
+    assert result["receipt_file"] == receipt.name
+
+
+def test_explicit_local_receipt_precedes_archive_copy(warehouse, tmp_path):
+    raw, nba, restored = _archived_receipts(tmp_path)
+    receipt = _archive(nba)
+    _bundle(raw, restored)
+    local = tmp_path / "operator-raw"
+    local.mkdir()
+    _archive(local, changes=lambda payload: payload.update(error="provider unavailable"))
+    _observe(warehouse, receipt, _run(warehouse))
+    assert _assess(warehouse, local, data_dir=restored)["status"] == "receipt_error"
+
+
+def test_restore_cli_discovers_verified_receipt_without_extraction(warehouse, tmp_path):
+    conn, _ = warehouse
+    raw, nba, restored = _archived_receipts(tmp_path)
+    _archive(nba, events=[])
+    _bundle(raw, restored)
+    _run(warehouse, status="no_predictions")
+    db = restored / "warehouse.sqlite"
+    conn.commit()
+    with sqlite3.connect(db) as disk:
+        conn.backup(disk)
+    before = db.read_bytes()
+    run = subprocess.run(
+        [sys.executable, "-B", "-m", "scripts.paper_capture_health", "--db", str(db),
+         "--as-of", AFTER_GRACE.isoformat()],
+        cwd=ROOT, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert run.returncode == 2, run.stderr
+    assert json.loads(run.stdout)["status"] == "empty_slate_unverified"
+    assert db.read_bytes() == before
+    assert not (restored / "raw").exists()
+
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_missing_or_invalid_restore_evidence_remains_unverified(warehouse, tmp_path, corrupt):
+    raw, nba, restored = _archived_receipts(tmp_path)
+    _archive(nba, events=[], fetched=FETCHED - timedelta(days=1))
+    bundle = _bundle(raw, restored)
+    if corrupt:
+        bundle.write_bytes(b"not a ZIP")
+    _run(warehouse, status="no_predictions")
+    result = _assess(warehouse, restored / "raw" / "odds" / "basketball_nba", data_dir=restored)
+    assert result["status"] == ("receipt_invalid" if corrupt else "receipt_missing")
+    assert "receipt_at" not in result

@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sqlite3
+import zipfile
+import zlib
 from collections import defaultdict
+from collections.abc import Iterator
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from scripts.backup_evidence import EVIDENCE_ZIP, _zip_manifest
 from src.data.config import RAW_DATA_DIR
 from src.db.core import resolve_db_path
 from src.predict.paper_coverage import _FULLY_EVALUATED
@@ -24,7 +29,10 @@ from src.predict.paper_settlement import _utc_timestamp
 _EASTERN = ZoneInfo("America/New_York")
 _EXPECTED_TIME = time(18, 4)
 _GRACE_MINUTES = 30
-_NBA_RAW_DIR = RAW_DATA_DIR / "odds" / "basketball_nba"
+_NBA_ODDS = Path("odds") / "basketball_nba"
+_NBA_RAW_DIR = RAW_DATA_DIR / _NBA_ODDS
+_ARCHIVED_NBA_RAW_DIR = PurePosixPath("raw") / _NBA_ODDS.as_posix()
+_MAX_RECEIPT_BYTES = 16 * 1024**2
 
 
 @dataclass(frozen=True)
@@ -70,64 +78,127 @@ def _is_daily_nba_request(payload: dict, trial: PaperTrial) -> bool:
     )
 
 
+def _receipt_inputs(
+    raw_dir: Path, data_dir: Path | None, start: datetime, end: datetime
+) -> Iterator[tuple[Path, bytes | None]]:
+    prefixes = tuple(
+        f"odds_{start.date() + timedelta(days=offset)}T"
+        for offset in range((end.date() - start.date()).days + 1)
+    )
+    local_names = set()
+    for prefix in prefixes:
+        for path in raw_dir.glob(f"{prefix}*.json"):
+            local_names.add(path.name)
+            try:
+                contents = path.read_bytes()
+            except OSError:
+                contents = None
+            yield path, contents
+    if data_dir is None:
+        return
+    bundle = data_dir / EVIDENCE_ZIP
+    if not bundle.is_file():
+        return
+    try:
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = _zip_manifest(archive)
+            for name, entry in manifest["files"].items():
+                member_path = PurePosixPath(name)
+                if (
+                    member_path.parent != _ARCHIVED_NBA_RAW_DIR
+                    or not member_path.name.startswith(prefixes)
+                    or member_path.suffix != ".json"
+                    or member_path.name in local_names
+                ):
+                    continue
+                contents = None
+                if entry["size_bytes"] <= _MAX_RECEIPT_BYTES:
+                    try:
+                        candidate = archive.read(name)
+                        if hashlib.sha256(candidate).hexdigest() == entry.get("sha256"):
+                            contents = candidate
+                    except (zipfile.BadZipFile, zlib.error):
+                        pass
+                yield Path(name), contents
+    except (zipfile.BadZipFile, KeyError, json.JSONDecodeError) as error:
+        raise ValueError("invalid restored raw evidence ZIP") from error
+
+
 def _read_receipt(
-    raw_dir: Path, trial: PaperTrial, start: datetime, end: datetime
+    raw_dir: Path, trial: PaperTrial, start: datetime, end: datetime, data_dir: Path | None
 ) -> _Receipt | None:
     daily = []
     invalid = []
     minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
     maximum_lead = timedelta(hours=trial.max_hours_before_start)
-    # Daily receipts live at this level. Supplemental archives are in subdirectories.
-    for path in raw_dir.glob("odds_*.json"):
-        try:
-            named_at = datetime.strptime(path.name[5:25], "%Y-%m-%dT%H-%M-%SZ").replace(
-                tzinfo=timezone.utc
-            )
-        except ValueError:
-            continue
-        if not start.date() <= named_at.date() <= end.date():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, ValueError):
-            payload = None
-        fetched = _utc_timestamp(payload.get("fetched_at")) if isinstance(payload, dict) else None
-        if fetched is None:
-            if start <= named_at <= end:
-                invalid.append(_Receipt(path, named_at, "receipt_invalid"))
-            continue
-        if not start <= fetched <= end:
-            continue
-        if not _is_daily_nba_request(payload, trial):
-            invalid.append(_Receipt(path, fetched, "receipt_invalid"))
-            continue
-        if payload.get("error"):
-            daily.append(_Receipt(path, fetched, "receipt_error"))
-            continue
-        events = payload.get("results")
-        if not isinstance(events, list):
+    try:
+        # Daily receipts live at this level. Supplemental archives are in subdirectories.
+        for path, contents in _receipt_inputs(raw_dir, data_dir, start, end):
+            try:
+                named_at = datetime.strptime(path.name[5:25], "%Y-%m-%dT%H-%M-%SZ").replace(
+                    tzinfo=timezone.utc
+                )
+            except ValueError:
+                continue
+            if not start.date() <= named_at.date() <= end.date():
+                continue
+            try:
+                payload = json.loads(contents.decode("utf-8-sig")) if contents is not None else None
+            except ValueError:
+                payload = None
+            fetched = _utc_timestamp(payload.get("fetched_at")) if isinstance(payload, dict) else None
+            if not isinstance(payload, dict) or fetched is None:
+                if start <= named_at <= end:
+                    invalid.append(_Receipt(path, named_at, "receipt_invalid"))
+                continue
+            if not start <= fetched <= end:
+                continue
+            if not _is_daily_nba_request(payload, trial):
+                invalid.append(_Receipt(path, fetched, "receipt_invalid"))
+                continue
+            if payload.get("error"):
+                daily.append(_Receipt(path, fetched, "receipt_error"))
+                continue
+            events = payload.get("results")
+            if not isinstance(events, list):
+                daily.append(_Receipt(path, fetched, "receipt_invalid"))
+                continue
+            all_events = set()
+            eligible = set()
+            for event in events:
+                if not isinstance(event, dict):
+                    break
+                event_id = event.get("id")
+                tip = _utc_timestamp(event.get("commence_time"))
+                if (
+                    not isinstance(event_id, str) or not event_id or event_id in all_events
+                    or event.get("sport_key") != "basketball_nba" or tip is None
+                ):
+                    break
+                all_events.add(event_id)
+                if minimum_lead <= tip - fetched <= maximum_lead:
+                    eligible.add(event_id)
+            else:
+                daily.append(_Receipt(path, fetched, "valid", frozenset(eligible)))
+                continue
             daily.append(_Receipt(path, fetched, "receipt_invalid"))
-            continue
-        all_events = set()
-        eligible = set()
-        for event in events:
-            if not isinstance(event, dict):
-                break
-            event_id = event.get("id")
-            tip = _utc_timestamp(event.get("commence_time"))
-            if (
-                not isinstance(event_id, str) or not event_id or event_id in all_events
-                or event.get("sport_key") != "basketball_nba" or tip is None
-            ):
-                break
-            all_events.add(event_id)
-            if minimum_lead <= tip - fetched <= maximum_lead:
-                eligible.add(event_id)
-        else:
-            daily.append(_Receipt(path, fetched, "valid", frozenset(eligible)))
-            continue
-        daily.append(_Receipt(path, fetched, "receipt_invalid"))
+    except (OSError, ValueError):
+        if not daily and not invalid:
+            raise
     return max(daily or invalid, key=lambda item: (item.fetched_at, item.path.name), default=None)
+
+
+def _matches_receipt_path(stored_path: object, selected: Path) -> bool:
+    if not isinstance(stored_path, str):
+        return False
+    original = stored_path.replace("\\", "/")
+    if ".." in PurePosixPath(original).parts:
+        return False
+    canonical = (_ARCHIVED_NBA_RAW_DIR / selected.name).as_posix()
+    return (
+        original in {selected.as_posix(), selected.absolute().as_posix(), canonical}
+        or original.endswith(f"/{canonical}")
+    )
 
 
 def _known_slate_gaps(
@@ -194,6 +265,7 @@ def assess_capture_health(
     *,
     expected_time: time = _EXPECTED_TIME,
     grace_minutes: int = _GRACE_MINUTES,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Return the status of the latest daily tick whose grace period elapsed."""
     if now.utcoffset() is None or grace_minutes <= 0 or expected_time.tzinfo is not None:
@@ -214,7 +286,10 @@ def assess_capture_health(
         return {**base, "status": "waiting"}
     end = min(tick + grace, review - timedelta(microseconds=1))
     base.update(expected_at=tick.isoformat(), window_ends_at=end.isoformat())
-    receipt = _read_receipt(raw_dir, trial, tick, end)
+    try:
+        receipt = _read_receipt(raw_dir, trial, tick, end, data_dir)
+    except (OSError, ValueError):
+        return {**base, "status": "receipt_invalid"}
     if receipt is None:
         return {**base, "status": "receipt_missing"}
     base.update(receipt_at=receipt.fetched_at.isoformat(), receipt_file=receipt.path.name)
@@ -266,8 +341,7 @@ def assess_capture_health(
             and row["outcome"] in _FULLY_EVALUATED
             and row["source"] == trial.odds_source
             and _utc_timestamp(row["fetched_at_utc"]) == receipt.fetched_at
-            and isinstance(row["raw_path"], str)
-            and row["raw_path"].replace("\\", "/").rsplit("/", 1)[-1] == receipt.path.name
+            and _matches_receipt_path(row["raw_path"], receipt.path)
         ):
             evaluated_by_run[row["run_id"]][row["odds_api_id"]] = row["outcome"]
 
@@ -303,7 +377,7 @@ def assess_capture_health(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path)
-    parser.add_argument("--raw-dir", type=Path, default=_NBA_RAW_DIR)
+    parser.add_argument("--raw-dir", type=Path)
     parser.add_argument("--rules", type=Path, default=DEFAULT_RULES)
     parser.add_argument("--expected-time", type=time.fromisoformat, default=_EXPECTED_TIME)
     parser.add_argument("--grace-minutes", type=int, default=_GRACE_MINUTES)
@@ -312,13 +386,17 @@ def main() -> None:
     if args.as_of is None or args.grace_minutes <= 0 or args.expected_time.tzinfo is not None:
         parser.error("Use an aware --as-of, a local --expected-time and positive --grace-minutes")
     db_path = resolve_db_path(args.db).resolve()
+    raw_dir = args.raw_dir
+    if raw_dir is None:
+        raw_dir = db_path.parent / "raw" / _NBA_ODDS if args.db is not None else _NBA_RAW_DIR
     try:
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("BEGIN")
             result = assess_capture_health(
-                conn, load_trial(args.rules), args.raw_dir, args.as_of,
+                conn, load_trial(args.rules), raw_dir, args.as_of,
                 expected_time=args.expected_time, grace_minutes=args.grace_minutes,
+                data_dir=db_path.parent,
             )
     except sqlite3.Error:
         result = {"status": "warehouse_unavailable"}
