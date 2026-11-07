@@ -41,7 +41,7 @@ def daily_capture_card(db_path: Path, rules_path: Path, now: datetime) -> dbc.Al
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True, timeout=2)) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("BEGIN")
-            health = assess_capture_health(conn, trial, raw_dir, now)
+            health = assess_capture_health(conn, trial, raw_dir, now, data_dir=db_path.parent)
     except (KeyError, OSError, ValueError, TypeError, sqlite3.Error, yaml.YAMLError):
         return dbc.Alert("Daily capture evidence is unavailable.", color="warning")
 

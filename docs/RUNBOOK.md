@@ -209,8 +209,10 @@ poetry run python -m scripts.paper_capture_health
 
 The check reads the local archive and ledger. It treats a completed evaluation
 with all quotes below the threshold as healthy when the run matches the exact
-daily odds receipt. If a later attempt used other evidence or failed, the JSON
-reports its time and status separately from the verified daily capture. The
+daily odds receipt. On a restored warehouse, it can verify the daily receipt
+inside `source_evidence.zip` beside the database. If a later attempt used other
+evidence or failed, the JSON reports its time and status separately from the
+verified daily capture. The
 check also examines the schedules retained by the trial through the receipt
 time. A known in-window fixture missing from the receipt or with unresolved
 identity makes the check incomplete and appears in the JSON by internal ID.

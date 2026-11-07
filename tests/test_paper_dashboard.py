@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import yaml
 
+from scripts.backup_evidence import EVIDENCE_ZIP, create_evidence_zip
 from src.dashboard import app as dashboard
 from src.data.audit_nba_schedule import save_schedule_audit
 from src.predict.paper_ledger import SCHEMA_PATH, load_trial
@@ -238,8 +239,16 @@ def test_daily_capture_panel_checks_the_exact_receipt_and_shows_later_attempt(le
     assert "Later attempt Nov 07, 06:11:04 PM EST · failed" in text
     assert receipt.name in text
 
+    contents = receipt.read_bytes()
     receipt.unlink()
     assert "Daily odds receipt is missing" in _text(dashboard.show_daily_capture(2))
+
+    receipt.write_bytes(contents)
+    create_evidence_zip(ledger.parent / EVIDENCE_ZIP, [("raw", ledger.parent / "raw")])
+    receipt.unlink()
+    restored = _text(dashboard.show_daily_capture(3))
+    assert "Daily receipt and evaluation verified" in restored
+    assert receipt.name in restored
 
 
 def _schedule_report(*, audited_at=NOW, observed_at=NOW, linked=False):
