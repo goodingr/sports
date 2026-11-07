@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -35,7 +37,9 @@ CREATE TABLE game_results (
     game_id TEXT PRIMARY KEY,
     home_score INTEGER,
     away_score INTEGER,
-    source_version TEXT
+    source_version TEXT,
+    total_close REAL,
+    total_close_snapshot_id TEXT
 );
 """
 
@@ -112,6 +116,94 @@ def test_score_backfill_preserves_voided_game(db_with_one_game: Path) -> None:
     with sqlite3.connect(db_with_one_game) as conn:
         assert conn.execute("SELECT status FROM games").fetchone()[0] == "voided"
         assert conn.execute("SELECT count(*) FROM game_results").fetchone()[0] == 0
+
+
+def test_stale_score_resolution_preserves_existing_and_concurrent_finals(
+    db_with_one_game: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = "NBA_20260427_LAL_BOS"
+    tip = (datetime.now(timezone.utc) - timedelta(days=2)).replace(
+        hour=0, minute=40, second=0, microsecond=0
+    )
+    target_date = tip.astimezone(ZoneInfo("America/New_York")).date()
+    with sqlite3.connect(db_with_one_game) as conn:
+        conn.execute(
+            "UPDATE games SET status = 'final', espn_id = 'old-espn', start_time_utc = ?",
+            (tip.isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO teams VALUES (12, 1, 'CLE'), (13, 1, 'NYK'), (14, 1, 'ATL'), (15, 1, 'MIA')"
+        )
+        conn.executemany(
+            "INSERT INTO games VALUES (?, 1, ?, ?, ?, 'scheduled', NULL)",
+            [
+                ("missing", tip.isoformat(), 12, 13),
+                ("completed_during_fetch", tip.isoformat(), 14, 15),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO game_results VALUES (?, ?, ?, ?, ?, ?)",
+            [(existing, 120, 110, "trusted", 221.5, "before"), ("missing", 98, None, "partial", 204.5, "other")],
+        )
+
+    def fetch(league, day):
+        assert (league, day) == ("NBA", target_date)
+        with sqlite3.connect(db_with_one_game) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO game_results VALUES ('completed_during_fetch', 130, 100, 'other-feed', 219.5, 'new')"
+            )
+            conn.execute(
+                "UPDATE games SET status = 'final', espn_id = 'other-espn' WHERE game_id = 'completed_during_fetch'"
+            )
+        teams_and_scores = [
+            ("Los Angeles Lakers", "Boston Celtics", "115", "100"),
+            ("Cleveland Cavaliers", "New York Knicks", "108", "101"),
+            ("Atlanta Hawks", "Miami Heat", "112", "105"),
+        ]
+        return {"events": [
+            {
+                "id": f"espn-{index}",
+                "date": tip.isoformat(),
+                "status": {"type": {"completed": True, "state": "post"}},
+                "competitions": [{"competitors": [
+                    {"homeAway": "home", "team": {"displayName": home}, "score": home_score},
+                    {"homeAway": "away", "team": {"displayName": away}, "score": away_score},
+                ]}],
+            }
+            for index, (home, away, home_score, away_score) in enumerate(teams_and_scores)
+        ]}
+
+    monkeypatch.setattr(score_backfill, "fetch_espn_scoreboard", fetch)
+    assert score_backfill.resolve_stale_scores(["NBA"]) == 1
+    with sqlite3.connect(db_with_one_game) as conn:
+        rows = conn.execute(
+            """
+            SELECT g.game_id, r.home_score, r.away_score, r.source_version,
+                   r.total_close, r.total_close_snapshot_id, g.status, g.espn_id
+            FROM games g JOIN game_results r USING(game_id)
+            ORDER BY g.game_id
+            """
+        ).fetchall()
+    assert rows == [
+        (existing, 120, 110, "trusted", 221.5, "before", "final", "old-espn"),
+        ("completed_during_fetch", 130, 100, "other-feed", 219.5, "new", "final", "other-espn"),
+        ("missing", 108, 101, "espn_scoreboard", 204.5, "other", "final", "espn-1"),
+    ]
+
+    with sqlite3.connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET status = 'scheduled' WHERE game_id = ?", (existing,))
+    assert score_backfill.stale_score_targets(["NBA"]) == []
+
+    assert score_backfill.backfill_scores(["NBA"], target_date, target_date, pause_seconds=0) == 3
+    with sqlite3.connect(db_with_one_game) as conn:
+        row = conn.execute(
+            """
+            SELECT home_score, away_score, source_version, total_close, total_close_snapshot_id
+            FROM game_results WHERE game_id = ?
+            """,
+            (existing,),
+        ).fetchone()
+    assert row == (115, 100, "espn_scoreboard", 221.5, "before")
 
 
 def test_update_scores_in_db_warns_on_unmatched_games(

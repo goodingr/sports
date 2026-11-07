@@ -114,7 +114,7 @@ def parse_espn_event(event: Dict, league: str) -> Optional[Dict]:
     }
 
 
-def update_scores_in_db(games: List[Dict], league: str) -> int:
+def update_scores_in_db(games: List[Dict], league: str, *, only_missing: bool = False) -> int:
     if not games:
         return 0
 
@@ -196,8 +196,9 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
                     home_score = excluded.home_score,
                     away_score = excluded.away_score,
                     source_version = excluded.source_version
+                WHERE NOT ? OR game_results.home_score IS NULL OR game_results.away_score IS NULL
                 """,
-                (game["home_score"], game["away_score"], game_id),
+                (game["home_score"], game["away_score"], game_id, only_missing),
             )
             if cursor.rowcount == 0:
                 continue
@@ -224,7 +225,14 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
     return updated
 
 
-def backfill_scores(leagues: Iterable[str], start_date: date, end_date: date, *, pause_seconds: float = 0.25) -> int:
+def backfill_scores(
+    leagues: Iterable[str],
+    start_date: date,
+    end_date: date,
+    *,
+    pause_seconds: float = 0.25,
+    only_missing: bool = False,
+) -> int:
     total_updated = 0
     for league in leagues:
         league_upper = league.upper()
@@ -242,7 +250,7 @@ def backfill_scores(leagues: Iterable[str], start_date: date, end_date: date, *,
             if pause_seconds > 0:
                 time.sleep(pause_seconds)
 
-        updated = update_scores_in_db(parsed_games, league_upper)
+        updated = update_scores_in_db(parsed_games, league_upper, only_missing=only_missing)
         LOGGER.info("Updated %d %s scores from ESPN", updated, league_upper)
         total_updated += updated
     return total_updated
@@ -280,11 +288,7 @@ def stale_score_targets(
         WHERE julianday(g.start_time_utc) < julianday('now', ?)
           AND julianday(g.start_time_utc) >= julianday('now', ?)
           AND LOWER(COALESCE(g.status, 'scheduled')) != 'voided'
-          AND (
-              COALESCE(g.status, 'scheduled') != 'final'
-              OR gr.home_score IS NULL
-              OR gr.away_score IS NULL
-          )
+          AND (gr.home_score IS NULL OR gr.away_score IS NULL)
           {where}
         ORDER BY g.start_time_utc
     """
@@ -314,7 +318,7 @@ def resolve_stale_scores(
 
     total_updated = 0
     for league, target_date in targets:
-        total_updated += backfill_scores([league], target_date, target_date)
+        total_updated += backfill_scores([league], target_date, target_date, only_missing=True)
     return total_updated
 
 
