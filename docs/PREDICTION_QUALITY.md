@@ -360,7 +360,7 @@ same steps locally, use these commands from the repository root.
 ```powershell
 poetry run python -m src.predict.paper_ledger report
 poetry run python -m src.predict.paper_ledger update
-poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --region us --force-refresh
+poetry run python -m src.data.ingest_odds --league NBA --market h2h,totals --region us --require-fresh
 poetry run python -m src.predict.runner --leagues NBA --model-type random_forest --paper
 ```
 
@@ -434,6 +434,21 @@ April 11, 899 dated games start at least 15 minutes after a modeled 6:10 p.m.
 Eastern capture, which would give about 156 decisions at the same rate if every
 eligible quote were captured and every decision graded. These are planning
 estimates from previously examined data. [Published NBA schedule by date](https://ak-static.cms.nba.com/wp-content/uploads/sites/46/2026/08/2026-27-NBA-Regular-Season-Schedule-By-Date.pdf)
+
+On Windows, `scripts/install_paper_close_task.ps1 -Entry` previews the
+supplemental entry task. Add `-Apply` to register `SportsPaperEarlyEntry`.
+It checks every 15 minutes, five minutes after the closing collector's checks,
+while the owner is logged on and the machine is awake. It expires at the capture
+deadline and writes `logs/paper_entry_YYYYMMDD.log`. The evening refresh still
+runs on its existing schedule. The supplement checks known fixtures whose tipoffs
+are too early for a 6:15 p.m. Eastern capture. It can collect when an eligible
+game is 30 to 75 minutes from tipoff, including other early games inside
+the registered decision window in that batch. It can use up to one two-market
+odds request per Eastern date and checks for a 200-credit reserve. The published
+schedule has 169 such games across 47 dates at the modeled times, so the
+supplement could use up to 94 credits on the listed fixtures if all 47 dates
+require a provider request. Fixture discovery, quote availability, the credit
+reserve, and the host schedule determine actual coverage.
 
 Capture ends April 12, 2027 at midnight Eastern time. The final report freezes
 grades April 19 at midnight Eastern time and requires at least 150 graded

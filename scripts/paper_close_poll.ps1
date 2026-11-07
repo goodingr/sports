@@ -1,8 +1,9 @@
-# Run one closing-quote inspection, or allow a bounded collection with -Collect.
+# Inspect one paper polling mode, or allow a bounded collection with -Collect.
 param(
     [Parameter(Mandatory = $true)]
     [string]$PythonPath,
-    [switch]$Collect = $false
+    [switch]$Collect = $false,
+    [switch]$Entry = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,10 +20,12 @@ if ($python.PSIsContainer) {
 $logDirectory = Join-Path $projectRoot "logs"
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $startedAt = [DateTime]::UtcNow
-$logPath = Join-Path $logDirectory ("paper_close_{0}.log" -f $startedAt.ToString("yyyyMMdd"))
-$pythonArgs = @("-B", "-m", "src.predict.paper_close_poll")
+$pollMode = if ($Entry) { "entry" } else { "close" }
+$logPath = Join-Path $logDirectory ("paper_{0}_{1}.log" -f $pollMode, $startedAt.ToString("yyyyMMdd"))
+$pythonArgs = @("-B", "-m", "src.predict.paper_${pollMode}_poll")
 if ($Collect) {
-    $pythonArgs += @("--collect", "--batch-scheduled")
+    $pythonArgs += "--collect"
+    if (-not $Entry) { $pythonArgs += "--batch-scheduled" }
 }
 
 # Windows PowerShell 5.1 represents redirected native stderr as ErrorRecord.

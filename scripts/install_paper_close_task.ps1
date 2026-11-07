@@ -1,17 +1,22 @@
-# Preview the closing-quote task. Register it only with -Apply.
+# Preview the paper closing task, or the supplemental entry task with -Entry.
 param(
     [string]$PythonPath = "",
+    [switch]$Entry = $false,
     [switch]$Apply = $false
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
-$taskName = "SportsPaperClosingQuotes"
+$taskName = if ($Entry) { "SportsPaperEarlyEntry" } else { "SportsPaperClosingQuotes" }
 $taskPath = "\"
 $wrapperPath = Join-Path $PSScriptRoot "paper_close_poll.ps1"
 $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-$description = "Sports paper closing quotes owned by $projectRoot"
+$description = if ($Entry) {
+    "Sports supplemental paper entry owned by $projectRoot"
+} else {
+    "Sports paper closing quotes owned by $projectRoot"
+}
 
 if (-not $PythonPath) {
     $poetry = Get-Command poetry -CommandType Application -ErrorAction Stop
@@ -32,7 +37,7 @@ if ($python.PSIsContainer) {
     throw "PythonPath must name an interpreter file."
 }
 if (-not (Test-Path -LiteralPath $wrapperPath -PathType Leaf)) {
-    throw "The project closing-quote wrapper is missing."
+    throw "The project paper polling wrapper is missing."
 }
 
 $metadataScript = @'
@@ -56,8 +61,9 @@ if path.is_file():
             ).fetchone()
             if registered and registered[0] != trial.specification:
                 raise ValueError('The trial configuration differs from its registered specification')
-end = datetime.fromisoformat(trial.review_at) + GRADING_GRACE
-print(json.dumps({'trial_id': trial.trial_id, 'end_boundary': end.isoformat()}))
+review = datetime.fromisoformat(trial.review_at)
+print(json.dumps({'trial_id': trial.trial_id, 'review_at': review.isoformat(),
+                  'end_boundary': (review + GRADING_GRACE).isoformat()}))
 '@
 $ErrorActionPreference = "Continue"
 $metadataOutput = & $python.FullName -B -c $metadataScript 2>&1
@@ -67,12 +73,16 @@ if ($metadataExitCode -ne 0) {
     throw "Could not read the trial deadline with the selected interpreter."
 }
 $metadata = ($metadataOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
-$expiresAt = [DateTimeOffset]::Parse($metadata.end_boundary).ToLocalTime()
-$startsAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
+$deadline = if ($Entry) { $metadata.review_at } else { $metadata.end_boundary }
+$expiresAt = [DateTimeOffset]::Parse($deadline).ToLocalTime()
+$offsetMinutes = if ($Entry) { 5 } else { 0 }
+$phaseTicks = [TimeSpan]::FromMinutes($offsetMinutes).Ticks
 $intervalTicks = [TimeSpan]::FromMinutes(15).Ticks
-$startsAt = $startsAt.AddTicks($intervalTicks - ($startsAt.Ticks % $intervalTicks)).ToLocalTime()
+$startsAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
+$phaseRemainder = ($startsAt.Ticks - $phaseTicks) % $intervalTicks
+$startsAt = $startsAt.AddTicks($intervalTicks - $phaseRemainder).ToLocalTime()
 if ($expiresAt -le $startsAt.AddMinutes(15)) {
-    throw "The trial deadline does not allow another closing-quote interval."
+    throw "The trial deadline does not allow another $taskName interval."
 }
 
 $daily = Get-ScheduledTask -TaskName "DailyPipelineRun" -TaskPath $taskPath -ErrorAction Stop
@@ -80,6 +90,7 @@ if ([string]$daily.Principal.LogonType -ne "Interactive" -or [string]$daily.Prin
     throw "DailyPipelineRun must use an Interactive, Limited principal."
 }
 $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Collect -PythonPath "{1}"' -f $wrapperPath, $python.FullName
+if ($Entry) { $arguments += ' -Entry' }
 $existing = Get-ScheduledTask -TaskPath $taskPath -ErrorAction Stop |
     Where-Object { $_.TaskName -eq $taskName }
 if ($existing) {
@@ -94,7 +105,7 @@ if ($existing) {
         [string]$existing.Principal.LogonType -ne "Interactive" -or
         [string]$existing.Principal.RunLevel -ne "Limited"
     ) {
-        throw "A conflicting SportsPaperClosingQuotes task already exists."
+        throw "A conflicting $taskName task already exists."
     }
 }
 
@@ -113,7 +124,8 @@ $plan = [ordered]@{
     first_start = $startsAt.ToString("o")
     end_boundary = $expiresAt.ToString("yyyy-MM-ddTHH:mm:sszzz")
     repetition_minutes = 15
-    execution_limit_minutes = 2
+    offset_minutes = $offsetMinutes
+    execution_limit_minutes = if ($Entry) { 5 } else { 2 }
     window_style = "Hidden"
     task_hidden = $false
     start_when_available = $true
@@ -125,7 +137,7 @@ if ($Apply) {
     $principal = New-ScheduledTaskPrincipal -UserId $daily.Principal.UserId -LogonType Interactive -RunLevel Limited
     $trigger = New-ScheduledTaskTrigger -Once -At $startsAt.LocalDateTime -RepetitionInterval ([TimeSpan]::FromMinutes(15)) -RepetitionDuration ($expiresAt - $startsAt)
     $trigger.EndBoundary = $plan.end_boundary
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2)) -WakeToRun:$false
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable:$plan.start_when_available -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes($plan.execution_limit_minutes)) -WakeToRun:$false
     $definition = New-ScheduledTask -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description $description
     Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -InputObject $definition -Force:([bool]$existing) -ErrorAction Stop | Out-Null
 }
