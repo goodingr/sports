@@ -455,11 +455,11 @@ def _needs_revision(
 
 
 def unreconciled_grades(conn: sqlite3.Connection, trial_id: str, observed_at: datetime) -> int:
-    """Count current-source changes that have not been recorded in grade history."""
+    """Compare current source evidence with grades visible at the observation time."""
     if observed_at.utcoffset() is None:
         raise ValueError("Settlement observation time must include a timezone")
     observed = observed_at.astimezone(timezone.utc)
-    latest = grades_as_of(conn, trial_id, datetime.max.replace(tzinfo=timezone.utc))
+    latest = grades_as_of(conn, trial_id, observed)
     return sum(
         _needs_revision(
             latest.get(decision["game_id"]), expected_grade(conn, decision, observed), observed

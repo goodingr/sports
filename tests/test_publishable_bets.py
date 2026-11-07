@@ -897,3 +897,28 @@ def test_source_correction_blocks_promotion_before_and_after_settlement_reconcil
             observed_at=observed + timedelta(hours=1),
         )
     assert rules_path.read_bytes() == original_rules
+
+
+def test_future_grade_revision_cannot_hide_current_source_correction(tmp_path):
+    db_path = tmp_path / "paper.db"
+    trial_id = "nba_totals_fixture"
+    observed = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    _seed_paper_evidence(db_path)
+    initial = paper_reviews(db_path, observed)[trial_id]
+    rule = rule_for_trial(initial)
+    assert paper_rule_result(rule, initial, QualityGate())["passes_launch_gate"]
+
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE game_results SET home_score = 80 WHERE game_id = 'forward0'")
+        future = observed + timedelta(days=1)
+        assert settle_open_trials(conn, future) == 1
+        assert settle_open_trials(conn, observed) == 0
+
+    review = paper_reviews(db_path, observed)[trial_id]
+    assert review["metrics"] == initial["metrics"]
+    assert review["late_grade_changes"] == 0
+    assert review["unreconciled_grades"] == 1
+    result = paper_rule_result(rule, review, QualityGate())
+    assert not result["passes_launch_gate"]
+    assert result["launch_gate_failures"] == ["paper_trial_has_unreconciled_grades"]
