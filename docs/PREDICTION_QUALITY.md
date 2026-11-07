@@ -405,6 +405,13 @@ only reads the warehouse. For collection, free quota probes check the active key
 and then distinct configured keys. A qualifying key is used locally for that
 request, under the shared attempt cap and cooldown.
 
+On Windows, run `scripts/install_paper_close_task.ps1` to preview the local task
+definition. Add `-Apply` to register `SportsPaperClosingQuotes`. It checks every
+15 minutes while the task owner is logged on and the machine is awake. The
+trigger expires at the trial's final review. Logs are written to
+`logs/paper_close_YYYYMMDD.log` using the UTC date. The task can be paused in
+Windows Task Scheduler.
+
 Capture ends February 1, 2027 at midnight Eastern time. The final report freezes
 grades one week later and requires at least 150 graded decisions, 5% flat-unit
 ROI, a positive lower 95% date-clustered bootstrap bound, a lower Brier score than
