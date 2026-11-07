@@ -9,6 +9,7 @@ on:
 env:
   RUFF_SCOPE: >-
     src/data/ingest_sources.py
+    src/data/ingest_nba_events.py
     src/features/betting_model_input.py
     src/models/betting_benchmark.py
     src/models/prediction_quality.py
@@ -26,9 +27,11 @@ env:
     src/predict/published_ledger.py
     src/models/totals_calibration.py
     src/data/replay_local_odds.py
+    src/api/settings.py
     scripts/backup_data.py
     scripts/backup_archive.py
     scripts/backup_evidence.py
+    scripts/commercial_cash_report.py
     tests/test_betting_benchmark.py
     tests/test_betting_model_input.py
     tests/test_prediction_quality.py
@@ -37,6 +40,7 @@ env:
     tests/api/test_readiness.py
   MYPY_SCOPE: >-
     src/data/ingest_sources.py
+    src/data/ingest_nba_events.py
     src/data/sources/espn_odds.py
     src/data/sources/nba_injuries_espn.py
     src/features/betting_model_input.py
@@ -55,9 +59,11 @@ env:
     src/predict/published_ledger.py
     src/models/totals_calibration.py
     src/data/replay_local_odds.py
+    src/api/settings.py
     scripts/backup_data.py
     scripts/backup_archive.py
     scripts/backup_evidence.py
+    scripts/commercial_cash_report.py
 
 jobs:
   python:
@@ -195,3 +201,9 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmstY2kuZXhhbXBsZS5pbnZhbGlkJA==
           CLERK_SECRET_KEY: ci-config-placeholder
         run: docker compose -f docker-compose.pilot.yml config --quiet
+
+      - name: Validate full-stack Compose configuration
+        working-directory: .
+        run: |
+          cp .env.example .env
+          docker compose config --quiet

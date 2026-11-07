@@ -50,6 +50,9 @@ The BetRivers soccer draw replay used early, same-snapshot moneyline and totals
 quotes. On 456 later fixtures, the paired log-loss difference missed the frozen
 gate. Its 165 selected draws returned −2.30% and had zero verified closes.
 See `reports/research/soccer_draw_cross_market/result.json`.
+The college football peer-movement replay missed its frozen log-loss gate on
+305 later fixtures. It selected four bets, with one verified closing quote.
+See `reports/research/cfb_peer_continuation/result.json`.
 The NBA prospective trial is collecting evidence and its
 scheduled final review is April 19, 2027 at midnight Eastern time.
 
