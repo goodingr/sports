@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,6 +17,14 @@ from src.predict.paper_ledger import (
 from src.predict.runner import run_predictions
 
 
+def _set_fixture_start(conn, game_id, start):
+    conn.execute("UPDATE games SET start_time_utc = ? WHERE game_id = ?", (start, game_id))
+    conn.execute(
+        "UPDATE odds_snapshot_game_starts SET observed_start_utc = ? WHERE game_id = ?",
+        (start, game_id),
+    )
+
+
 @pytest.fixture
 def warehouse(tmp_path: Path):
     db = tmp_path / "trial.db"
@@ -25,20 +34,30 @@ def warehouse(tmp_path: Path):
     register_trial(trial, db)
     with connect(db) as conn:
         conn.execute("INSERT INTO sports VALUES (1, 'Basketball', 'NBA', 'totals', 'today')")
-        conn.execute("INSERT INTO teams (team_id, sport_id, code, name) VALUES (1, 1, 'H', 'Home')")
-        conn.execute("INSERT INTO teams (team_id, sport_id, code, name) VALUES (2, 1, 'A', 'Away')")
+        conn.execute(
+            """
+            INSERT INTO teams (team_id, sport_id, code, name)
+            VALUES (1, 1, 'SAS', 'San Antonio Spurs'), (2, 1, 'SAC', 'Sacramento Kings')
+            """
+        )
         conn.execute("INSERT INTO books VALUES (1, 'DraftKings', 'us')")
         start = (now + timedelta(hours=2)).isoformat()
         conn.execute(
             """
-            INSERT INTO games (game_id, sport_id, home_team_id, away_team_id, start_time_utc)
-            VALUES ('game', 1, 1, 2, ?), ('duplicate', 1, 1, 2, ?)
+            INSERT INTO games (game_id, sport_id, home_team_id, away_team_id, start_time_utc, odds_api_id)
+            VALUES ('game', 1, 1, 2, ?, 'provider-game'), ('duplicate', 1, 1, 2, ?, 'provider-duplicate')
             """,
             (start, (now + timedelta(days=3)).isoformat()),
         )
         conn.execute(
             "INSERT INTO odds_snapshots VALUES ('snapshot', ?, 1, 'the-odds-api', NULL)",
             (now.isoformat(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO odds_snapshot_game_starts (snapshot_id, game_id, observed_start_utc)
+            SELECT 'snapshot', game_id, start_time_utc FROM games
+            """
         )
         conn.execute(
             """
@@ -85,10 +104,7 @@ def test_capture_freezes_first_eligible_decision(warehouse):
         "already_recorded": 1
     }
     with connect(db) as conn:
-        conn.execute(
-            "UPDATE games SET start_time_utc = ? WHERE game_id = 'duplicate'",
-            (predictions.iloc[0]["commence_time"],),
-        )
+        _set_fixture_start(conn, "duplicate", predictions.iloc[0]["commence_time"])
     duplicate = predictions.assign(game_id="duplicate")
     assert capture_predictions(
         trial, pd.concat([predictions, duplicate]), trial.model_sha256, db
@@ -108,9 +124,7 @@ def test_scoped_capture_excludes_other_eligible_fixtures(warehouse):
     db, trial, predictions, now = warehouse
     second_start = (now + timedelta(hours=5)).isoformat()
     with connect(db) as conn:
-        conn.execute(
-            "UPDATE games SET start_time_utc = ? WHERE game_id = 'duplicate'", (second_start,)
-        )
+        _set_fixture_start(conn, "duplicate", second_start)
     second = predictions.assign(game_id="duplicate", commence_time=second_start)
     assert capture_predictions(
         trial,
@@ -138,14 +152,104 @@ def test_scoped_capture_checks_earlier_start_at_ledger_write(warehouse):
     earlier_start = canonical_start - timedelta(minutes=8)
     predictions["commence_time"] = canonical_start.isoformat()
     with connect(db) as conn:
-        conn.execute(
-            "UPDATE games SET start_time_utc = ? WHERE game_id = 'game'",
-            (canonical_start.isoformat(),),
-        )
+        _set_fixture_start(conn, "game", canonical_start.isoformat())
     assert capture_predictions(
         trial, predictions, trial.model_sha256, db, fixture_start_limits={"game": earlier_start}
     ) == {"outside_decision_window": 1}
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {"recorded": 1}
+
+
+def test_scoped_capture_checks_clock_span_across_all_three_sources(warehouse):
+    db, trial, predictions, now = warehouse
+    canonical_start = now + timedelta(hours=2)
+    provider_start = canonical_start + timedelta(minutes=6)
+    scoped_start = canonical_start - timedelta(minutes=5)
+    with connect(db) as conn:
+        conn.execute(
+            "UPDATE odds_snapshot_game_starts SET observed_start_utc = ? WHERE game_id = 'game'",
+            (provider_start.isoformat(),),
+        )
+    assert capture_predictions(
+        trial, predictions, trial.model_sha256, db, fixture_start_limits={"game": scoped_start}
+    ) == {"game_schedule_changed": 1}
+    with connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM paper_decisions").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("proof", "expected"),
+    [
+        ("legacy_row", "recorded"),
+        ("legacy_table", "recorded"),
+        ("missing", "unverified_quote_start"),
+        ("invalid_normalized", "unverified_quote_start"),
+    ],
+)
+def test_capture_accepts_only_verified_provider_tipoff(warehouse, tmp_path, proof, expected):
+    db, trial, predictions, now = warehouse
+    provider_start = now + timedelta(hours=1, minutes=52)
+    with connect(db) as conn:
+        if proof == "legacy_table":
+            conn.execute("DROP TABLE odds_snapshot_game_starts")
+        elif proof == "invalid_normalized":
+            conn.execute(
+                """
+                UPDATE odds_snapshot_game_starts SET observed_start_utc = '2026-11-07T22:00:00'
+                WHERE game_id = 'game'
+                """
+            )
+        else:
+            conn.execute("DELETE FROM odds_snapshot_game_starts WHERE game_id = 'game'")
+        conn.execute(
+            "UPDATE odds_snapshots SET raw_path = ? WHERE snapshot_id = 'snapshot'",
+            (r"Z:\old_checkout\data\raw\odds\basketball_nba\odds_entry.json",),
+        )
+    if proof != "missing":
+        raw = tmp_path / "raw" / "odds" / "basketball_nba" / "odds_entry.json"
+        raw.parent.mkdir(parents=True)
+        payload = {
+            "fetched_at": now.isoformat(),
+            "request": {"url": "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"},
+            "results": [
+                {
+                    "id": "provider-game",
+                    "sport_key": "basketball_nba",
+                    "commence_time": provider_start.isoformat(),
+                    "home_team": "San Antonio Spurs",
+                    "away_team": "Sacramento Kings",
+                    "bookmakers": [
+                        {
+                            "key": "draftkings",
+                            "markets": [
+                                {
+                                    "key": "h2h",
+                                    "outcomes": [
+                                        {"name": "San Antonio Spurs", "price": -130},
+                                        {"name": "Sacramento Kings", "price": 110},
+                                    ],
+                                },
+                                {
+                                    "key": "totals",
+                                    "outcomes": [
+                                        {"name": "Over", "point": 222.5, "price": -110},
+                                        {"name": "Under", "point": 222.5, "price": -110},
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        raw.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert capture_predictions(trial, predictions, trial.model_sha256, db) == {expected: 1}
+    with connect(db) as conn:
+        decision = conn.execute("SELECT start_time_utc FROM paper_decisions").fetchone()
+    if expected == "recorded":
+        assert decision["start_time_utc"] == provider_start.isoformat()
+    else:
+        assert decision is None
 
 
 def test_capture_rejects_missing_provenance_wrong_model_and_invalid_market(warehouse):
@@ -259,12 +363,16 @@ def test_runner_signals_empty_predictions_when_a_fixture_is_in_window(warehouse,
     monkeypatch.setenv("SPORTS_DB_PATH", str(db))
     monkeypatch.setattr("src.predict.runner.PredictionEngine", EmptyEngine)
     monkeypatch.setattr("src.predict.runner.load_trial", lambda _: trial)
-    with pytest.raises(RuntimeError, match="produced no predictions during an active capture window"):
+    with pytest.raises(
+        RuntimeError, match="produced no predictions during an active capture window"
+    ):
         run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
 
     with connect(db) as conn:
         statuses = conn.execute("SELECT status FROM paper_capture_runs").fetchall()
-        conn.execute("UPDATE games SET start_time_utc = ?", ((now + timedelta(days=1)).isoformat(),))
+        conn.execute(
+            "UPDATE games SET start_time_utc = ?", ((now + timedelta(days=1)).isoformat(),)
+        )
     assert [row["status"] for row in statuses] == ["no_predictions"]
     run_predictions(["NBA"], "random_forest", paper_rules=Path("unused"))
 

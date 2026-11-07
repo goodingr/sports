@@ -22,7 +22,7 @@ from src.db.core import connect, resolve_db_path
 from src.models.prediction_quality import expected_value, no_vig_pair
 from src.predict.paper_report import build_paper_report
 from src.predict.paper_schedule import record_known_fixtures
-from src.predict.paper_settlement import _START_TOLERANCE, settle_open_trials
+from src.predict.paper_settlement import _START_TOLERANCE, _quote_source_start, settle_open_trials
 
 DEFAULT_RULES = Path("config/paper_trial.yml")
 SCHEMA_PATH = Path(__file__).with_name("paper_schema.sql")
@@ -148,7 +148,8 @@ def _decision_quote(
 ) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT sn.snapshot_id, sn.fetched_at_utc, b.book_id, b.name AS book,
+        SELECT sn.snapshot_id, over.game_id, sn.sport_id, sn.source,
+               sn.fetched_at_utc, b.book_id, b.name AS book,
                over.line, over.price_american AS over_price, under.price_american AS under_price
         FROM odds_snapshots sn
         JOIN odds over ON over.snapshot_id = sn.snapshot_id
@@ -237,11 +238,11 @@ def _capture_one(
         return "invalid_time"
     if abs(start - verified_start) > _START_TOLERANCE:
         return "game_schedule_changed"
-    decision_start = min(start, verified_start)
+    minimum_lead = timedelta(minutes=trial.min_minutes_before_start)
     if (
         start != model_start
         or not registered <= predicted_at <= now
-        or decision_start - now < timedelta(minutes=trial.min_minutes_before_start)
+        or min(start, verified_start) - now < minimum_lead
         or start - now > timedelta(hours=trial.max_hours_before_start)
     ):
         return "outside_decision_window"
@@ -258,6 +259,15 @@ def _capture_one(
         minutes=trial.max_quote_age_minutes
     ):
         return "stale_quote"
+    provider_start = _quote_source_start(conn, quote, fetched_at)
+    if provider_start is None:
+        return "unverified_quote_start"
+    starts = (start, verified_start, provider_start)
+    decision_start = min(starts)
+    if max(starts) - decision_start > _START_TOLERANCE:
+        return "game_schedule_changed"
+    if decision_start - now < minimum_lead:
+        return "outside_decision_window"
     if not _model_inputs_match(conn, row, quote):
         return "unverified_model_inputs"
 
@@ -444,7 +454,9 @@ def capture_predictions(
             for row in predictions.itertuples(index=False):
                 if fixture_ids is not None and row.game_id not in fixture_ids:
                     continue
-                start_limit = fixture_start_limits.get(row.game_id) if fixture_start_limits else None
+                start_limit = (
+                    fixture_start_limits.get(row.game_id) if fixture_start_limits else None
+                )
                 outcome = _capture_one(conn, trial, row, registered, now, start_limit=start_limit)
                 counts[outcome] += 1
                 snapshot = row.selected_totals_snapshot_id

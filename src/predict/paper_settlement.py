@@ -50,7 +50,7 @@ def _valid_american_odds(value: object) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value) and abs(value) >= 100
 
 
-def _archived_close_pair_matches(event: dict, quote: sqlite3.Row) -> bool:
+def _archived_totals_pair_matches(event: dict, quote: sqlite3.Row) -> bool:
     books = event.get("bookmakers")
     if not isinstance(books, list):
         return False
@@ -81,15 +81,21 @@ def _archived_close_pair_matches(event: dict, quote: sqlite3.Row) -> bool:
     )
 
 
-def _archived_close_start(
+def _archived_quote_start(
     conn: sqlite3.Connection,
-    decision: sqlite3.Row,
     quote: sqlite3.Row,
     fetched_at: datetime,
 ) -> datetime | None:
     """Recover legacy provenance from the original or relocated raw receipt."""
-    stored_path = quote["raw_path"]
-    if decision["odds_source"] != _ODDS_SOURCE or not isinstance(stored_path, str):
+    if not any(
+        row["name"] == "raw_path" for row in conn.execute("PRAGMA table_info(odds_snapshots)")
+    ):
+        return None
+    snapshot = conn.execute(
+        "SELECT raw_path FROM odds_snapshots WHERE snapshot_id = ?", (quote["snapshot_id"],)
+    ).fetchone()
+    stored_path = snapshot["raw_path"] if snapshot is not None else None
+    if not isinstance(stored_path, str):
         return None
     normalized = stored_path.replace("\\", "/")
     if normalized.startswith("raw/"):
@@ -119,7 +125,7 @@ def _archived_close_start(
               AND other.game_id <> g.game_id
           )
         """,
-        (decision["game_id"], decision["sport_id"]),
+        (quote["game_id"], quote["sport_id"]),
     ).fetchone()
     if fixture is None:
         return None
@@ -164,10 +170,31 @@ def _archived_close_start(
         or not isinstance(away, str)
         or (NBA_ALIASES.get(home.strip().lower()), NBA_ALIASES.get(away.strip().lower()))
         != (fixture["home_code"], fixture["away_code"])
-        or not _archived_close_pair_matches(event, quote)
+        or not _archived_totals_pair_matches(event, quote)
     ):
         return None
     return _utc_timestamp(event.get("commence_time"))
+
+
+def _quote_source_start(
+    conn: sqlite3.Connection, quote: sqlite3.Row, fetched_at: datetime
+) -> datetime | None:
+    """Resolve the provider's kickoff for the exact normalized totals pair."""
+    if quote["source"] != _ODDS_SOURCE:
+        return None
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'odds_snapshot_game_starts'"
+    ).fetchone():
+        proof = conn.execute(
+            """
+            SELECT observed_start_utc FROM odds_snapshot_game_starts
+            WHERE snapshot_id = ? AND game_id = ?
+            """,
+            (quote["snapshot_id"], quote["game_id"]),
+        ).fetchone()
+        if proof is not None:
+            return _utc_timestamp(proof["observed_start_utc"])
+    return _archived_quote_start(conn, quote, fetched_at)
 
 
 def _close_for_decision(
@@ -183,28 +210,10 @@ def _close_for_decision(
     latest_start = max(captured_start, current_start)
     if start != min(captured_start, current_start) or latest_start - start > _START_TOLERANCE:
         return None
-    has_source_starts = (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'odds_snapshot_game_starts'"
-        ).fetchone()
-        is not None
-    )
-    provider_start = (
-        """(SELECT observed_start_utc FROM odds_snapshot_game_starts proof
-            WHERE proof.snapshot_id = o.snapshot_id AND proof.game_id = o.game_id)"""
-        if has_source_starts
-        else "NULL"
-    )
-    raw_path = (
-        "MAX(s.raw_path)"
-        if any(row["name"] == "raw_path" for row in conn.execute("PRAGMA table_info(odds_snapshots)"))
-        else "NULL"
-    )
     window_start = start - _CLOSE_WINDOW - _START_TOLERANCE
     candidates = conn.execute(
-        f"""
-        SELECT o.snapshot_id, s.fetched_at_utc, {raw_path} AS raw_path,
-               {provider_start} AS provider_start,
+        """
+        SELECT o.snapshot_id, o.game_id, s.sport_id, s.source, s.fetched_at_utc,
                MIN(o.line) AS line,
                MAX(CASE WHEN LOWER(o.outcome) = 'over' THEN o.price_american END) AS over_price,
                MAX(CASE WHEN LOWER(o.outcome) = 'under' THEN o.price_american END) AS under_price
@@ -237,12 +246,7 @@ def _close_for_decision(
             and _valid_american_odds(row["under_price"])
         ):
             continue
-        observed = row["provider_start"]
-        raw_start = (
-            _utc_timestamp(observed)
-            if observed is not None
-            else _archived_close_start(conn, decision, row, fetched)
-        )
+        raw_start = _quote_source_start(conn, row, fetched)
         if raw_start is None:
             continue
         earliest = min(start, raw_start)

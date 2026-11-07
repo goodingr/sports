@@ -246,15 +246,18 @@ def test_collects_exact_batch_and_preserves_existing_fixtures(warehouse, monkeyp
         snapshot = conn.execute(
             "SELECT * FROM odds_snapshots WHERE raw_path IS NOT NULL"
         ).fetchone()
-        assert dict(
-            conn.execute(
-                """
+        assert (
+            dict(
+                conn.execute(
+                    """
                 SELECT game_id, observed_start_utc FROM odds_snapshot_game_starts
                 WHERE snapshot_id = ?
                 """,
-                (snapshot["snapshot_id"],),
+                    (snapshot["snapshot_id"],),
+                )
             )
-        ) == {event["id"]: event["commence_time"] for event in events[:2]}
+            == {event["id"]: event["commence_time"] for event in events[:2]}
+        )
         assert (
             conn.execute(
                 "SELECT count(*) FROM odds WHERE snapshot_id = ?", (snapshot["snapshot_id"],)
@@ -279,6 +282,58 @@ def test_fresh_exact_pairs_reuse_without_quota_or_daily_reservation(warehouse):
     assert predictions == [{"early-one", "early-two"}]
     with connect(path) as conn:
         assert not paper_entry_poll._has_table(conn, "paper_entry_requests")
+
+
+@pytest.mark.parametrize(
+    ("provider_lead", "outcome"),
+    [(12, "outside_decision_window"), (15, "recorded")],
+)
+def test_ordinary_capture_uses_quote_tipoff_after_no_quote_schedule_update(
+    warehouse, provider_lead, outcome
+):
+    path, _, events, _, _ = warehouse
+    trial = paper_ledger.load_trial()
+    provider_start = NOW + timedelta(minutes=provider_lead)
+    current_start = NOW + timedelta(minutes=20)
+    quote_event = {**events[0], "commence_time": provider_start.isoformat()}
+    schedule_event = {**quote_event, "commence_time": current_start.isoformat(), "bookmakers": []}
+    _seed_quotes([quote_event])
+    _seed_quotes([schedule_event], fetched=NOW - timedelta(minutes=1))
+
+    engine = paper_entry_poll.PredictionEngine(model_type=trial.model_type)
+    assert engine.load_model(trial.league, trace_totals=True)
+    predictions = engine.predict(
+        trial.league, days_ahead=1, trace_totals=True, fixture_ids={"early-one"}
+    )
+    [(snapshot_id, start)] = list(
+        predictions[["selected_totals_snapshot_id", "commence_time"]].itertuples(
+            index=False, name=None
+        )
+    )
+    assert start == current_start.isoformat()
+    with connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM odds_snapshots").fetchone()[0] == 2
+        proof = conn.execute(
+            """
+            SELECT observed_start_utc FROM odds_snapshot_game_starts
+            WHERE snapshot_id = ? AND game_id = 'early-one'
+            """,
+            (snapshot_id,),
+        ).fetchone()
+        assert proof["observed_start_utc"] == provider_start.isoformat()
+
+    assert paper_ledger.capture_predictions(trial, predictions, trial.model_sha256, path) == {
+        outcome: 1,
+        "prediction_missing": 2,
+    }
+    with connect(path) as conn:
+        decision = conn.execute(
+            "SELECT snapshot_id, start_time_utc FROM paper_decisions"
+        ).fetchone()
+    if outcome == "recorded":
+        assert tuple(decision) == (snapshot_id, provider_start.isoformat())
+    else:
+        assert decision is None
 
 
 @pytest.mark.parametrize("elapsed_minutes", [4, 5])
