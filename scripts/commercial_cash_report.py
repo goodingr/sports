@@ -52,6 +52,7 @@ class Invoice:
 
 @dataclass(frozen=True)
 class BalanceRow:
+    transaction_id: str
     created_at: datetime
     category: str
     invoice_id: str
@@ -147,10 +148,9 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
     balance: dict[str, BalanceRow] = {}
     duplicates = 0
     for line, row in _rows(path, _BALANCE_COLUMNS, "balance", optional=("source_id",)):
+        transaction_id = row["balance_transaction_id"]
         try:
-            if row["currency"].lower() != "usd" or not row["balance_transaction_id"].startswith(
-                "txn_"
-            ):
+            if row["currency"].lower() != "usd" or not transaction_id.startswith("txn_"):
                 raise ValueError
             created = datetime.fromisoformat(row["created_utc"])
             if created.tzinfo is None:
@@ -158,6 +158,7 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
                     raise ValueError
                 created = created.replace(tzinfo=timezone.utc)
             parsed = BalanceRow(
+                transaction_id,
                 created.astimezone(timezone.utc),
                 row["reporting_category"].lower(),
                 row["invoice_id"],
@@ -178,7 +179,6 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
                 raise ValueError
         except (ValueError, OverflowError):
             raise ValueError(f"Invalid USD balance activity at CSV row {line}") from None
-        transaction_id = row["balance_transaction_id"]
         previous = balance.get(transaction_id)
         if previous is None:
             balance[transaction_id] = parsed
@@ -194,14 +194,14 @@ def _balance(path: Path) -> tuple[list[BalanceRow], int]:
     return [row for _, row in ordered], duplicates
 
 
-def match_paid_invoices(
+def _load_cash_matches(
     invoices_path: Path,
     balance_path: Path,
     *,
     price_id: str,
     exclude_customer_ids: Collection[str] = (),
-) -> tuple[list[CashMatch], dict[str, int]]:
-    """Match eligible invoices to a single actual Stripe charge."""
+) -> tuple[list[CashMatch], list[BalanceRow], dict[str, int]]:
+    """Read the exports once and retain rows omitted from the subscription cash matches."""
     if not re.fullmatch(r"price_[A-Za-z0-9_]+", price_id):
         raise ValueError("A Stripe price ID is required")
     invoices = _invoices(invoices_path)
@@ -256,7 +256,49 @@ def match_paid_invoices(
             continue
 
         matches.append(CashMatch(invoice_id, invoice, charges[0], tuple(rows)))
+    return matches, balance, audit
+
+
+def match_paid_invoices(
+    invoices_path: Path,
+    balance_path: Path,
+    *,
+    price_id: str,
+    exclude_customer_ids: Collection[str] = (),
+) -> tuple[list[CashMatch], dict[str, int]]:
+    """Match eligible invoices to a single actual Stripe charge."""
+    matches, _, audit = _load_cash_matches(
+        invoices_path, balance_path, price_id=price_id, exclude_customer_ids=exclude_customer_ids
+    )
     return matches, audit
+
+
+def _reconciled_activity(match: CashMatch, audit: dict[str, int]) -> Iterator[BalanceRow]:
+    charge = match.charge
+    yield charge
+    unreversed: dict[tuple[str, str], tuple[int, int]] = {}
+    for row in match.activity:
+        if row is charge:
+            continue
+        if row.category not in _ACTIVITY:
+            audit["unsupported_linked_balance_rows"] += 1
+            continue
+        if (
+            not row.charge_id
+            or row.charge_id != charge.charge_id
+            or row.created_at < charge.created_at
+        ):
+            audit["unmatched_charge_adjustments"] += 1
+            continue
+
+        debit_category = _REVERSAL_DEBITS.get(row.category, row.category)
+        key = (debit_category, row.source_id)
+        principal, fees = unreversed.get(key, (0, 0))
+        if row.gross > principal or -row.fee > fees:
+            audit["unreconciled_adjustment_credits"] += 1
+            continue
+        unreversed[key] = (principal - row.gross, fees + row.fee)
+        yield row
 
 
 def build_report(
@@ -280,29 +322,7 @@ def build_report(
         first_paid_at[invoice.customer_id] = min(
             charge.created_at, first_paid_at.get(invoice.customer_id, charge.created_at)
         )
-        months[charge.created_at.strftime("%Y-%m")].add(charge)
-        unreversed: dict[tuple[str, str], tuple[int, int]] = {}
-        for row in match.activity:
-            if row is charge:
-                continue
-            if row.category not in _ACTIVITY:
-                audit["unsupported_linked_balance_rows"] += 1
-                continue
-            if (
-                not row.charge_id
-                or row.charge_id != charge.charge_id
-                or row.created_at < charge.created_at
-            ):
-                audit["unmatched_charge_adjustments"] += 1
-                continue
-
-            debit_category = _REVERSAL_DEBITS.get(row.category, row.category)
-            key = (debit_category, row.source_id)
-            principal, fees = unreversed.get(key, (0, 0))
-            if row.gross > principal or -row.fee > fees:
-                audit["unreconciled_adjustment_credits"] += 1
-                continue
-            unreversed[key] = (principal - row.gross, fees + row.fee)
+        for row in _reconciled_activity(match, audit):
             months[row.created_at.strftime("%Y-%m")].add(row)
 
     for paid_at in first_paid_at.values():

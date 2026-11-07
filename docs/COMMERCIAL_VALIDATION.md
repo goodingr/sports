@@ -129,7 +129,44 @@ credit. Excluded adjustments appear as `unmatched_charge_adjustments` or
 `unreconciled_adjustment_credits` in the audit. Reconcile those exceptions,
 excluded invoices, standalone fees, and taxes separately before relying on the
 totals. The report measures Stripe balance activity. [Stripe refund failures](https://docs.stripe.com/refunds#failed-refunds) · [Stripe dispute resolution](https://docs.stripe.com/disputes/how-disputes-work#dispute-resolution)
-Use actual business costs for operating profit.
+
+### Reconcile monthly operating cash
+
+Use the [operating report](../scripts/commercial_operating_report.py) for one
+closed UTC posting month and one dedicated single-product USD Stripe account.
+Confirm that the invoice and Balance exports contain the account's complete
+history through the month, including original charges for later adjustments.
+Confirm that cost records cover the whole month. The coverage flags are
+operator attestations. The report checks the declared bounds and reconciles the
+supplied rows. Keep the source exports and private cost register outside the
+repository.
+
+The cost CSV columns are `entry_id,posted_at_utc,category,currency,amount_cents`.
+Use unique source-backed IDs, timestamps with UTC offsets, `USD`, and integer
+cents. A cost is positive and a credit is negative. Use `acquisition` and
+`variable_support` for variable costs. Paid fixed categories are `hosting`,
+`odds_data`, `auth`, `backups`, `domains`, `monitoring`, `fixed_labor`,
+and `other_fixed`. Use `owner_labor` for optional imputed labor. If there were no paid non-Stripe
+operating costs, confirm that explicitly with `--confirm-no-paid-operating-costs`.
+
+Use `stripe_fee` for each separately posted Stripe Balance fee. Copy its
+`txn_` transaction ID and original posting time. Enter the negative of the
+Balance row's `net` amount in cents, including credits. The cash reconciliation
+already accounts for fees attached to charges, refunds and disputes. Enter
+those transactions only in the Balance export. Zero-fee Stripe payouts are
+cash transfers and stay outside operating cash.
+
+```powershell
+poetry run python -m scripts.commercial_operating_report --invoices C:/private/invoices.csv --balance C:/private/balance.csv --costs C:/private/costs.csv --price-id price_replace_me --month 2027-01 --stripe-history-start 2027-01-01T00:00:00Z --stripe-observed-through 2027-02-01T00:00:00Z --costs-observed-from 2027-01-01T00:00:00Z --costs-observed-through 2027-02-01T00:00:00Z --confirm-dedicated-account
+```
+
+Contribution subtracts matched standalone fees and variable costs from
+reconciled Stripe net cash. Operating cash subtracts paid fixed costs from
+contribution. Optional owner labor reduces the separate labor-adjusted result.
+The report suppresses those results and exits with status 2 when coverage,
+invoice reconciliation, fee evidence, or other balance activity is unresolved.
+Taxed or mixed-price invoices require separate reconciliation before using
+monthly results. Only aggregate totals and audit counts are emitted.
 
 ### Measure first and second renewals
 
