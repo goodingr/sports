@@ -21,9 +21,13 @@ env:
     src/predict/paper_report.py
     src/predict/paper_schedule.py
     src/predict/paper_settlement.py
+    src/predict/paper_settlement_history.py
     src/predict/published_ledger.py
     src/models/totals_calibration.py
     src/data/replay_local_odds.py
+    scripts/backup_data.py
+    scripts/backup_archive.py
+    scripts/backup_evidence.py
     tests/test_betting_benchmark.py
     tests/test_betting_model_input.py
     tests/test_prediction_quality.py
@@ -45,9 +49,13 @@ env:
     src/predict/paper_report.py
     src/predict/paper_schedule.py
     src/predict/paper_settlement.py
+    src/predict/paper_settlement_history.py
     src/predict/published_ledger.py
     src/models/totals_calibration.py
     src/data/replay_local_odds.py
+    scripts/backup_data.py
+    scripts/backup_archive.py
+    scripts/backup_evidence.py
 
 jobs:
   python:
@@ -136,6 +144,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Lint
         run: npm run lint
