@@ -128,7 +128,11 @@ def test_pinned_totals_needs_only_quote_inputs_and_retains_verified_bundle(
             "selected_totals_book_id": 1, "selected_h2h_snapshot_id": "quote", "selected_h2h_book_id": 1,
         }]
     )
-    monkeypatch.setattr(engine_module, "load_games_from_database", lambda *args: games)
+    def load_paper_inputs(league, days_ahead, *, paper_quotes, fixture_ids):
+        assert (league, days_ahead, paper_quotes, fixture_ids) == ("NBA", 7, True, {"GAME"})
+        return games
+
+    monkeypatch.setattr(engine_module, "load_games_from_database", load_paper_inputs)
 
     def unexpected(*args, **kwargs):
         pytest.fail("Paper inference should not access the ordinary prediction path")

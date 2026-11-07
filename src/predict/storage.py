@@ -1,13 +1,15 @@
 """Storage utilities for the prediction system."""
 
 import logging
+import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import AbstractSet, Any, Optional
 
 import numpy as np
 import pandas as pd
 
 from src.db.core import PREDICTION_METADATA_COLUMNS, connect, ensure_prediction_metadata_columns
+from src.predict.quote_order import latest_market_snapshot_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -184,7 +186,42 @@ def _apply_deterministic_odds(games_df: pd.DataFrame, odds_df: pd.DataFrame) -> 
     return games_df
 
 
-def load_games_from_database(league: str, days_ahead: int = 7) -> pd.DataFrame:
+def _apply_paper_odds(
+    conn: sqlite3.Connection, games: pd.DataFrame, sport_id: int
+) -> pd.DataFrame:
+    """Keep both paper model inputs on the latest trial-source totals snapshot."""
+    rows = []
+    for game_id in games["game_id"]:
+        snapshot_id = latest_market_snapshot_id(
+            conn, game_id=game_id, sport_id=sport_id, source="the-odds-api", market="totals"
+        )
+        if snapshot_id is None:
+            continue
+        rows.extend(conn.execute(
+            """
+            SELECT o.game_id, o.market, o.outcome, o.price_american, o.line, o.snapshot_id,
+                   o.book_id, b.name AS book_name, s.fetched_at_utc
+            FROM odds o JOIN odds_snapshots s USING (snapshot_id)
+            JOIN books b USING (book_id)
+            WHERE o.game_id = ? AND o.snapshot_id = ? AND lower(b.name) = 'draftkings'
+              AND o.market IN ('h2h', 'totals') AND o.price_american IS NOT NULL
+            """,
+            (game_id, snapshot_id),
+        ))
+    odds = pd.DataFrame.from_records(rows, columns=[
+        "game_id", "market", "outcome", "price_american", "line", "snapshot_id",
+        "book_id", "book_name", "fetched_at_utc",
+    ])
+    return _apply_deterministic_odds(games, odds)
+
+
+def load_games_from_database(
+    league: str,
+    days_ahead: int = 7,
+    *,
+    paper_quotes: bool = False,
+    fixture_ids: AbstractSet[str] | None = None,
+) -> pd.DataFrame:
     """
     Load upcoming games from the database for a specific league.
     
@@ -221,34 +258,39 @@ def load_games_from_database(league: str, days_ahead: int = 7) -> pd.DataFrame:
             ORDER BY g.start_time_utc
         """
         games_df = pd.read_sql_query(query, conn, params=(sport_id, f"+{days_ahead} days"))
+        if fixture_ids is not None:
+            games_df = games_df[games_df["game_id"].isin(fixture_ids)]
 
         if games_df.empty:
             return games_df
 
-        game_ids = games_df["game_id"].tolist()
-        placeholders = ",".join("?" * len(game_ids))
+        if paper_quotes:
+            games_df = _apply_paper_odds(conn, games_df, sport_id)
+        else:
+            game_ids = games_df["game_id"].tolist()
+            placeholders = ",".join("?" * len(game_ids))
 
-        odds_query = f"""
-            SELECT
-                o.game_id,
-                o.market,
-                o.outcome,
-                o.price_american,
-                o.line,
-                o.snapshot_id,
-                o.book_id,
-                b.name AS book_name,
-                s.fetched_at_utc
-            FROM odds o
-            JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
-            JOIN books b ON o.book_id = b.book_id
-            WHERE o.game_id IN ({placeholders})
-              AND o.market IN ('h2h', 'totals', 'spreads')
-              AND o.price_american IS NOT NULL
-        """
-        odds_df = pd.read_sql_query(odds_query, conn, params=game_ids)
+            odds_query = f"""
+                SELECT
+                    o.game_id,
+                    o.market,
+                    o.outcome,
+                    o.price_american,
+                    o.line,
+                    o.snapshot_id,
+                    o.book_id,
+                    b.name AS book_name,
+                    s.fetched_at_utc
+                FROM odds o
+                JOIN odds_snapshots s ON o.snapshot_id = s.snapshot_id
+                JOIN books b ON o.book_id = b.book_id
+                WHERE o.game_id IN ({placeholders})
+                  AND o.market IN ('h2h', 'totals', 'spreads')
+                  AND o.price_american IS NOT NULL
+            """
+            odds_df = pd.read_sql_query(odds_query, conn, params=game_ids)
+            games_df = _apply_deterministic_odds(games_df, odds_df)
 
-    games_df = _apply_deterministic_odds(games_df, odds_df)
     games_df["commence_time"] = pd.to_datetime(games_df["commence_time"])
     games_df["league"] = league
 

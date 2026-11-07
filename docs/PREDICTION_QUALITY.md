@@ -355,6 +355,11 @@ The latest totals snapshot for the fixture must have been fetched within 10 minu
 capture. This measures the quote the feed returned, without assuming sportsbook
 acceptance or recording any wager.
 
+Paper inference and cached entry both select the unique latest totals snapshot
+from the registered source. The model gets the DraftKings moneylines and total
+from that snapshot. An independent moneyline update cannot substitute a model
+input, and an incomplete newer totals observation still supersedes an older pair.
+
 The scheduled pipeline downloads NBA odds and captures eligible decisions after
 the preflight backup and before history ingestion. It reuses that download for
 the daily odds refresh. Settlement updates run after data ingestion. To run the

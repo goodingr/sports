@@ -324,9 +324,9 @@ class PredictionEngine:
         fixture_ids: AbstractSet[str] | None = None,
     ) -> Optional[pd.DataFrame]:
         """Forecast on retained quote inputs without saving ordinary predictions."""
-        games = load_games_from_database(league, days_ahead)
-        if fixture_ids is not None and not games.empty:
-            games = games[games["game_id"].isin(fixture_ids)]
+        games = load_games_from_database(
+            league, days_ahead, paper_quotes=True, fixture_ids=fixture_ids
+        )
         if games.empty:
             return None
         if self._pinned_totals_league != league.upper() or self.totals_model_sha256 != model_sha256:

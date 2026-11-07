@@ -52,7 +52,7 @@ from src.predict.paper_settlement import (
     _valid_american_odds,
     _valid_total_line,
 )
-from src.predict.storage import _apply_deterministic_odds
+from src.predict.storage import _apply_paper_odds
 
 if TYPE_CHECKING:
     from src.predict.paper_entry_fallback import FallbackPlan
@@ -204,26 +204,6 @@ def _fresh_quotes(
         conn,
         params=game_ids,
     )
-    odds = pd.read_sql_query(
-        f"""
-        SELECT o.game_id, o.market, o.outcome, o.price_american, o.line, o.snapshot_id,
-               o.book_id, b.name AS book_name, s.fetched_at_utc, s.raw_path
-        FROM odds o JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id
-        JOIN books b ON b.book_id = o.book_id
-        WHERE o.game_id IN ({markers}) AND o.market IN ('h2h', 'totals')
-          AND o.price_american IS NOT NULL
-          AND julianday(s.fetched_at_utc) BETWEEN julianday(?) AND julianday(?)
-        """,
-        conn,
-        params=[
-            *game_ids,
-            earliest.isoformat(),
-            now.isoformat(),
-        ],
-    )
-    fetched = odds["fetched_at_utc"].map(_utc_timestamp)
-    odds = odds.loc[fetched.between(earliest, now)]
-    raw_paths = dict(zip(odds["snapshot_id"], odds["raw_path"], strict=True))
     stored_starts = {}
     if _has_table(conn, "paper_entry_quote_starts"):
         stored_starts = {
@@ -237,7 +217,8 @@ def _fresh_quotes(
             )
         }
     fresh: _FreshQuotes = {}
-    for row in _apply_deterministic_odds(games, odds).itertuples(index=False):
+    sport_id = next(iter(due.values())).sport_id
+    for row in _apply_paper_odds(conn, games, sport_id).itertuples(index=False):
         game = _eligible_game(conn, row.game_id, trial.league)
         if game is None or pd.isna(row.selected_totals_book_id):
             continue
@@ -249,6 +230,9 @@ def _fresh_quotes(
             and _model_inputs_match(conn, row, quote)
         ):
             continue
+        fetched = _utc_timestamp(quote["fetched_at_utc"])
+        if fetched is None or not earliest <= fetched <= now:
+            continue
         snapshot_id = quote["snapshot_id"]
         start = fixture_starts[row.game_id]
         evidence_key = (snapshot_id, row.game_id)
@@ -258,7 +242,9 @@ def _fresh_quotes(
                 continue
             start = min(start, verified_start)
         else:
-            raw_path = raw_paths.get(snapshot_id)
+            raw_path = conn.execute(
+                "SELECT raw_path FROM odds_snapshots WHERE snapshot_id = ?", (snapshot_id,)
+            ).fetchone()[0]
             if isinstance(raw_path, str) and "paper_entry" in raw_path.replace(
                 "\\", "/"
             ).lower().split("/"):

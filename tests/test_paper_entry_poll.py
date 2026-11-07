@@ -13,6 +13,7 @@ from src.db.core import connect, initialize
 from src.db.loaders import _generate_internal_id, load_odds_snapshot
 from src.predict import paper_entry_poll, paper_ledger
 from src.predict.paper_close_poll import OddsAPIKeyManager
+from src.predict.storage import load_games_from_database
 
 NOW = datetime(2026, 11, 7, 21, tzinfo=timezone.utc)
 
@@ -387,6 +388,60 @@ def test_fresh_exact_pairs_reuse_without_quota_or_daily_reservation(warehouse):
     assert predictions == [{"early-one", "early-two"}]
     with connect(path) as conn:
         assert not paper_entry_poll._has_table(conn, "paper_entry_requests")
+
+
+@pytest.mark.parametrize("book", ["draftkings", "fanduel"])
+def test_paper_inputs_ignore_newer_moneyline_without_the_selected_totals(warehouse, book):
+    path, _, events, _, predictions = warehouse
+    _seed_quotes(events)
+    first = events[0]
+    h2h = first["bookmakers"][0]["markets"][0]
+    title = "DraftKings" if book == "draftkings" else "FanDuel"
+    newer = {
+        **first,
+        "bookmakers": [{"key": book, "title": title, "markets": [h2h]}],
+    }
+    _seed_quotes([newer], fetched=NOW - timedelta(minutes=1))
+
+    assert paper_entry_poll.poll_entry(collect=True) == {
+        "status": "reused", "due_events": 2, "decisions_recorded": 2,
+    }
+    assert predictions == [{"early-one", "early-two"}]
+    with connect(path) as conn:
+        assert not paper_entry_poll._has_table(conn, "paper_entry_requests")
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'early-one'",
+            ((datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),),
+        )
+    ordinary = load_games_from_database("NBA", fixture_ids={"early-one"}).iloc[0]
+    assert ordinary.selected_h2h_snapshot_id != ordinary.selected_totals_snapshot_id
+    paper = load_games_from_database("NBA", paper_quotes=True, fixture_ids={"early-one"}).iloc[0]
+    assert paper.selected_h2h_snapshot_id == paper.selected_totals_snapshot_id
+    assert paper.selected_h2h_book_id == paper.selected_totals_book_id == 1
+
+
+def test_newer_unpaired_trial_totals_still_block_reuse_of_older_quotes(warehouse):
+    path, _, events, _, _ = warehouse
+    _seed_quotes(events)
+    first = events[0]
+    total = first["bookmakers"][0]["markets"][1]
+    newer = {
+        **first,
+        "bookmakers": [{
+            "key": "draftkings", "title": "DraftKings",
+            "markets": [{**total, "outcomes": total["outcomes"][:1]}],
+        }],
+    }
+    _seed_quotes([newer], fetched=NOW - timedelta(minutes=1))
+
+    assert paper_entry_poll.poll_entry() == {"status": "due", "due_events": 2}
+    with connect(path) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'early-one'",
+            ((datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),),
+        )
+    paper = load_games_from_database("NBA", paper_quotes=True, fixture_ids={"early-one"}).iloc[0]
+    assert pd.isna(paper.selected_totals_snapshot_id)
 
 
 @pytest.mark.parametrize(
