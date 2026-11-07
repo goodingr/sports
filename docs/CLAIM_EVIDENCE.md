@@ -63,6 +63,13 @@ coefficient. It missed the accuracy gate on 620 later fixtures and returned
 `reports/research/soccer_away_turnaround/result.json`.
 The NBA prospective trial is collecting evidence and its
 scheduled final review is April 19, 2027 at midnight Eastern time.
+The frozen [college basketball totals forecast](../reports/research/ncaab_imbalance_offset/README.md)
+uses 1,111 verified development fixtures. Its first eligible capture is
+November 8, 2026 Eastern time, and final review opens March 22, 2027 Eastern
+time. This experiment measures forecast accuracy and selects no wagers.
+Two archive screens stopped before scoring. The [NFL wind screen](../reports/research/nfl_forecast_wind/availability.md)
+found no verified same-book closes on 94 later entries. The [soccer cross-book screen](../reports/research/soccer_hourly_cross_book/availability.md)
+found seven later price opportunities across six dates, below its sample floor.
 
 ## Blocked Claims
 
