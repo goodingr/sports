@@ -433,8 +433,8 @@ approval. The original frozen review stays available for audit.
 Preview the closing collector with
 `poetry run python -m src.predict.paper_close_poll`. Add `--collect` to allow
 one batched request when pending decisions need a close and have 10 to 60
-minutes until tipoff. The collector checks a 200-credit reserve, spaces requests
-at least 15 minutes apart, and allows up to three attempts per UTC day. A preview
+minutes until tipoff. The collector checks a 200-credit reserve, spaces charged
+closing attempts at least 15 minutes apart, and allows up to three per UTC day. A preview
 reads the warehouse and retained receipts. For collection, free quota probes
 check the active key and then distinct configured keys. A qualifying key is used
 locally for that request, under the shared attempt cap and cooldown.
@@ -442,7 +442,10 @@ locally for that request, under the shared attempt cap and cooldown.
 The scheduled collector waits until the first eligible game is within 28 minutes
 of tipoff, then includes all eligible games in the same request. This leaves one
 15-minute polling interval and three minutes of delay before the ten-minute
-minimum lead. The provider response is retained under
+minimum lead. A recent NBA quote normally triggers a cooldown. At the last
+eligible scheduled tick, the collector can request a close for a pending
+decision if the sole recent snapshot is that decision's verified supplemental
+entry. The charged closing limits still apply. The provider response is retained under
 `data/raw/odds/basketball_nba/paper_closing/` with credential-free request
 metadata. Only paired DraftKings totals for the verified existing fixture enter
 the warehouse. The collector leaves game schedules and results intact.
