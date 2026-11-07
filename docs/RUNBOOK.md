@@ -222,6 +222,13 @@ The entry and closing collectors can both succeed on the same day without
 collecting anything, so their exit codes cannot confirm the daily capture.
 Use `--expected-time` and `--grace-minutes` if the daily task's schedule changes.
 
+For an early entry attempt, inspect `logs/paper_entry_YYYYMMDD.log` using the
+UTC date. The attachment trace identifies the retained response and counts
+targeted quote rejections. The inference trace distinguishes quotes that lost
+their lead window, missing model rows, and rows from a different snapshot.
+Compare those traces with the ledger's fixture observations. A verified
+`below_edge_threshold` is a completed evaluation with zero decisions.
+
 The Paper Trials dashboard also shows the balance from the latest
 checksum-verified NBA discovery receipt. The observation covers one provider
 key and is marked stale after 80 minutes. A closing request needs at least 201
