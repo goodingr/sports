@@ -88,6 +88,26 @@ def test_espn_schedule_refresh_preserves_stored_result(tmp_path: Path, monkeypat
     assert result == ("final", 2, 0, "espn_scoreboard")
 
 
+def test_schedule_replay_preserves_voided_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "schedules.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("src/db/schema.sql").read_text(encoding="utf-8"))
+    monkeypatch.setattr(loaders, "connect", _sqlite_context(db_path))
+    fixture = {
+        "game_id": "EPL_123", "season": 2026, "gameday": "2026-01-01", "gametime": "18:00",
+        "home_team": "Arsenal", "away_team": "Chelsea", "home_score": None, "away_score": None,
+    }
+    loaders.load_schedules(pd.DataFrame([fixture]), source_version="espn_api", league="EPL")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE games SET status = 'voided'")
+    fixture.update({"home_score": 0, "away_score": 0})
+    loaders.load_schedules(pd.DataFrame([fixture]), source_version="espn_api", league="EPL")
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT status, home_score, away_score FROM games JOIN game_results USING (game_id)"
+        ).fetchone() == ("voided", None, None)
+
+
 def test_load_odds_snapshot_persists_total_close_lineage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

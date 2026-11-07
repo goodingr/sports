@@ -432,6 +432,13 @@ def load_schedules(
             else:
                 LOGGER.debug("Creating schedule game %s for %s vs %s", game_id, home_raw, away_raw)
 
+            if conn.execute(
+                "SELECT 1 FROM games WHERE game_id = ? AND LOWER(status) = 'voided'",
+                (game_id,),
+            ).fetchone():
+                LOGGER.debug("Skipping schedule update for voided game %s", game_id)
+                continue
+
             conn.execute(
                 """
                 INSERT INTO games (

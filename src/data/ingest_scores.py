@@ -130,13 +130,15 @@ def update_database(scores_data: List[Dict], league: str) -> int:
             
             # First, check if we have this game by odds_api_id
             cursor = conn.execute(
-                "SELECT game_id FROM games WHERE odds_api_id = ?", 
+                "SELECT game_id, status FROM games WHERE odds_api_id = ?",
                 (event_id,)
             )
             row = cursor.fetchone()
             
             game_id = None
             if row:
+                if str(row["status"] or "").lower() == "voided":
+                    continue
                 game_id = row[0]
             else:
                 # Fallback: Match by teams and date?
@@ -147,16 +149,20 @@ def update_database(scores_data: List[Dict], league: str) -> int:
                 
             if game_id:
                 # Upsert into game_results
-                conn.execute(
+                cursor = conn.execute(
                     """
                     INSERT INTO game_results (game_id, home_score, away_score)
-                    VALUES (?, ?, ?)
+                    SELECT game_id, ?, ?
+                    FROM games
+                    WHERE game_id = ? AND LOWER(COALESCE(status, 'scheduled')) != 'voided'
                     ON CONFLICT(game_id) DO UPDATE SET
                         home_score = excluded.home_score,
                         away_score = excluded.away_score
                     """,
-                    (game_id, home_score, away_score)
+                    (home_score, away_score, game_id)
                 )
+                if cursor.rowcount == 0:
+                    continue
                 
                 # Update status
                 new_status = 'final' if is_completed else 'in_progress'

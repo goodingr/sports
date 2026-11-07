@@ -60,9 +60,19 @@ def parse_espn_event(event: Dict, league: str) -> Optional[Dict]:
     if len(competitors) != 2:
         return None
 
-    status_type = event.get("status", {}).get("type", {})
+    status_type = competition.get("status", event.get("status", {})).get("type", {})
     completed = bool(status_type.get("completed")) or status_type.get("state") == "post"
-    if not completed:
+    nonstandard_status = str(status_type.get("name") or "").upper() in {
+        "STATUS_ABANDONED",
+        "STATUS_AWARDED",
+        "STATUS_CANCELED",
+        "STATUS_CANCELLED",
+        "STATUS_FORFEIT",
+        "STATUS_NO_CONTEST",
+        "STATUS_POSTPONED",
+        "STATUS_SUSPENDED",
+    }
+    if not completed or nonstandard_status:
         return None
 
     home_comp = next((item for item in competitors if item.get("homeAway") == "home"), None)
@@ -120,7 +130,7 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
         for game in games:
             row = conn.execute(
                 """
-                SELECT g.game_id
+                SELECT g.game_id, g.status
                 FROM games g
                 JOIN teams ht ON g.home_team_id = ht.team_id
                 JOIN teams at ON g.away_team_id = at.team_id
@@ -139,6 +149,7 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
                     f"""
                     SELECT
                         g.game_id,
+                        g.status,
                         ht.code AS home_code,
                         at.code AS away_code,
                         {team_name_select}
@@ -171,19 +182,25 @@ def update_scores_in_db(games: List[Dict], league: str) -> int:
             if not row:
                 unmatched.append(game)
                 continue
+            if str(row["status"] or "").lower() == "voided":
+                continue
 
             game_id = row[0]
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO game_results (game_id, home_score, away_score, source_version)
-                VALUES (?, ?, ?, 'espn_scoreboard')
+                SELECT game_id, ?, ?, 'espn_scoreboard'
+                FROM games
+                WHERE game_id = ? AND LOWER(COALESCE(status, 'scheduled')) != 'voided'
                 ON CONFLICT(game_id) DO UPDATE SET
                     home_score = excluded.home_score,
                     away_score = excluded.away_score,
                     source_version = excluded.source_version
                 """,
-                (game_id, game["home_score"], game["away_score"]),
+                (game["home_score"], game["away_score"], game_id),
             )
+            if cursor.rowcount == 0:
+                continue
             conn.execute(
                 "UPDATE games SET status = 'final', espn_id = COALESCE(?, espn_id) WHERE game_id = ?",
                 (game.get("espn_id"), game_id),
@@ -262,6 +279,7 @@ def stale_score_targets(
         LEFT JOIN game_results gr ON gr.game_id = g.game_id
         WHERE julianday(g.start_time_utc) < julianday('now', ?)
           AND julianday(g.start_time_utc) >= julianday('now', ?)
+          AND LOWER(COALESCE(g.status, 'scheduled')) != 'voided'
           AND (
               COALESCE(g.status, 'scheduled') != 'final'
               OR gr.home_score IS NULL

@@ -101,6 +101,19 @@ def test_update_scores_in_db_matches_by_team_codes_and_date(db_with_one_game: Pa
     assert game["espn_id"] == "401584321"
 
 
+def test_score_backfill_preserves_voided_game(db_with_one_game: Path) -> None:
+    with sqlite3.connect(db_with_one_game) as conn:
+        conn.execute("UPDATE games SET status = 'voided'")
+    parsed = [{
+        "home_team": "LAL", "away_team": "BOS", "home_score": 0, "away_score": 0,
+        "date": "2026-04-27T01:40:00Z", "espn_id": "401584321",
+    }]
+    assert score_backfill.update_scores_in_db(parsed, "NBA") == 0
+    with sqlite3.connect(db_with_one_game) as conn:
+        assert conn.execute("SELECT status FROM games").fetchone()[0] == "voided"
+        assert conn.execute("SELECT count(*) FROM game_results").fetchone()[0] == 0
+
+
 def test_update_scores_in_db_warns_on_unmatched_games(
     db_with_one_game: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -159,3 +172,18 @@ def test_parse_espn_event_skips_in_progress_games() -> None:
         ],
     }
     assert score_backfill.parse_espn_event(event, "NBA") is None
+
+
+@pytest.mark.parametrize("status", ["STATUS_ABANDONED", "STATUS_AWARDED", "STATUS_POSTPONED", "STATUS_SUSPENDED"])
+def test_parse_espn_event_rejects_nonstandard_completed_game(status: str) -> None:
+    event = {
+        "status": {"type": {"completed": True, "state": "post", "name": "STATUS_FINAL"}},
+        "competitions": [{
+            "status": {"type": {"completed": True, "state": "post", "name": status}},
+            "competitors": [
+                {"homeAway": "home", "team": {"displayName": "Arsenal"}, "score": "0"},
+                {"homeAway": "away", "team": {"displayName": "Chelsea"}, "score": "0"},
+            ],
+        }],
+    }
+    assert score_backfill.parse_espn_event(event, "EPL") is None

@@ -243,6 +243,24 @@ def test_finalize_scored_games_marks_stale_scored_rows_final(db_path: Path) -> N
     assert status == "final"
 
 
+@pytest.mark.parametrize("status", ["voided", "canceled", "postponed", "no_contest"])
+def test_finalize_scored_games_preserves_terminal_status(db_path: Path, status: str) -> None:
+    with _connect(db_path) as conn:
+        _insert_game(
+            conn,
+            game_id="nonstandard_result",
+            sport_id=3,
+            start_time=datetime.now(timezone.utc) - timedelta(days=1),
+            status=status,
+        )
+        conn.execute(
+            "INSERT INTO game_results (game_id, home_score, away_score) VALUES ('nonstandard_result', 0, 0)"
+        )
+    assert quality.finalize_scored_games(db_path, leagues=["EPL"]) == 0
+    with _connect(db_path) as conn:
+        assert conn.execute("SELECT status FROM games WHERE game_id = 'nonstandard_result'").fetchone()[0] == status
+
+
 def test_close_unresolved_stale_games_excludes_rows_from_readiness(db_path: Path) -> None:
     now = datetime.now(timezone.utc)
     with _connect(db_path) as conn:

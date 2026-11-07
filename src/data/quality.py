@@ -415,6 +415,7 @@ def finalize_scored_games(
                 WHERE g.start_time_utc IS NOT NULL
                   AND julianday(g.start_time_utc) < julianday('now', ?)
                   AND COALESCE(g.status, 'scheduled') != 'final'
+                  AND {_terminal_status_sql("g")}
                   AND gr.home_score IS NOT NULL
                   AND gr.away_score IS NOT NULL
                   {league_filter}
