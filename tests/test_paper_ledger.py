@@ -223,8 +223,9 @@ def test_scoped_capture_checks_earlier_start_at_ledger_write(warehouse):
         ("clock_regression", "invalid_time"),
     ],
 )
+@pytest.mark.parametrize("over_probability", [0.75, 0.50], ids=["positive_edge", "below_threshold"])
 def test_capture_rechecks_wall_clock_after_original_quote_verification(
-    warehouse, monkeypatch, boundary, expected
+    warehouse, monkeypatch, boundary, expected, over_probability
 ):
     db, trial, predictions, fetched_at = warehouse
     verification_duration = timedelta(seconds=2)
@@ -247,7 +248,10 @@ def test_capture_rechecks_wall_clock_after_original_quote_verification(
     elif boundary == "clock_regression":
         verification_duration = timedelta(seconds=-1)
     predictions = predictions.assign(
-        commence_time=start.isoformat(), predicted_at=attempt_at.isoformat()
+        commence_time=start.isoformat(),
+        predicted_at=attempt_at.isoformat(),
+        over_predicted_prob=over_probability,
+        under_predicted_prob=1 - over_probability,
     )
     with connect(db) as conn:
         _set_fixture_start(conn, "game", start.isoformat())
@@ -270,11 +274,15 @@ def test_capture_rechecks_wall_clock_after_original_quote_verification(
     monkeypatch.setattr(paper_ledger, "datetime", Clock)
     monkeypatch.setattr(paper_ledger, "_quote_source_start", verify_with_clock_change)
 
+    if expected == "recorded" and over_probability == 0.50:
+        expected = "below_edge_threshold"
     assert capture_predictions(trial, predictions, trial.model_sha256, db) == {expected: 1}
     with connect(db) as conn:
         decision = conn.execute("SELECT captured_at FROM paper_decisions").fetchone()
         attempt = conn.execute("SELECT observed_at FROM paper_capture_runs").fetchone()
+        observation = conn.execute("SELECT outcome FROM paper_fixture_observations").fetchone()
     assert attempt["observed_at"] == attempt_at.isoformat()
+    assert observation["outcome"] == expected
     if expected == "recorded":
         assert decision["captured_at"] == Clock.current.isoformat()
     else:

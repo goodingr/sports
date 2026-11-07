@@ -295,10 +295,7 @@ def _capture_one(
             under_market,
         )
     edge = model - market
-    if edge < trial.min_edge or expected_value(model, price, stake=1) <= 0:
-        return "below_edge_threshold"
-
-    # Original quote verification can outlast the entry window.
+    # Original quote verification can outlast the entry window for any outcome.
     captured_at = datetime.now(timezone.utc)
     if captured_at < now:
         return "invalid_time"
@@ -308,6 +305,8 @@ def _capture_one(
         return "outside_decision_window"
     if captured_at - fetched_at > maximum_quote_age:
         return "stale_quote"
+    if edge < trial.min_edge or expected_value(model, price, stake=1) <= 0:
+        return "below_edge_threshold"
 
     cursor = conn.execute(
         """
