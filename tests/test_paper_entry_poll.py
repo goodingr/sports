@@ -271,6 +271,71 @@ def test_fresh_exact_pairs_reuse_without_quota_or_daily_reservation(warehouse):
         assert not paper_entry_poll._has_table(conn, "paper_entry_requests")
 
 
+@pytest.mark.parametrize("elapsed_minutes", [4, 5])
+def test_retry_uses_original_verified_tipoff(warehouse, monkeypatch, elapsed_minutes):
+    path, _, events, clock, predictions = warehouse
+    canonical_start = NOW + timedelta(minutes=27)
+    provider_start = NOW + timedelta(minutes=19)
+    events[1]["commence_time"] = provider_start.isoformat()
+    with connect(path) as conn:
+        conn.execute(
+            "UPDATE games SET start_time_utc = ? WHERE game_id = 'early-two'",
+            (canonical_start.isoformat(),),
+        )
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("interrupted after appending quotes")
+
+    with monkeypatch.context() as first_run:
+        first_run.setattr(paper_entry_poll, "_budgeted_key", lambda **kwargs: "test-key")
+        first_run.setattr(
+            paper_entry_poll, "_provider_get", lambda endpoint, params: _response(events)
+        )
+        first_run.setattr(paper_entry_poll, "_capture", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted after appending quotes"):
+            paper_entry_poll.poll_entry(collect=True)
+
+    clock.current += timedelta(minutes=elapsed_minutes)
+    accepted = {"early-one", "early-two"} if elapsed_minutes == 4 else {"early-one"}
+    assert paper_entry_poll.poll_entry(collect=True) == {
+        "status": "reused",
+        "due_events": 2,
+        "decisions_recorded": len(accepted),
+    }
+    assert predictions == [accepted]
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_entry_requests").fetchone()[0] == 1
+        decisions = dict(conn.execute("SELECT game_id, start_time_utc FROM paper_decisions"))
+        assert set(decisions) == accepted
+        evidence = dict(
+            conn.execute(
+                """
+                SELECT e.game_id, e.earliest_start_utc
+                FROM paper_entry_quote_starts e JOIN odds_snapshots s USING (snapshot_id)
+                """
+            )
+        )
+        assert evidence["early-two"] == provider_start.isoformat()
+        if "early-two" in accepted:
+            assert decisions["early-two"] == provider_start.isoformat()
+
+
+def test_legacy_entry_cache_without_verified_start_fails_closed(warehouse):
+    path, _, events, _, predictions = warehouse
+    _seed_quotes(events)
+    with connect(path) as conn:
+        conn.execute(
+            "UPDATE odds_snapshots SET raw_path = ?",
+            (r"D:\previous\data\raw\odds\basketball_nba\paper_entry\legacy\odds.json",),
+        )
+        conn.execute("CREATE TABLE paper_entry_requests (entry_date_et TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO paper_entry_requests VALUES ('2026-11-07')")
+    assert paper_entry_poll.poll_entry(collect=True) == {"status": "daily_cap", "due_events": 2}
+    assert not predictions
+    with connect(path) as conn:
+        assert conn.execute("SELECT count(*) FROM paper_decisions").fetchone()[0] == 0
+
+
 def test_one_available_credit_above_reserve_cannot_pay_for_two_markets(warehouse, monkeypatch):
     path, _, _, _, _ = warehouse
     calls = []

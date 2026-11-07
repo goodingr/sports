@@ -57,6 +57,7 @@ _MIN_TRIGGER_LEAD = timedelta(minutes=30)
 _MAX_TRIGGER_LEAD = timedelta(minutes=75)
 _ENTRY_MARKETS = "h2h,totals"
 _REQUEST_CREDITS = 2
+_FreshQuotes = dict[str, tuple[str, datetime]]
 
 
 def _already_handled(conn: sqlite3.Connection, trial_id: str, game: sqlite3.Row) -> bool:
@@ -99,7 +100,7 @@ def _already_handled(conn: sqlite3.Connection, trial_id: str, game: sqlite3.Row)
 
 def _plan(
     conn: sqlite3.Connection, trial: PaperTrial, now: datetime
-) -> tuple[str, dict[str, _ClosingFixture], dict[str, str]]:
+) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes]:
     if not all(
         _has_table(conn, table)
         for table in (
@@ -187,8 +188,9 @@ def _plan(
 
 def _fresh_quotes(
     conn: sqlite3.Connection, trial: PaperTrial, due: dict[str, _ClosingFixture], now: datetime
-) -> dict[str, str]:
-    game_ids = [fixture.game_id for fixture in due.values()]
+) -> _FreshQuotes:
+    fixture_starts = {fixture.game_id: fixture.start for fixture in due.values()}
+    game_ids = list(fixture_starts)
     markers = ", ".join("?" for _ in game_ids)
     games = pd.read_sql_query(
         f"""
@@ -202,7 +204,7 @@ def _fresh_quotes(
     odds = pd.read_sql_query(
         f"""
         SELECT o.game_id, o.market, o.outcome, o.price_american, o.line, o.snapshot_id,
-               o.book_id, b.name AS book_name, s.fetched_at_utc
+               o.book_id, b.name AS book_name, s.fetched_at_utc, s.raw_path
         FROM odds o JOIN odds_snapshots s ON s.snapshot_id = o.snapshot_id
         JOIN books b ON b.book_id = o.book_id
         WHERE o.game_id IN ({markers}) AND o.market IN ('h2h', 'totals')
@@ -216,26 +218,53 @@ def _fresh_quotes(
             now.isoformat(),
         ],
     )
-    fresh = {}
+    raw_paths = dict(zip(odds["snapshot_id"], odds["raw_path"], strict=True))
+    stored_starts = {}
+    if _has_table(conn, "paper_entry_quote_starts"):
+        stored_starts = {
+            (row["snapshot_id"], row["game_id"]): _utc_timestamp(row["earliest_start_utc"])
+            for row in conn.execute(
+                f"""
+                SELECT snapshot_id, game_id, earliest_start_utc FROM paper_entry_quote_starts
+                WHERE game_id IN ({markers})
+                """,
+                game_ids,
+            )
+        }
+    fresh: _FreshQuotes = {}
     for row in _apply_deterministic_odds(games, odds).itertuples(index=False):
         game = _eligible_game(conn, row.game_id, trial.league)
         if game is None or pd.isna(row.selected_totals_book_id):
             continue
         quote = _decision_quote(conn, trial, row, game)
-        if (
-            quote is not None
-            and _valid_total_line(quote["line"])
+        if quote is None or not (
+            _valid_total_line(quote["line"])
             and _valid_american_odds(quote["over_price"])
             and _valid_american_odds(quote["under_price"])
             and _model_inputs_match(conn, row, quote)
         ):
-            fresh[row.game_id] = quote["snapshot_id"]
+            continue
+        snapshot_id = quote["snapshot_id"]
+        start = fixture_starts[row.game_id]
+        evidence_key = (snapshot_id, row.game_id)
+        if evidence_key in stored_starts:
+            verified_start = stored_starts[evidence_key]
+            if verified_start is None or abs(start - verified_start) > _START_TOLERANCE:
+                continue
+            start = min(start, verified_start)
+        else:
+            raw_path = raw_paths.get(snapshot_id)
+            if isinstance(raw_path, str) and "paper_entry" in raw_path.replace(
+                "\\", "/"
+            ).lower().split("/"):
+                continue
+        fresh[row.game_id] = (snapshot_id, start)
     return fresh
 
 
 def _reserve(
     db_path: Path, trial: PaperTrial
-) -> tuple[str, dict[str, _ClosingFixture], dict[str, str]]:
+) -> tuple[str, dict[str, _ClosingFixture], _FreshQuotes]:
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc)
@@ -376,6 +405,23 @@ def _append_entry_quotes(
                 """,
                 rows,
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS paper_entry_quote_starts (
+                    snapshot_id TEXT NOT NULL REFERENCES odds_snapshots(snapshot_id) ON DELETE CASCADE,
+                    game_id TEXT NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+                    earliest_start_utc TEXT NOT NULL,
+                    PRIMARY KEY (snapshot_id, game_id)
+                )
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO paper_entry_quote_starts (snapshot_id, game_id, earliest_start_utc)
+                VALUES (?, ?, ?)
+                """,
+                [(snapshot_id, game_id, start.isoformat()) for game_id, start in quoted.items()],
+            )
     return quoted
 
 
@@ -458,8 +504,9 @@ def poll_entry(*, collect: bool = False, rules: Path | None = None) -> dict[str,
         status, due, fresh = _reserve(path, trial)
         result.update(status=status, due_events=len(due))
     if status == "reusable":
-        quoted = {fixture.game_id: fixture.start for fixture in due.values()}
-        recorded = _capture(path, trial, engine, due, quoted, fresh)
+        quoted = {game_id: start for game_id, (_, start) in fresh.items()}
+        snapshots = {game_id: snapshot_id for game_id, (snapshot_id, _) in fresh.items()}
+        recorded = _capture(path, trial, engine, due, quoted, snapshots)
         return {**result, "status": "reused", "decisions_recorded": recorded}
     if status != "due":
         return result
